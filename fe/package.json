@@ -1,0 +1,23 @@
+{
+  "name": "grfe",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch build.ts",
+    "build": "bun run build.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^18.2.55",
+    "@types/react-dom": "^18.2.19",
+    "sass": "^1.70.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.22.0"
+  }
+}
