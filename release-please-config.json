@@ -5,18 +5,23 @@
     "packages/borgo": {
       "release-type": "node",
       "component": "borgo",
-      "include-component-in-tag": false
+      "include-component-in-tag": false,
+      "release-as": "0.9.0"
     },
     "packages/create-borgo": {
       "release-type": "node",
-      "component": "create-borgo"
+      "component": "create-borgo",
+      "release-as": "0.9.0"
     }
   },
   "plugins": [
     {
       "type": "linked-versions",
       "groupName": "borgo",
-      "components": ["borgo", "create-borgo"]
+      "components": [
+        "borgo",
+        "create-borgo"
+      ]
     }
   ]
 }
