@@ -6,9 +6,9 @@
 
 borgo is a mini Vercel-style full-stack framework: file-based React pages server-rendered by Bun, API routes written in Go. You get the DX — `bunx create-borgo my-app`, drop a file in `pages/`, drop a file in `api/`, one dev command — without the platform. Deployment is one Go binary and one Bun server on any box you control.
 
-Pages get nested layouts, per-page `<head>` management, streaming SSR through Suspense, client-side navigation over plain `<a>` tags, per-route code splitting, opt-out and deferred hydration, form actions with post/redirect/get, live updates over server-sent events, and custom 404/500 pages — all through file conventions. Loaders and actions talk to the Go API through a client typed end to end by `borgogen`, which reads the Go handlers with `go/types` and generates the TypeScript route map.
+Pages get nested layouts, per-page `<head>` management, streaming SSR through Suspense, client-side navigation with hover/viewport prefetching and scroll restoration, per-route code splitting, opt-out and deferred hydration plus islands, form actions with post/redirect/get, live updates over server-sent events and first-class WebSocket topics, signed-cookie sessions, fast refresh in dev, and custom 404/500 pages — all through file conventions. Loaders and actions talk to the Go API through a client typed end to end by `borgogen`, which reads the Go handlers with `go/types` and generates the TypeScript route map, request bodies included.
 
-The entire framework core is a few hundred lines of code, published as readable TypeScript and Go with a zero-dependency runtime. It exists because most of what makes Next-style frameworks pleasant is conventions, not machinery — and conventions are cheap.
+The entire framework core is a couple thousand lines of readable TypeScript and Go; the Go runtime has zero dependencies. It exists because most of what makes Next-style frameworks pleasant is conventions, not machinery — and conventions are cheap.
 
 ## Quickstart
 
@@ -18,11 +18,13 @@ Prerequisites: [Bun](https://bun.sh) >= 1.3, [Go](https://go.dev) >= 1.25.
 bunx create-borgo my-app
 cd my-app
 bun install
-go mod tidy
+go mod tidy   # fetches the borgo go module
 bun run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000 — edit a page and watch fast refresh keep your state. When it's time to ship: `docker compose up -d` (the scaffold includes the Dockerfile), or see the [deploy guide](docs/deploy.md).
+
+To poke at the full demo instead, clone this repo and run `bun install`, then `cd examples/tasks && bun run dev`.
 
 ## Conventions
 
@@ -271,11 +273,13 @@ Two processes, one front door:
 - **Go API server** — plain `net/http` with method patterns, bootstrapped by `borgo.Serve()`.
 
 ```
-packages/borgo          npm: the bun/typescript core (cli, ssr server, router, build, hydration, typed api client)
+packages/borgo          npm: the bun/typescript core (cli, ssr server, router, build, runtime, typed api client)
 packages/create-borgo   npm: project scaffolder
-borgo.go, sse.go        go module github.com/LuigiDavideMicca/borgo: route registry, server bootstrap, sse (zero deps)
+*.go                    go module github.com/LuigiDavideMicca/borgo: route registry, server bootstrap,
+                        sse, websocket push, sessions, cache helpers (zero deps)
 cmd/borgogen            go: static analysis codegen for the typed bridge and route mounting (depends on x/tools)
-examples/tasks          demo app: tasks crud with gorm + sqlite, live updates over sse
+examples/tasks          demo app: tasks crud with gorm + sqlite, sse, websockets, islands, deferred hydration
+docs/deploy.md          docker, compose, reverse proxy, systemd
 ```
 
 Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo build` (client assets + Go binary in `dist/`), `borgo start` (run from build output, supervising both processes; `--front-only` for split deployments with `API_URL`). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
@@ -288,23 +292,52 @@ Scaffolded apps ship a multi-stage `Dockerfile` (Go builds static, the runtime i
 
 [release-please](https://github.com/googleapis/release-please) maintains a release PR from conventional commits; merging it tags `vX.Y.Z` and publishes both npm packages (`borgo`, `create-borgo`) with linked versions via npm trusted publishing, provenance attached. The Go module `github.com/LuigiDavideMicca/borgo` lives at the repo root and resolves the **same** `vX.Y.Z` tag — one version number across all three artifacts.
 
+## How it compares
+
+Honest comparison with the frameworks a borgo adopter would otherwise pick. ✓ means shipped and documented here; a — links to the reasoning in the next section.
+
+| | borgo | Next.js | Nuxt | SolidStart |
+| --- | --- | --- | --- | --- |
+| Backend language | **Go** | Node | Node | Node |
+| File-based routing, nested layouts | ✓ | ✓ | ✓ | ✓ |
+| SSR + streaming Suspense | ✓ | ✓ | ✓ | ✓ |
+| Typed server↔client bridge | ✓ generated from Go source, request bodies included | manual / tRPC | ✓ Nitro `$fetch` | ✓ server functions |
+| Client nav, prefetch, scroll restoration | ✓ | ✓ | ✓ | ✓ |
+| Per-route code splitting | ✓ | ✓ | ✓ | ✓ |
+| Hydration control | ✓ page-level opt-out, deferred, islands | — (RSC instead) | ✓ islands (experimental) | — (fine-grained reactivity instead) |
+| Form actions | ✓ | ✓ | ✓ | ✓ |
+| SSE + WebSockets first-class | ✓ | bring your own | ✓ Nitro | bring your own |
+| Sessions/auth | ✓ signed cookie + recipes | libraries | modules | libraries |
+| Fast refresh | ✓ registration-based | ✓ full transform | ✓ | ✓ |
+| React Server Components | — | ✓ | n/a | n/a |
+| ISR / edge / serverless targets | — | ✓ | ✓ | ✓ |
+| Image/font optimization | — | ✓ | ✓ | — |
+| Plugin ecosystem | — | ✓ | ✓ | ✓ |
+| Deploy story | one box: Docker/compose/systemd, guide included | Vercel or DIY | many presets | many presets |
+| Framework size | ~2k lines, readable in an evening | large | large | medium |
+
 ## What this is not
 
-Not production-grade, yet, and honest about it. The old caveats are gone — routes are code-split into lazy chunks, loaders and actions are stripped from client bundles (and CI proves it), pages can opt out of or defer hydration, and Go handlers mount through generated code instead of hand-written `init()`. What remains true:
+Everything here is a deliberate choice, with the reason attached:
 
-- The typed bridge is static analysis: helpers in the `api` package are followed and `//borgo:type` covers custom marshalers, but responses written through `json.NewEncoder` or helpers in other packages still type as `unknown`.
-- Islands hydrate independently but their code is bundled eagerly with the entry: `client="visible"` defers work, not bytes.
-- Loader data on client navigations arrives as one JSON payload fetched in parallel with the route chunk — it is not streamed.
-- Fast refresh is registration-based, not the full babel transform: component edits keep state, hook-signature edits may need a reload.
-- Sessions are a signed cookie, not an auth framework: no OAuth, no user store, no CSRF middleware — the helpers cover the mechanics, the policy is yours.
-- One process each side, and the codegen tool (not the runtime) depends on `golang.org/x/tools`.
-- WebSocket topics are a relay, not an RPC layer: the front server forwards `{event, data}` between subscribers and Go; per-message server logic belongs in Go routes.
+- **No React Server Components.** Loaders returning serialized props are the model: they cover data-on-the-server with a runtime small enough to read. RSC needs deep bundler/runtime integration that would be most of the framework's weight for one feature.
+- **No edge, serverless or ISR targets.** borgo is self-hosted by conviction — one box, two processes, a reverse proxy. `borgo.Cache` headers plus proxy caching cover what ISR covers on a single-site scale.
+- **No image/font optimization pipeline.** The build is one `Bun.build` call and stays that way; put a CDN or `vips` in front if you need it.
+- **No plugin system.** The framework is small enough that the extension mechanism is reading the source and changing it.
+- **Fast refresh without the babel transform.** Component edits keep state through name-based react-refresh registration; a hook-signature edit may need one manual reload. The tradeoff buys a zero-babel toolchain.
+- **Loader data is not streamed on client navigations** — one JSON payload, fetched in parallel with the route chunk (and usually prefetched on hover). Streaming applies to initial SSR, where it matters most.
+- **Sessions are mechanics, not policy.** Signed cookie in, tamper-proof out; OAuth, user stores and CSRF strategy stay in your hands.
+- **The typed bridge is static analysis, no runtime reflection.** Helpers inside `api/` are followed and `//borgo:type` covers custom marshalers; a response written through `json.NewEncoder` or a helper in another package types as `unknown` — the escape hatch is visible, not silent.
+- **WebSocket topics are a relay, not RPC.** The front server forwards `{event, data}` between subscribers and Go; per-message business logic belongs in Go routes.
 
 ## Roadmap
 
 - ~~**Phase 2 — pages that feel like an app**: layouts, `<head>` management, client-side navigation, streaming SSR, form actions, error pages~~ done
 - ~~**Phase 3 — typed bridge and a production build**: TypeScript types generated from Go handlers, per-route code splitting, server-only code elimination, partial hydration, route directives, server-sent events~~ done
-- **Phase 4 — deploy story**: a Dockerfile that builds both halves into one image, plus a guide for running behind a reverse proxy
+- ~~**Phase 4 — deploy story**: multi-stage Dockerfile, compose with a SQLite volume, reverse proxy and systemd guide~~ done
+- ~~**Phase 5 — production round**: complete typed bridge (helpers, `WriteJSON`, type overrides, typed request bodies), islands, prefetching and scroll restoration, fast refresh, first-class WebSockets, sessions and cache helpers, release automation~~ done
+
+The roadmap is complete. What ships next is driven by [issues](https://github.com/LuigiDavideMicca/borgo/issues), not phases.
 
 ---
 
