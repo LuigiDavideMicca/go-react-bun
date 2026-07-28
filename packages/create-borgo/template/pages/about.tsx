@@ -1,3 +1,5 @@
+export const head = { title: "About · borgo app" };
+
 export default function About() {
   return (
     <main>
@@ -6,7 +8,7 @@ export default function About() {
         Pages live in <code>pages/</code> and map to routes by file name. API
         routes live in <code>api/</code> as Go files that register themselves.
       </p>
-      <a href="/">Back home</a>
+      <a href="/">← Back home</a>
     </main>
   );
 }

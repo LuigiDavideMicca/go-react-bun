@@ -1,4 +1,8 @@
-import type { LoaderContext } from "borgo";
+import type { Head, LoaderContext } from "borgo";
+
+export const head = (props: Record<string, unknown>): Head => ({
+  title: `${props.message ?? "Hello"} · borgo app`,
+});
 
 export async function loader({ params, api }: LoaderContext) {
   const res = await fetch(`${api}/hello/${params.name}`);
@@ -10,7 +14,7 @@ export default function Hello({ message }: { message: string }) {
     <main>
       <h1>{message}</h1>
       <p>This page was server-rendered with data fetched from the Go API.</p>
-      <a href="/">Back home</a>
+      <a href="/">← Back home</a>
     </main>
   );
 }

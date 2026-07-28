@@ -1,14 +1,98 @@
-main {
-  max-width: 40rem;
-  margin: 3rem auto;
-  padding: 0 1rem;
+$terracotta: #c06b45;
+$sage: #6f8a63;
+$cream: #f7f0e3;
+$ink: #3d2f24;
+
+body {
+  margin: 0;
+  background: $cream;
+  color: $ink;
   font-family: system-ui, sans-serif;
-  line-height: 1.5;
+  line-height: 1.6;
+}
+
+.app {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+a {
+  color: $terracotta;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid rgba($ink, 0.12);
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 700;
+    color: $ink;
+    text-decoration: none;
+  }
+
+  nav {
+    display: flex;
+    gap: 1rem;
+
+    a {
+      color: rgba($ink, 0.7);
+      text-decoration: none;
+
+      &:hover {
+        color: $terracotta;
+      }
+    }
+  }
+}
+
+main {
+  padding: 2rem 0 3rem;
 
   form {
     display: flex;
     gap: 0.5rem;
-    margin: 1rem 0;
+    margin: 1.25rem 0;
+
+    input {
+      flex: 1;
+      background: #fffdf8;
+      border: 1px solid rgba($ink, 0.2);
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem;
+      font: inherit;
+      color: inherit;
+
+      &:focus {
+        outline: 2px solid rgba($terracotta, 0.5);
+        border-color: $terracotta;
+      }
+    }
+
+    button {
+      background: $terracotta;
+      color: $cream;
+      border: none;
+      border-radius: 8px;
+      padding: 0.5rem 1.25rem;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+
+      &:hover {
+        background: #a85a38;
+      }
+    }
+  }
+
+  .error {
+    color: #a4442c;
   }
 
   ul {
@@ -18,8 +102,43 @@ main {
     li {
       display: flex;
       justify-content: space-between;
-      padding: 0.4rem 0;
-      border-bottom: 1px solid #ddd;
+      align-items: center;
+      background: #fffdf8;
+      border: 1px solid rgba($ink, 0.12);
+      border-radius: 8px;
+      padding: 0.6rem 0.9rem;
+      margin-bottom: 0.5rem;
+
+      button {
+        background: none;
+        border: none;
+        color: rgba($ink, 0.45);
+        font: inherit;
+        cursor: pointer;
+
+        &:hover {
+          color: #a4442c;
+        }
+      }
     }
   }
+
+  .fallback {
+    color: rgba($ink, 0.55);
+    font-style: italic;
+  }
+
+  .streamed {
+    background: rgba($sage, 0.15);
+    border: 1px solid rgba($sage, 0.4);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+  }
+}
+
+footer {
+  padding: 1.5rem 0 2rem;
+  color: rgba($ink, 0.5);
+  font-size: 0.85rem;
+  border-top: 1px solid rgba($ink, 0.12);
 }

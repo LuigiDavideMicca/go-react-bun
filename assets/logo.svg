@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400" role="img" aria-label="borgo: a small italian village in a circular crest">
+  <defs>
+    <clipPath id="scene">
+      <circle cx="200" cy="200" r="172"/>
+    </clipPath>
+  </defs>
+
+  <!-- crest: cream ground, terracotta ring, dotted inner ring -->
+  <circle cx="200" cy="200" r="194" fill="#F3E9D7" stroke="#C06B45" stroke-width="6"/>
+  <circle cx="200" cy="200" r="183" fill="none" stroke="#C06B45" stroke-width="3" stroke-opacity="0.35" stroke-dasharray="0.5 11" stroke-linecap="round"/>
+
+  <g clip-path="url(#scene)">
+    <!-- sky -->
+    <rect x="28" y="28" width="344" height="344" fill="#AECFDA"/>
+
+    <!-- sun -->
+    <g stroke="#EAC15E" stroke-width="6" stroke-linecap="round">
+      <path d="M283 63 V70 M283 124 V131 M249 97 H256 M310 97 H317 M259 73 l5 5 M302 116 l5 5 M307 73 l-5 5 M264 116 l-5 5"/>
+    </g>
+    <circle cx="283" cy="97" r="20" fill="#EAC15E"/>
+
+    <!-- cloud -->
+    <g fill="#F2EFE4" opacity="0.95">
+      <ellipse cx="103" cy="114" rx="24" ry="13"/>
+      <ellipse cx="126" cy="107" rx="19" ry="12"/>
+    </g>
+
+    <!-- hills -->
+    <ellipse cx="112" cy="302" rx="175" ry="92" fill="#A9BF9B"/>
+    <ellipse cx="298" cy="312" rx="168" ry="98" fill="#9DB48F"/>
+
+    <!-- meadow -->
+    <ellipse cx="200" cy="390" rx="270" ry="110" fill="#8CA97F"/>
+
+    <!-- lane from the village -->
+    <path d="M194 300 L216 300 Q226 338 248 372 L156 372 Q180 338 194 300 Z" fill="#E7D7BC"/>
+
+    <!-- left house -->
+    <rect x="100" y="230" width="70" height="70" fill="#F1E4CC"/>
+    <path d="M94 232 L135 196 L176 232 Z" fill="#C06B45"/>
+    <path d="M124 300 V266 A11 11 0 0 1 146 266 V300 Z" fill="#7A5643"/>
+    <rect x="108" y="242" width="15" height="15" rx="2" fill="#7A5643"/>
+
+    <!-- right house -->
+    <rect x="240" y="240" width="70" height="60" fill="#EFDFC5"/>
+    <path d="M234 242 L275 206 L316 242 Z" fill="#B4603C"/>
+    <rect x="252" y="256" width="15" height="15" rx="2" fill="#7A5643"/>
+    <rect x="283" y="256" width="15" height="15" rx="2" fill="#7A5643"/>
+
+    <!-- campanile -->
+    <rect x="186" y="150" width="36" height="150" fill="#F5EBD8"/>
+    <path d="M180 152 L204 116 L228 152 Z" fill="#C06B45"/>
+    <path d="M196 186 V172 A8 8 0 0 1 212 172 V186 Z" fill="#7A5643"/>
+    <rect x="182" y="192" width="44" height="7" fill="#E2D2B6"/>
+    <circle cx="204" cy="222" r="8" fill="#F9F3E6" stroke="#7A5643" stroke-width="2.5"/>
+    <path d="M204 222 V217 M204 222 L208 224" stroke="#7A5643" stroke-width="2" stroke-linecap="round" fill="none"/>
+    <path d="M197 300 V264 A7 7 0 0 1 211 264 V300 Z" fill="#7A5643"/>
+
+    <!-- cypresses -->
+    <rect x="73" y="296" width="6" height="12" fill="#6B5138"/>
+    <ellipse cx="76" cy="268" rx="11" ry="32" fill="#5F7D54"/>
+    <rect x="329" y="298" width="6" height="10" fill="#6B5138"/>
+    <ellipse cx="332" cy="274" rx="10" ry="28" fill="#5F7D54"/>
+  </g>
+</svg>

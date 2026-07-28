@@ -63,6 +63,6 @@ jobs:
           bun run build
           PORT=3100 API_PORT=3601 bun run start &
           for i in $(seq 1 20); do curl -fs http://localhost:3100/ > /dev/null && break; sleep 1; done
-          curl -fs http://localhost:3100/ | grep -q "Welcome to borgo"
+          curl -fs http://localhost:3100/ | grep -q "Get started by editing"
           curl -fs http://localhost:3100/hello/ci | grep -q "hello, ci"
           curl -fs http://localhost:3100/api/hello | grep -q "hello from go"
