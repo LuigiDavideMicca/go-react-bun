@@ -16,7 +16,9 @@ bunx create-borgo my-app
 
 ## Exports
 
-- `borgo` — `LoaderContext`, `PageModule`, `Route` types plus `matchRoute`, `filePathToPattern`, `buildAssets`, `serve`
-- `borgo/router` — the browser-safe subset (`matchRoute`, `filePathToPattern` and the types), used by the generated client entry
+- `borgo` — browser-safe: the `redirect` helper plus `LoaderContext`, `ActionContext`, `Head`, `PageModule`, `Route` types and the router functions
+- `borgo/server` — `serve`, the SSR front server (server-only)
+- `borgo/router` — router internals shared by server and client
+- `borgo/runtime` — the hydration/navigation runtime, imported by the generated client entry
 
 The client hydration entry is generated into the app (`.borgo/client.tsx`) so that React always resolves from the app's own `node_modules`.
