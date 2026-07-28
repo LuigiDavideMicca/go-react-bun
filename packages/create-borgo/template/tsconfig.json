@@ -15,5 +15,6 @@
     "strict": true,
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
-  }
+  },
+  "include": ["**/*", ".borgo/api-types.d.ts"]
 }
