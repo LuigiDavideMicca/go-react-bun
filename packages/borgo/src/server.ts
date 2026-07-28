@@ -69,18 +69,30 @@ export async function serve({ dev = false } = {}) {
 
   const port = Number(process.env.PORT || 3000);
   const api = `http://localhost:${process.env.API_PORT || 3501}`;
-  const apiClient = makeApiClient(api);
   const apiUrl = `${api}/api`;
 
+  // the api client forwards the browser's cookies, so go handlers see the
+  // session during ssr and in actions
+  const apiFor = (req: Request) => {
+    const cookie = req.headers.get("cookie");
+    return makeApiClient(api, cookie ? { cookie } : {});
+  };
+
+  const runLoader = (req: Request, route: Route, params: Record<string, string>) =>
+    route.module.loader
+      ? route.module.loader({ request: req, params, api: apiFor(req), apiUrl })
+      : Promise.resolve({});
+
   async function renderPage(
+    req: Request,
     route: Route,
     params: Record<string, string>,
     status: number,
     extraProps?: Record<string, unknown>,
   ): Promise<Response> {
-    const loaded = route.module.loader
-      ? await route.module.loader({ params, api: apiClient, apiUrl })
-      : {};
+    const loaded = await runLoader(req, route, params);
+    // a loader may short-circuit with a response, e.g. redirect() as a guard
+    if (loaded instanceof Response) return loaded;
     const props = extraProps ? { ...loaded, ...extraProps } : loaded;
 
     const head = resolveHead(route.module, props);
@@ -169,9 +181,9 @@ export async function serve({ dev = false } = {}) {
         if (typeof action !== "function") {
           throw new Error(`the action export of pages/${target.route.file} must be a function`);
         }
-        const result = await action({ request: req, params: target.params, api: apiClient, apiUrl });
+        const result = await action({ request: req, params: target.params, api: apiFor(req), apiUrl });
         if (result instanceof Response) return result;
-        return renderPage(target.route, target.params, 200, { actionData: result });
+        return renderPage(req, target.route, target.params, 200, { actionData: result });
       }
     }
 
@@ -182,19 +194,22 @@ export async function serve({ dev = false } = {}) {
 
     if (!matched) {
       if (wantsProps) return Response.json({ notFound: true }, { status: 404 });
-      if (notFound) return renderPage(notFound, {}, 404);
+      if (notFound) return renderPage(req, notFound, {}, 404);
       return new Response("not found", { status: 404 });
     }
 
     if (wantsProps) {
-      const { route, params } = matched;
-      const props = route.module.loader
-        ? await route.module.loader({ params, api: apiClient, apiUrl })
-        : {};
+      const props = await runLoader(req, matched.route, matched.params);
+      if (props instanceof Response) {
+        // surface loader redirects as data, so the client runtime can follow
+        const location = props.headers.get("Location");
+        if (location) return Response.json({ redirect: location });
+        return props;
+      }
       return Response.json({ props });
     }
 
-    return renderPage(matched.route, matched.params, 200);
+    return renderPage(req, matched.route, matched.params, 200);
   }
 
   function logRequest(req: Request, status: number, ms: number) {
@@ -327,7 +342,7 @@ export async function serve({ dev = false } = {}) {
           });
         } else if (serverError) {
           try {
-            response = await renderPage(serverError, {}, 500);
+            response = await renderPage(req, serverError, {}, 500);
           } catch {
             response = new Response("internal server error", { status: 500 });
           }

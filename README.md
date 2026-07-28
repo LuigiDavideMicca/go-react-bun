@@ -204,6 +204,57 @@ Go itself stays stdlib-only — the WebSocket termination lives where Bun alread
 
 The mechanics, honestly: an edit restarts the front server for a clean server module graph; the browser never reloads — it reconnects and hot-applies the change from the boot greeting. Component registration is name-based (top-level capitalized functions), without the full babel transform — editing a component's *hooks* may keep stale state; save again or reload if a hook edit looks off.
 
+### Sessions, auth and caching
+
+Minimal stdlib helpers, honestly scoped: a signed cookie, not an auth framework.
+
+**Sessions** are a JSON payload HMAC-signed with `SESSION_SECRET`, stored in an http-only cookie — no server-side storage, expiry signed in (set `SESSION_SECURE=1` behind https):
+
+```go
+type Session struct{ User string `json:"user"` }
+
+//borgo:route POST /api/login
+func Login(w http.ResponseWriter, r *http.Request) {
+    // ...verify credentials...
+    borgo.SetSession(w, Session{User: user}, 24*time.Hour)
+    borgo.JSON(w, http.StatusOK, Me{User: user})
+}
+
+session, ok := borgo.GetSession[Session](r) // false when missing, tampered or expired
+borgo.ClearSession(w)                       // logout
+```
+
+**Auth guards.** The front server forwards the browser's cookies on every api call a loader or action makes, so Go sees the session during SSR. A loader may return a `Response` to short-circuit — `redirect()` makes it a guard, honored on full loads and client navigations alike:
+
+```tsx
+export async function loader({ api }: LoaderContext) {
+  try {
+    return { me: await api("GET /api/me") };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return redirect("/login");
+    throw error;
+  }
+}
+```
+
+On the Go side, guard route groups with a plain wrapper — handlers are ordinary `http.HandlerFunc`s:
+
+```go
+func authed(h http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if _, ok := borgo.GetSession[Session](r); !ok {
+            http.Error(w, "unauthenticated", http.StatusUnauthorized)
+            return
+        }
+        h(w, r)
+    }
+}
+
+func init() { borgo.Handle("GET /api/admin/stats", authed(adminStats)) }
+```
+
+**Caching.** `borgo.Cache(w, 5*time.Minute)` sets `Cache-Control: public, max-age=300` (optional second argument adds `stale-while-revalidate`); `borgo.NoCache(w)` sets `no-store` for anything personalized. A reverse proxy in front (see the deploy guide) turns these headers into actual caching.
+
 ### Error pages
 
 - `pages/_404.tsx` renders unmatched routes with status 404.
@@ -237,7 +288,8 @@ Not production-grade, yet, and honest about it. The old caveats are gone — rou
 - Islands hydrate independently but their code is bundled eagerly with the entry: `client="visible"` defers work, not bytes.
 - Loader data on client navigations arrives as one JSON payload fetched in parallel with the route chunk — it is not streamed.
 - Fast refresh is registration-based, not the full babel transform: component edits keep state, hook-signature edits may need a reload.
-- One process each side, sessions/auth/caching are yours to bring, and the codegen tool (not the runtime) depends on `golang.org/x/tools`.
+- Sessions are a signed cookie, not an auth framework: no OAuth, no user store, no CSRF middleware — the helpers cover the mechanics, the policy is yours.
+- One process each side, and the codegen tool (not the runtime) depends on `golang.org/x/tools`.
 - WebSocket topics are a relay, not an RPC layer: the front server forwards `{event, data}` between subscribers and Go; per-message server logic belongs in Go routes.
 
 ## Roadmap

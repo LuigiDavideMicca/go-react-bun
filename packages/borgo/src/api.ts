@@ -44,7 +44,7 @@ export class ApiError extends Error {
   }
 }
 
-export function makeApiClient(base: string): ApiClient {
+export function makeApiClient(base: string, defaults: Record<string, string> = {}): ApiClient {
   return (async (route: string, opts: ApiOptions<string> = {}) => {
     const space = route.indexOf(" ");
     const method = route.slice(0, space);
@@ -62,6 +62,7 @@ export function makeApiClient(base: string): ApiClient {
     const res = await fetch(url, {
       method,
       headers: {
+        ...defaults,
         ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
         ...opts.headers,
       },

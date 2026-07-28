@@ -214,7 +214,12 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       const [loaded, res] = await Promise.all([matched.route.load(), propsPromise]);
       if (!res.ok) throw new Error(`props fetch failed: ${res.status}`);
       module = loaded;
-      props = (await res.json()).props ?? {};
+      const data = await res.json();
+      if (data.redirect) {
+        navigate(new URL(data.redirect, location.origin), push);
+        return;
+      }
+      props = data.props ?? {};
     } catch {
       location.assign(to.href);
       return;

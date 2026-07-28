@@ -2,8 +2,15 @@ import type { ComponentType, ReactNode } from "react";
 import type { ApiClient } from "./api";
 
 // api is the typed client for the go routes; apiUrl is the raw base url
-// (e.g. http://localhost:3501/api) for anything the client doesn't cover
-export type LoaderContext = { params: Record<string, string>; api: ApiClient; apiUrl: string };
+// (e.g. http://localhost:3501/api) for anything the client doesn't cover.
+// the incoming request's cookies are forwarded on every api call, so go
+// handlers see the browser's session during ssr.
+export type LoaderContext = {
+  request: Request;
+  params: Record<string, string>;
+  api: ApiClient;
+  apiUrl: string;
+};
 export type ActionContext = {
   request: Request;
   params: Record<string, string>;
@@ -17,7 +24,7 @@ export type HydrateMode = boolean | "visible";
 
 export type PageModule = {
   default: ComponentType<any>;
-  loader?: (ctx: LoaderContext) => Promise<Record<string, unknown>>;
+  loader?: (ctx: LoaderContext) => Promise<Record<string, unknown> | Response>;
   action?: (ctx: ActionContext) => Promise<Response | Record<string, unknown>>;
   head?: Head | ((props: Record<string, unknown>) => Head);
   hydrate?: HydrateMode;
