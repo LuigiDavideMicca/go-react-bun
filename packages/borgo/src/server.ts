@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildAssets } from "./build";
+import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, type Head, type Route } from "./router";
 
 // resolve react from the app, not from this package: with a linked borgo
@@ -47,9 +48,10 @@ export async function serve({ dev = false } = {}) {
   }
 
   const manifest = pathToFileURL(join(process.cwd(), ".borgo/routes.gen.tsx")).href;
-  const { routes, notFound } = (await import(manifest)) as {
+  const { routes, notFound, serverError } = (await import(manifest)) as {
     routes: Route[];
     notFound: Route | null;
+    serverError: Route | null;
   };
   const shell = await Bun.file("index.html").text();
   const [shellStart, shellEnd = ""] = shell.split("<!--app-->");
@@ -82,7 +84,8 @@ export async function serve({ dev = false } = {}) {
     }
 
     const propsJson = JSON.stringify(props).replaceAll("<", "\\u003c");
-    const state = `<script>window.__PROPS__=${propsJson};window.__BORGO_TITLE__=${JSON.stringify(shellTitle)}</script>`;
+    const devFlag = dev ? ";window.__BORGO_DEV__=1" : "";
+    const state = `<script>window.__PROPS__=${propsJson};window.__BORGO_TITLE__=${JSON.stringify(shellTitle)}${devFlag}</script>`;
     const end = shellEnd.replace("<!--props-->", state);
 
     const encoder = new TextEncoder();
@@ -110,53 +113,73 @@ export async function serve({ dev = false } = {}) {
     });
   }
 
+  async function handle(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+
+    if (url.pathname.startsWith("/api/")) {
+      return fetch(api + url.pathname + url.search, req);
+    }
+
+    if (!url.pathname.includes("..")) {
+      const asset = Bun.file("public" + url.pathname);
+      if (url.pathname !== "/" && (await asset.exists())) return new Response(asset);
+    }
+
+    if (req.method === "POST") {
+      const target = matchRoute(url.pathname, routes);
+      const action = target?.route.module.action;
+      if (target && action) {
+        if (typeof action !== "function") {
+          throw new Error(`the action export of pages/${target.route.file} must be a function`);
+        }
+        const result = await action({ request: req, params: target.params, api: `${api}/api` });
+        if (result instanceof Response) return result;
+        return renderPage(target.route, target.params, 200, { actionData: result });
+      }
+    }
+
+    if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
+
+    const matched = matchRoute(url.pathname, routes);
+    const wantsProps = url.searchParams.get("__borgo") === "props";
+
+    if (!matched) {
+      if (wantsProps) return Response.json({ notFound: true }, { status: 404 });
+      if (notFound) return renderPage(notFound, {}, 404);
+      return new Response("not found", { status: 404 });
+    }
+
+    if (wantsProps) {
+      const { route, params } = matched;
+      const props = route.module.loader
+        ? await route.module.loader({ params, api: `${api}/api` })
+        : {};
+      return Response.json({ props });
+    }
+
+    return renderPage(matched.route, matched.params, 200);
+  }
+
   Bun.serve({
     port,
     async fetch(req) {
-      const url = new URL(req.url);
-
-      if (url.pathname.startsWith("/api/")) {
-        return fetch(api + url.pathname + url.search, req);
-      }
-
-      if (!url.pathname.includes("..")) {
-        const asset = Bun.file("public" + url.pathname);
-        if (url.pathname !== "/" && (await asset.exists())) return new Response(asset);
-      }
-
-      if (req.method === "POST") {
-        const target = matchRoute(url.pathname, routes);
-        const action = target?.route.module.action;
-        if (target && action) {
-          if (typeof action !== "function") {
-            throw new Error(`the action export of pages/${target.route.file} must be a function`);
-          }
-          const result = await action({ request: req, params: target.params, api: `${api}/api` });
-          if (result instanceof Response) return result;
-          return renderPage(target.route, target.params, 200, { actionData: result });
+      try {
+        return await handle(req);
+      } catch (error) {
+        console.error(error);
+        if (dev) {
+          return new Response(overlayHtml(error), {
+            status: 500,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
         }
+        if (serverError) {
+          try {
+            return await renderPage(serverError, {}, 500);
+          } catch {}
+        }
+        return new Response("internal server error", { status: 500 });
       }
-
-      if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
-
-      const matched = matchRoute(url.pathname, routes);
-      const wantsProps = url.searchParams.get("__borgo") === "props";
-
-      if (!matched) {
-        if (wantsProps) return Response.json({ notFound: true }, { status: 404 });
-        if (notFound) return renderPage(notFound, {}, 404);
-        return new Response("not found", { status: 404 });
-      }
-
-      if (wantsProps) {
-        const { route, params } = matched;
-        const props = route.module.loader
-          ? await route.module.loader({ params, api: `${api}/api` })
-          : {};
-        return Response.json({ props });
-      }
-
-      return renderPage(matched.route, matched.params, 200);
     },
   });
 

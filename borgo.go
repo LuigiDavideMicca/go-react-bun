@@ -8,13 +8,26 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 )
 
-var routes = map[string]http.HandlerFunc{}
+var (
+	routes    = map[string]http.HandlerFunc{}
+	patternRe = regexp.MustCompile(`^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /\S*$`)
+)
 
 // Handle registers a handler under a net/http method pattern,
 // e.g. "GET /api/tasks" or "GET /api/tasks/{id}".
 func Handle(pattern string, h http.HandlerFunc) {
+	if !patternRe.MatchString(pattern) {
+		panic(`borgo.Handle: pattern must be "METHOD /path", e.g. "GET /api/tasks" or "GET /api/tasks/{id}"; got "` + pattern + `"`)
+	}
+	if _, dup := routes[pattern]; dup {
+		panic(`borgo.Handle: pattern "` + pattern + `" registered twice; each route file must use a unique method + path`)
+	}
+	if h == nil {
+		panic(`borgo.Handle: nil handler for pattern "` + pattern + `"`)
+	}
 	routes[pattern] = h
 }
 

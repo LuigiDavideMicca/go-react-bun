@@ -8,7 +8,40 @@ declare global {
   interface Window {
     __PROPS__?: Record<string, unknown>;
     __BORGO_TITLE__?: string;
+    __BORGO_DEV__?: number;
   }
+}
+
+function showOverlay(title: string, detail: string) {
+  document.getElementById("borgo-overlay")?.remove();
+  const el = document.createElement("div");
+  el.id = "borgo-overlay";
+  el.style.cssText =
+    "position:fixed;inset:0;z-index:99999;background:rgba(34,27,22,.97);color:#f5ead9;" +
+    "font-family:ui-monospace,monospace;overflow:auto;padding:3rem 1.5rem";
+  const pre = document.createElement("pre");
+  pre.textContent = detail;
+  pre.style.cssText =
+    "background:#1a140f;border:1px solid #3d2f24;border-radius:8px;padding:1rem;" +
+    "white-space:pre-wrap;line-height:1.5;max-width:56rem;margin:0 auto";
+  const header = document.createElement("div");
+  header.innerHTML =
+    '<div style="max-width:56rem;margin:0 auto 1rem">' +
+    '<div style="color:#d9825f;font-weight:bold">⌂ borgo</div>' +
+    `<h1 style="font-size:1.2rem;color:#e8a07e;margin:.5rem 0">${title}</h1>` +
+    '<button style="position:absolute;top:1rem;right:1.5rem;background:none;border:1px solid #3d2f24;color:#b5a08f;border-radius:6px;padding:.3rem .8rem;cursor:pointer" onclick="this.closest(\'#borgo-overlay\').remove()">dismiss</button></div>';
+  el.append(header, pre);
+  document.body.appendChild(el);
+}
+
+function attachDevOverlay() {
+  window.addEventListener("error", (event) => {
+    showOverlay("client error", event.error?.stack ?? event.message);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    showOverlay("unhandled rejection", reason?.stack ?? String(reason));
+  });
 }
 
 export type MountOptions = {
@@ -31,6 +64,8 @@ function compose(
 }
 
 export function mount({ createElement, hydrateRoot, routes, notFound }: MountOptions) {
+  if (window.__BORGO_DEV__) attachDevOverlay();
+
   const initial = matchRoute(location.pathname, routes);
   const initialRoute = initial?.route ?? notFound;
   if (!initialRoute) return;
