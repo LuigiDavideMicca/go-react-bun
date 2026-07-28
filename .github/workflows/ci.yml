@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: install workspace
+        run: bun install --frozen-lockfile
+
+      - name: build go core
+        run: |
+          go build ./...
+          go vet ./...
+
+      - name: build example go module
+        working-directory: examples/tasks
+        run: |
+          go build ./...
+          go vet ./...
+
+      - name: typecheck
+        run: bun run typecheck
+
+      - name: build example app
+        working-directory: examples/tasks
+        run: bun run build
+
+      - name: smoke test example app
+        working-directory: examples/tasks
+        run: |
+          bun run start &
+          for i in $(seq 1 20); do curl -fs http://localhost:3000/ > /dev/null && break; sleep 1; done
+          curl -fs http://localhost:3000/ | grep -q "<h1>Tasks</h1>"
+          curl -fs -X POST http://localhost:3000/api/tasks -H "Content-Type: application/json" -d '{"title":"ci smoke"}' | grep -q "ci smoke"
+          curl -fs http://localhost:3000/ | grep -q "ci smoke"
+          curl -fs http://localhost:3000/tasks/1 | grep -q "ci smoke"
+
+      - name: scaffold test
+        run: |
+          tmp="$(mktemp -d)"
+          cd packages/borgo && bun pm pack --destination "$tmp" && cd "$tmp"
+          bun "$GITHUB_WORKSPACE/packages/create-borgo/src/cli.ts" smoke-app
+          cd smoke-app
+          echo "replace github.com/LuigiDavideMicca/borgo => $GITHUB_WORKSPACE" >> go.mod
+          sed -i 's#"borgo": "\^0.1.0"#"borgo": "file:../borgo-0.1.0.tgz"#' package.json
+          bun install
+          go mod tidy
+          bun run build
+          PORT=3100 API_PORT=3601 bun run start &
+          for i in $(seq 1 20); do curl -fs http://localhost:3100/ > /dev/null && break; sleep 1; done
+          curl -fs http://localhost:3100/ | grep -q "Welcome to borgo"
+          curl -fs http://localhost:3100/hello/ci | grep -q "hello, ci"
+          curl -fs http://localhost:3100/api/hello | grep -q "hello from go"
