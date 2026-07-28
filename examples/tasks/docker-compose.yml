@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: examples/tasks/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      DB_PATH: /data/tasks.db
+    volumes:
+      - data:/data
+    restart: unless-stopped
+
+volumes:
+  data:

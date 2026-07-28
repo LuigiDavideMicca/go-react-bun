@@ -53,17 +53,26 @@ switch (command) {
   }
 
   case "start": {
-    const bin = `dist/${goBinName()}`;
-    if (!existsSync(bin)) {
-      console.error(`  ${c.red("✗")} ${bin} not found - run \`borgo build\` first`);
-      process.exit(1);
-    }
+    // --front-only skips the go binary, for a split deployment where the
+    // api runs elsewhere (point API_URL at it)
+    if (!process.argv.includes("--front-only")) {
+      const bin = `dist/${goBinName()}`;
+      if (!existsSync(bin)) {
+        console.error(`  ${c.red("✗")} ${bin} not found - run \`borgo build\` first`);
+        process.exit(1);
+      }
 
-    const apiProc = Bun.spawn([bin], { stdout: "inherit", stderr: "inherit" });
-    process.on("SIGINT", () => {
-      apiProc.kill();
-      process.exit(0);
-    });
+      const apiProc = Bun.spawn([bin], { stdout: "inherit", stderr: "inherit" });
+      process.on("SIGINT", () => {
+        apiProc.kill();
+        process.exit(0);
+      });
+      // if the api dies, exit too, so a supervisor restarts the pair
+      apiProc.exited.then((code) => {
+        console.error(`  ${c.red("✗")} api process exited (${code})`);
+        process.exit(code || 1);
+      });
+    }
 
     await serve({ dev: false });
     break;

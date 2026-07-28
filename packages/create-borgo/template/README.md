@@ -21,9 +21,13 @@ If you are developing against a local borgo checkout, uncomment the `replace` di
 
 ## Commands
 
-- `bun run dev` — both servers with watch and rebuild
+- `bun run dev` — both servers with watch, fast refresh and css hot swap
 - `bun run build` — production client assets and the Go API binary in `dist/`
-- `bun run start` — run from the build output
+- `bun run start` — run from the build output (supervises both processes)
+
+## Deploy
+
+`docker compose up -d` builds the multi-stage `Dockerfile` (small `oven/bun:slim` runtime, static Go binary) and mounts a volume at `/data` for SQLite or anything persistent. See the [deploy guide](https://github.com/LuigiDavideMicca/borgo/blob/main/docs/deploy.md) for reverse proxy samples, systemd, and split-service setups.
 
 ## Layout
 

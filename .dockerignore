@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+**/.borgo
+**/dist
+**/public/assets
+**/*.db
+.git
+.github
+assets

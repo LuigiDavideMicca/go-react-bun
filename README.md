@@ -278,7 +278,11 @@ cmd/borgogen            go: static analysis codegen for the typed bridge and rou
 examples/tasks          demo app: tasks crud with gorm + sqlite, live updates over sse
 ```
 
-Commands (in an app): `borgo dev` (both servers, watch and rebuild), `borgo build` (client assets + Go binary in `dist/`), `borgo start` (run from build output). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
+Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo build` (client assets + Go binary in `dist/`), `borgo start` (run from build output, supervising both processes; `--front-only` for split deployments with `API_URL`). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
+
+### Deploying
+
+Scaffolded apps ship a multi-stage `Dockerfile` (Go builds static, the runtime is `oven/bun:slim`) and a `docker-compose.yml` with a `/data` volume for SQLite — `docker compose up -d` is a deployment. The [deploy guide](docs/deploy.md) covers the single-container and two-service layouts, Caddy and nginx reverse-proxy samples (WebSockets and SSE included), a systemd unit for bare metal, and the full environment reference.
 
 ## What this is not
 

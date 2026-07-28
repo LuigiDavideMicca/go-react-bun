@@ -68,7 +68,7 @@ export async function serve({ dev = false } = {}) {
   const shellTitle = shell.match(/<title>(.*?)<\/title>/s)?.[1] ?? "";
 
   const port = Number(process.env.PORT || 3000);
-  const api = `http://localhost:${process.env.API_PORT || 3501}`;
+  const api = process.env.API_URL || `http://localhost:${process.env.API_PORT || 3501}`;
   const apiUrl = `${api}/api`;
 
   // the api client forwards the browser's cookies, so go handlers see the
