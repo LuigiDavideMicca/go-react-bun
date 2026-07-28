@@ -1,0 +1,7 @@
+node_modules
+.env
+.borgo
+dist
+public/assets
+*.db
+.DS_Store

@@ -1,0 +1,37 @@
+{
+  "name": "create-borgo",
+  "version": "0.1.0",
+  "description": "Scaffold a new borgo app: file-based React SSR on Bun with a Go API.",
+  "type": "module",
+  "bin": {
+    "create-borgo": "./src/cli.ts"
+  },
+  "files": [
+    "src",
+    "template"
+  ],
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "author": "Luigi Davide Micca <luigimicca94@gmail.com> (https://luigimicca.com)",
+  "license": "MIT",
+  "homepage": "https://github.com/LuigiDavideMicca/borgo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LuigiDavideMicca/borgo.git",
+    "directory": "packages/create-borgo"
+  },
+  "keywords": [
+    "react",
+    "ssr",
+    "go",
+    "bun",
+    "framework",
+    "fullstack",
+    "self-hosted",
+    "scaffold"
+  ]
+}
