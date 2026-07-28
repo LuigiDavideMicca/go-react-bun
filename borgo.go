@@ -5,10 +5,13 @@ package borgo
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
+	"strings"
 )
 
 var (
@@ -41,15 +44,48 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 // Serve mounts every registered route and listens on API_PORT (default 3501).
 func Serve() {
 	mux := http.NewServeMux()
+	patterns := make([]string, 0, len(routes))
 	for pattern, handler := range routes {
 		mux.HandleFunc(pattern, handler)
+		patterns = append(patterns, pattern)
 	}
+	sort.Slice(patterns, func(i, j int) bool {
+		a, b := strings.SplitN(patterns[i], " ", 2), strings.SplitN(patterns[j], " ", 2)
+		if a[1] != b[1] {
+			return a[1] < b[1]
+		}
+		return a[0] < b[0]
+	})
 
 	port := os.Getenv("API_PORT")
 	if port == "" {
 		port = "3501"
 	}
 
-	log.Println("borgo api listening on :" + port)
+	printStartup(patterns, port)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
+}
+
+func colorEnabled() bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	fi, err := os.Stdout.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+func printStartup(patterns []string, port string) {
+	var dim, sage, terra, reset string
+	if colorEnabled() {
+		dim, sage, terra, reset = "\x1b[2m", "\x1b[38;5;108m", "\x1b[38;5;173m", "\x1b[0m"
+	}
+	if os.Getenv("BORGO_RELOAD") != "" {
+		fmt.Printf("  %s✓%s api restarted on :%s\n", sage, reset, port)
+		return
+	}
+	fmt.Printf("\n  %s⌂%s api %s· :%s%s\n", terra, reset, dim, port, reset)
+	for _, p := range patterns {
+		parts := strings.SplitN(p, " ", 2)
+		fmt.Printf("  %s%-7s%s %s\n", sage, parts[0], reset, parts[1])
+	}
 }

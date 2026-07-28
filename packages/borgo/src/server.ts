@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildAssets } from "./build";
+import { banner, c, fmtMs, statusColor } from "./colors";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, type Head, type Route } from "./router";
 
@@ -43,6 +44,7 @@ function composeElement(route: Route, props: Record<string, unknown>) {
 }
 
 export async function serve({ dev = false } = {}) {
+  const started = performance.now();
   if (dev || !existsSync(".borgo/routes.gen.tsx") || !existsSync("public/assets/client.js")) {
     await buildAssets(dev);
   }
@@ -160,28 +162,59 @@ export async function serve({ dev = false } = {}) {
     return renderPage(matched.route, matched.params, 200);
   }
 
+  function logRequest(req: Request, status: number, ms: number) {
+    const path = new URL(req.url).pathname;
+    if (path.startsWith("/assets/") || path === "/favicon.ico") return;
+    const method = c.dim(req.method.padEnd(4));
+    console.log(`  ${method} ${path.padEnd(24)} ${statusColor(status)(String(status))} ${c.dim(fmtMs(ms))}`);
+  }
+
   Bun.serve({
     port,
     async fetch(req) {
+      const t0 = performance.now();
+      let response: Response;
       try {
-        return await handle(req);
+        response = await handle(req);
       } catch (error) {
         console.error(error);
         if (dev) {
-          return new Response(overlayHtml(error), {
+          response = new Response(overlayHtml(error), {
             status: 500,
             headers: { "Content-Type": "text/html; charset=utf-8" },
           });
-        }
-        if (serverError) {
+        } else if (serverError) {
           try {
-            return await renderPage(serverError, {}, 500);
-          } catch {}
+            response = await renderPage(serverError, {}, 500);
+          } catch {
+            response = new Response("internal server error", { status: 500 });
+          }
+        } else {
+          response = new Response("internal server error", { status: 500 });
         }
-        return new Response("internal server error", { status: 500 });
       }
+      if (dev) logRequest(req, response.status, performance.now() - t0);
+      return response;
     },
   });
 
-  console.log(`borgo front server on http://localhost:${port} (${dev ? "dev" : "prod"})`);
+  const ready = performance.now() - started;
+  if (process.env.BORGO_RELOAD) {
+    console.log(`  ${c.sage("✓")} rebuilt in ${fmtMs(ready)}`);
+    return;
+  }
+
+  const table: Array<[string, string]> = routes.map((r) => [r.pattern, `pages/${r.file}`]);
+  if (notFound) table.push(["404", `pages/${notFound.file}`]);
+  if (serverError) table.push(["500", `pages/${serverError.file}`]);
+  const width = Math.max(...table.map(([pattern]) => pattern.length));
+
+  console.log(`\n  ${banner(dev ? "dev" : "start")}\n`);
+  for (const [pattern, file] of table) {
+    const colored = pattern.replace(/:(\w+)/g, (m) => c.terracotta(m));
+    console.log(`  ${colored}${" ".repeat(width - pattern.length)}  ${c.dim(file)}`);
+  }
+  console.log(`\n  ${c.sage("✓")} ready in ${c.bold(fmtMs(ready))}`);
+  console.log(`  ${c.terracotta("➜")} app  ${c.blue(`http://localhost:${port}`)}`);
+  console.log(`  ${c.terracotta("➜")} api  ${c.blue(api)} ${c.dim("go, proxied at /api")}\n`);
 }
