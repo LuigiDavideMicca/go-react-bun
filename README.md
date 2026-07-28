@@ -284,6 +284,10 @@ Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo bu
 
 Scaffolded apps ship a multi-stage `Dockerfile` (Go builds static, the runtime is `oven/bun:slim`) and a `docker-compose.yml` with a `/data` volume for SQLite — `docker compose up -d` is a deployment. The [deploy guide](docs/deploy.md) covers the single-container and two-service layouts, Caddy and nginx reverse-proxy samples (WebSockets and SSE included), a systemd unit for bare metal, and the full environment reference.
 
+## Versioning and releases
+
+[release-please](https://github.com/googleapis/release-please) maintains a release PR from conventional commits; merging it tags `vX.Y.Z` and publishes both npm packages (`borgo`, `create-borgo`) with linked versions via npm trusted publishing, provenance attached. The Go module `github.com/LuigiDavideMicca/borgo` lives at the repo root and resolves the **same** `vX.Y.Z` tag — one version number across all three artifacts.
+
 ## What this is not
 
 Not production-grade, yet, and honest about it. The old caveats are gone — routes are code-split into lazy chunks, loaders and actions are stripped from client bundles (and CI proves it), pages can opt out of or defer hydration, and Go handlers mount through generated code instead of hand-written `init()`. What remains true:

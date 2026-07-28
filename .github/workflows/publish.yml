@@ -1,0 +1,43 @@
+name: publish
+
+# npm trusted publishing (oidc): no tokens, provenance attached. both
+# packages publish from the borgo release tag, borgo first so create-borgo
+# can always resolve its linked version.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: git tag to publish from (e.g. v0.2.0)
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    # the linked create-borgo release fires its own event; publish once, from
+    # the plain vX.Y.Z tag
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.release.tag_name, 'create-borgo')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - run: npm install -g npm@latest
+
+      - name: publish borgo
+        run: npm publish --provenance --access public
+        working-directory: packages/borgo
+
+      - name: publish create-borgo
+        run: npm publish --provenance --access public
+        working-directory: packages/create-borgo
