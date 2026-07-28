@@ -6,13 +6,13 @@
 
 borgo is a mini Vercel-style full-stack framework: file-based React pages server-rendered by Bun, API routes written in Go. You get the DX — `bunx create-borgo my-app`, drop a file in `pages/`, drop a file in `api/`, one dev command — without the platform. Deployment is one Go binary and one Bun server on any box you control.
 
-Pages get nested layouts, per-page `<head>` management, streaming SSR through Suspense, client-side navigation over plain `<a>` tags, form actions with post/redirect/get, and custom 404/500 pages — all through file conventions, no imports from a framework runtime beyond a handful of types and one `redirect` helper.
+Pages get nested layouts, per-page `<head>` management, streaming SSR through Suspense, client-side navigation over plain `<a>` tags, per-route code splitting, opt-out and deferred hydration, form actions with post/redirect/get, live updates over server-sent events, and custom 404/500 pages — all through file conventions. Loaders and actions talk to the Go API through a client typed end to end by `borgogen`, which reads the Go handlers with `go/types` and generates the TypeScript route map.
 
-The entire framework core is a few hundred lines of code, published as readable TypeScript and dependency-free Go. It exists because most of what makes Next-style frameworks pleasant is conventions, not machinery — and conventions are cheap.
+The entire framework core is a few hundred lines of code, published as readable TypeScript and Go with a zero-dependency runtime. It exists because most of what makes Next-style frameworks pleasant is conventions, not machinery — and conventions are cheap.
 
 ## Quickstart
 
-Prerequisites: [Bun](https://bun.sh) >= 1.3, [Go](https://go.dev) >= 1.22.
+Prerequisites: [Bun](https://bun.sh) >= 1.3, [Go](https://go.dev) >= 1.25.
 
 ```bash
 bunx create-borgo my-app
@@ -32,29 +32,41 @@ Open http://localhost:3000.
 - `pages/about.tsx` → `/about`
 - `pages/tasks/[id].tsx` → `/tasks/:id`
 
-A page may export a `loader` that runs on the server before rendering; its result becomes the component's props, both for SSR and after hydration:
+A page may export a `loader` that runs on the server before rendering; its result becomes the component's props, both for SSR and after hydration. The `api` argument is a typed client over the Go routes — pattern, path params and response shape are all checked by `tsc`:
 
 ```tsx
 import type { LoaderContext } from "borgo";
+import type { Task } from "../.borgo/api-types";
 
 export async function loader({ params, api }: LoaderContext) {
-  const res = await fetch(`${api}/tasks/${params.id}`);
-  return { task: (await res.json()).task };
+  const { task } = await api("GET /api/tasks/{id}", { params: { id: params.id } });
+  return { task };
 }
 
-export default function TaskDetail({ task }) { /* ... */ }
+export default function TaskDetail({ task }: { task: Task }) { /* ... */ }
 ```
 
-**API routes** are Go files in `api/` that register themselves in `init()`:
+The client throws `ApiError` (with `.status`) on non-2xx responses; `apiUrl` is the raw base URL for anything the client doesn't cover. Loader and action code is stripped from client bundles at build time, so server-only imports and secrets used there never reach the browser (CI greps the built assets for a sentinel to keep this honest).
+
+**API routes** are Go files in `api/`. Annotate a handler with a route directive and it is mounted for you:
 
 ```go
-func init() {
-    borgo.Handle("GET /api/tasks", listTasks)
-    borgo.Handle("POST /api/tasks", createTask)
+//borgo:route GET /api/tasks
+func ListTasks(w http.ResponseWriter, r *http.Request) {
+    borgo.JSON(w, http.StatusOK, TaskList{Tasks: tasks})
 }
 ```
 
-`main.go` is five lines: import your `api` package, call `borgo.Serve()`. The Go core imposes no database and has zero dependencies — bring GORM, sqlc, or nothing (see `examples/tasks` for a GORM + SQLite CRUD app).
+Prefer explicitness? `init()` + `borgo.Handle("GET /api/tasks", listTasks)` still works, and both styles feed the generated types. `main.go` is five lines: import your `api` package, call `borgo.Serve()`. The Go runtime imposes no database and has zero dependencies — bring GORM, sqlc, or nothing (see `examples/tasks` for a GORM + SQLite CRUD app).
+
+### The typed bridge
+
+`borgogen` (run automatically by `borgo dev` on every `api/*.go` change, and by `borgo build`) statically analyzes the `api` package with `go/ast` + `go/types` — no reflection, nothing at runtime — and generates:
+
+- `.borgo/api-types.d.ts` — route pattern → response type, plus a TypeScript interface for every Go struct involved (import them in your pages). A route's response type is the union of `T` across the `borgo.JSON[T]` calls in its handler.
+- `api/borgo.gen.go` — the mounting for `//borgo:route` handlers.
+
+The convention, and its honest limits: only `borgo.JSON` calls made directly in the handler's body are seen (respond through a helper function and the route types as `unknown`, as does `borgo.WriteJSON`); types with a custom `MarshalJSON` (except `time.Time`) become `unknown`; request bodies are not typed. Struct fields follow `encoding/json` semantics — tags, `omitempty`, embedded structs flattened. The tool is wired through the `tool` directive in the app's `go.mod`.
 
 ### Layouts
 
@@ -80,9 +92,20 @@ export const head = (props): Head => ({ title: `${props.task.title} · borgo` })
 
 During SSR the title replaces the shell's `<title>` and metas are injected into `<head>`; after hydration the runtime owns both, updating them on every client-side navigation (and restoring the shell title on pages without a `head`).
 
-### Client-side navigation
+### Client-side navigation and code splitting
 
-Plain `<a>` tags become client-side transitions — no `<Link>` component. The runtime intercepts same-origin left clicks (no modifier keys, no `target`, no `download`), fetches the destination's loader props as JSON from the same URL (`?__borgo=props`), swaps the composed tree in place and updates head, history and scroll. Anything it cannot handle — external links, unknown routes, a failed fetch — falls back to a normal full navigation.
+Plain `<a>` tags become client-side transitions — no `<Link>` component. The runtime intercepts same-origin left clicks (no modifier keys, no `target`, no `download`), fetches the destination's route chunk and its loader props as JSON (`?__borgo=props`) in parallel, swaps the composed tree in place and updates head, history and scroll. Anything it cannot handle — external links, unknown routes, a failed fetch — falls back to a normal full navigation.
+
+The build emits one lazy chunk per route; React, the runtime and layouts live in the shared entry chunk, loaded once. A page's code is downloaded the first time you visit or navigate to it.
+
+### Partial hydration
+
+A page may export `hydrate` (as a literal, so the build can read it without executing the page):
+
+- `export const hydrate = false` — the page is server-rendered HTML only: no props script, no client bundle, no route chunk built. Right for pure content pages; classic form actions still work, and links on it are normal full navigations.
+- `export const hydrate = "visible"` — the entry loads, but the page's chunk is fetched and hydrated only when the element marked `data-borgo-visible` (or the page root, if unmarked) scrolls into view. Right for pages whose interactive part sits below a long read.
+
+The default is eager hydration. Client-side navigation *to* a `"visible"` page hydrates it immediately — the deferral applies to the initial load, where the HTML is already on screen.
 
 ### Streaming SSR
 
@@ -98,12 +121,16 @@ import { redirect, type ActionContext } from "borgo";
 export async function action({ request, params, api }: ActionContext) {
   const form = await request.formData();
   if (!String(form.get("title") ?? "").trim()) return { error: "give the task a title" };
-  await fetch(`${api}/tasks`, { method: "POST", /* ... */ });
+  await api("POST /api/tasks", { body: { title: form.get("title") } });
   return redirect("/");
 }
 ```
 
 Return a `Response` and it is sent as-is — `redirect(to, status = 303)` gives you post/redirect/get. Return any other object and the page re-renders with it as the `actionData` prop, merged over the loader's props.
+
+### Server-sent events
+
+`borgo.SSE(w, r)` turns any handler into an event stream; `borgo.NewSSEHub()` adds broadcast — `hub.Publish(event, data)` from anywhere, `hub.ServeHTTP` as the route handler. The front server proxies streams without buffering, so an `EventSource` in the browser just works. All stdlib; WebSockets are deliberately left out (Go's standard library has no server implementation, and a dependency is not worth it — SSE covers live updates). See the tasks example: create a task in one tab, watch it appear in another.
 
 ### Error pages
 
@@ -121,22 +148,29 @@ Two processes, one front door:
 - **Go API server** — plain `net/http` with method patterns, bootstrapped by `borgo.Serve()`.
 
 ```
-packages/borgo          npm: the bun/typescript core (cli, ssr server, router, build, hydration)
+packages/borgo          npm: the bun/typescript core (cli, ssr server, router, build, hydration, typed api client)
 packages/create-borgo   npm: project scaffolder
-borgo.go, go.mod        go module github.com/LuigiDavideMicca/borgo: route registry + server bootstrap
-examples/tasks          demo app: tasks crud with gorm + sqlite
+borgo.go, sse.go        go module github.com/LuigiDavideMicca/borgo: route registry, server bootstrap, sse (zero deps)
+cmd/borgogen            go: static analysis codegen for the typed bridge and route mounting (depends on x/tools)
+examples/tasks          demo app: tasks crud with gorm + sqlite, live updates over sse
 ```
 
 Commands (in an app): `borgo dev` (both servers, watch and rebuild), `borgo build` (client assets + Go binary in `dist/`), `borgo start` (run from build output). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
 
 ## What this is not
 
-Not production-grade, yet, and honest about it. One client bundle contains all pages, loaders and actions ride along into it (keep secrets in the Go side), and there is no code splitting or partial hydration. The Go side has no dynamic loading — "file-based API routes" means self-registration through `init()`.
+Not production-grade, yet, and honest about it. The old caveats are gone — routes are code-split into lazy chunks, loaders and actions are stripped from client bundles (and CI proves it), pages can opt out of or defer hydration, and Go handlers mount through generated code instead of hand-written `init()`. What remains true:
+
+- The typed bridge sees only `borgo.JSON` calls made directly in a handler's body; anything else — helpers, `borgo.WriteJSON`, custom marshalers — is typed `unknown`, and request bodies are not typed at all.
+- Hydration granularity is the page, not the component: `hydrate = "visible"` defers the whole page, there are no islands.
+- No streaming of loader data on client-side navigations, no prefetching route chunks on hover, no scroll restoration on back/forward beyond the browser default.
+- One process each side, no HMR (rebuilds are full page reloads), sessions/auth/caching are yours to bring, and the codegen tool (not the runtime) depends on `golang.org/x/tools`.
+- No WebSockets — SSE only, by choice.
 
 ## Roadmap
 
 - ~~**Phase 2 — pages that feel like an app**: layouts, `<head>` management, client-side navigation, streaming SSR, form actions, error pages~~ done
-- **Phase 3 — typed bridge**: generate TypeScript types from Go handlers so loaders and fetches are typed end to end
+- ~~**Phase 3 — typed bridge and a production build**: TypeScript types generated from Go handlers, per-route code splitting, server-only code elimination, partial hydration, route directives, server-sent events~~ done
 - **Phase 4 — deploy story**: a Dockerfile that builds both halves into one image, plus a guide for running behind a reverse proxy
 
 ---
