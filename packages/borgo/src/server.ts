@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { makeApiClient } from "./api";
 import { buildAssets } from "./build";
 import { banner, c, fmtMs, statusColor } from "./colors";
+import { registerIslands } from "./index";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, type Head, type Route } from "./router";
 
@@ -56,6 +57,11 @@ export async function serve({ dev = false } = {}) {
     notFound: Route | null;
     serverError: Route | null;
   };
+  const islandsManifest = pathToFileURL(join(process.cwd(), ".borgo/islands.gen.ts")).href;
+  const { islands } = (await import(islandsManifest)) as {
+    islands: Record<string, import("react").ComponentType<any>>;
+  };
+  registerIslands(islands, React.createElement);
   const shell = await Bun.file("index.html").text();
   const [shellStart, shellEnd = ""] = shell.split("<!--app-->");
   const shellTitle = shell.match(/<title>(.*?)<\/title>/s)?.[1] ?? "";
@@ -92,10 +98,17 @@ export async function serve({ dev = false } = {}) {
 
     let end: string;
     if (route.module.hydrate === false) {
-      // the page opted out of hydration: ship no props and no client script
+      // the page opted out of hydration: ship no props and no client script.
+      // pages with islands get the islands entry, which hydrates only those.
+      const islandsTag = route.islands
+        ? '<script type="module" src="/assets/islands-client.js"></script>'
+        : "";
       end = shellEnd
         .replace("<!--props-->", "")
-        .replace(/[ \t]*<script type="module" src="\/assets\/client\.js"><\/script>\r?\n?/, "");
+        .replace(
+          /[ \t]*<script type="module" src="\/assets\/client\.js"><\/script>\r?\n?/,
+          islandsTag,
+        );
     } else {
       const propsJson = JSON.stringify(props).replaceAll("<", "\\u003c");
       const devFlag = dev ? ";window.__BORGO_DEV__=1" : "";

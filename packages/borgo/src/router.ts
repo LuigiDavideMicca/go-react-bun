@@ -32,6 +32,7 @@ export type Route = {
   file: string;
   module: PageModule;
   layouts: LayoutModule[];
+  islands?: boolean;
 };
 
 // pages/index.tsx -> /, pages/about.tsx -> /about, pages/tasks/[id].tsx -> /tasks/:id

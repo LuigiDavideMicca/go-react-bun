@@ -55,6 +55,35 @@ function attachDevOverlay() {
   });
 }
 
+export type MountIslandsOptions = {
+  createElement: typeof CreateElement;
+  hydrateRoot: typeof HydrateRoot;
+  islands: Record<string, import("react").ComponentType<any>>;
+};
+
+// hydrates every <Island> marker on a page that itself ships no page bundle
+// (hydrate=false); client="visible" defers the work until scrolled into view
+export function mountIslands({ createElement, hydrateRoot, islands }: MountIslandsOptions) {
+  for (const el of document.querySelectorAll("[data-borgo-island]")) {
+    const name = el.getAttribute("data-borgo-island")!;
+    const component = islands[name];
+    if (!component) continue;
+    const props = JSON.parse(el.getAttribute("data-borgo-props") || "{}");
+    const hydrate = () => hydrateRoot(el, createElement(component, props));
+    if (el.getAttribute("data-borgo-client") === "visible") {
+      const observer = new IntersectionObserver((entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          observer.disconnect();
+          hydrate();
+        }
+      });
+      observer.observe(el);
+    } else {
+      hydrate();
+    }
+  }
+}
+
 export type MountOptions = {
   createElement: typeof CreateElement;
   hydrateRoot: typeof HydrateRoot;

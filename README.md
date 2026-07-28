@@ -128,6 +128,23 @@ A page may export `hydrate` (as a literal, so the build can read it without exec
 
 The default is eager hydration. Client-side navigation *to* a `"visible"` page hydrates it immediately — the deferral applies to the initial load, where the HTML is already on screen.
 
+### Islands
+
+For finer granularity than the page, drop a component in `islands/` and mark it in any page:
+
+```tsx
+import { Island } from "borgo";
+
+export const hydrate = false; // the page ships no page bundle at all
+
+<Island name="Counter" props={{ start: 5 }} />
+<Island name="Counter" props={{ start: 0 }} client="visible" />
+```
+
+On a `hydrate = false` page each island hydrates independently — through a small dedicated entry that touches only the island markers — so a content page can carry a search box without hydrating anything else. `client="visible"` waits until the island scrolls into view. On normally hydrated pages `<Island>` renders inline as part of the page tree.
+
+The tradeoff, stated: island modules are registered eagerly, so their code rides with the client entry (and the islands entry loads React). `client="visible"` defers the hydration *work*, not the download. Props must be JSON-serializable — they are inlined into the island's HTML marker.
+
 ### Streaming SSR
 
 Pages render through `renderToReadableStream`, so a `<Suspense>` boundary that suspends on the server sends the rest of the page immediately and streams the slow part in when it resolves. See `examples/tasks/pages/slow.tsx`.
@@ -183,7 +200,7 @@ Commands (in an app): `borgo dev` (both servers, watch and rebuild), `borgo buil
 Not production-grade, yet, and honest about it. The old caveats are gone — routes are code-split into lazy chunks, loaders and actions are stripped from client bundles (and CI proves it), pages can opt out of or defer hydration, and Go handlers mount through generated code instead of hand-written `init()`. What remains true:
 
 - The typed bridge is static analysis: helpers in the `api` package are followed and `//borgo:type` covers custom marshalers, but responses written through `json.NewEncoder` or helpers in other packages still type as `unknown`.
-- Hydration granularity is the page, not the component: `hydrate = "visible"` defers the whole page, there are no islands.
+- Islands hydrate independently but their code is bundled eagerly with the entry: `client="visible"` defers work, not bytes.
 - No streaming of loader data on client-side navigations, no prefetching route chunks on hover, no scroll restoration on back/forward beyond the browser default.
 - One process each side, no HMR (rebuilds are full page reloads), sessions/auth/caching are yours to bring, and the codegen tool (not the runtime) depends on `golang.org/x/tools`.
 - No WebSockets — SSE only, by choice.
