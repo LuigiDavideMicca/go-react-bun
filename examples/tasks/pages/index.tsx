@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { redirect, type ActionContext, type LoaderContext } from "borgo";
 import type { Task } from "../.borgo/api-types";
 
@@ -36,10 +36,22 @@ export default function Home({
 }) {
   const [tasks, setTasks] = useState(initialTasks);
 
-  const remove = async (id: number) => {
-    await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+  const refresh = async () => {
     const res = await fetch("/api/tasks");
     setTasks((await res.json()).tasks);
+  };
+
+  // live updates: a task created or deleted in another tab appears here
+  useEffect(() => {
+    const source = new EventSource("/api/events");
+    source.addEventListener("task-created", refresh);
+    source.addEventListener("task-deleted", refresh);
+    return () => source.close();
+  }, []);
+
+  const remove = async (id: number) => {
+    await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+    await refresh();
   };
 
   return (

@@ -184,6 +184,8 @@ export async function serve({ dev = false } = {}) {
 
   Bun.serve({
     port,
+    // long-lived proxied streams (sse) must not be killed by the default 10s
+    idleTimeout: 0,
     async fetch(req) {
       const t0 = performance.now();
       let response: Response;

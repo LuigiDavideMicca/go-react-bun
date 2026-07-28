@@ -23,6 +23,7 @@ export interface Deleted {
 
 declare module "borgo" {
   interface ApiRoutes {
+    "GET /api/events": unknown;
     "GET /api/tasks": TaskList;
     "POST /api/tasks": TaskItem;
     "DELETE /api/tasks/{id}": Deleted;

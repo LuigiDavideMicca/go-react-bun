@@ -55,6 +55,7 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	events.Publish("task-created", task)
 	borgo.JSON(w, http.StatusCreated, TaskItem{Task: task})
 }
 
@@ -79,5 +80,6 @@ func DeleteTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	events.Publish("task-deleted", r.PathValue("id"))
 	borgo.JSON(w, http.StatusOK, Deleted{Deleted: true})
 }
