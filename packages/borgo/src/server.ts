@@ -85,10 +85,18 @@ export async function serve({ dev = false } = {}) {
       start = start.replace("</head>", `${injected}</head>`);
     }
 
-    const propsJson = JSON.stringify(props).replaceAll("<", "\\u003c");
-    const devFlag = dev ? ";window.__BORGO_DEV__=1" : "";
-    const state = `<script>window.__PROPS__=${propsJson};window.__BORGO_TITLE__=${JSON.stringify(shellTitle)}${devFlag}</script>`;
-    const end = shellEnd.replace("<!--props-->", state);
+    let end: string;
+    if (route.module.hydrate === false) {
+      // the page opted out of hydration: ship no props and no client script
+      end = shellEnd
+        .replace("<!--props-->", "")
+        .replace(/[ \t]*<script type="module" src="\/assets\/client\.js"><\/script>\r?\n?/, "");
+    } else {
+      const propsJson = JSON.stringify(props).replaceAll("<", "\\u003c");
+      const devFlag = dev ? ";window.__BORGO_DEV__=1" : "";
+      const state = `<script>window.__PROPS__=${propsJson};window.__BORGO_TITLE__=${JSON.stringify(shellTitle)}${devFlag}</script>`;
+      end = shellEnd.replace("<!--props-->", state);
+    }
 
     const encoder = new TextEncoder();
     const body = new ReadableStream({

@@ -1,5 +1,8 @@
 export const head = { title: "About · borgo tasks" };
 
+// pure content: this page ships zero javascript
+export const hydrate = false;
+
 export default function About() {
   return (
     <main>
