@@ -1,4 +1,4 @@
-import type { LoaderContext } from "../../framework/router";
+import type { LoaderContext } from "borgo";
 
 type Task = { ID: number; CreatedAt: string; title: string; body: string };
 
