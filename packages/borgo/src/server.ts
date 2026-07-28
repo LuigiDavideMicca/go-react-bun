@@ -124,6 +124,19 @@ export async function serve({ dev = false } = {}) {
         if (url.pathname !== "/" && (await asset.exists())) return new Response(asset);
       }
 
+      if (req.method === "POST") {
+        const target = matchRoute(url.pathname, routes);
+        const action = target?.route.module.action;
+        if (target && action) {
+          if (typeof action !== "function") {
+            throw new Error(`the action export of pages/${target.route.file} must be a function`);
+          }
+          const result = await action({ request: req, params: target.params, api: `${api}/api` });
+          if (result instanceof Response) return result;
+          return renderPage(target.route, target.params, 200, { actionData: result });
+        }
+      }
+
       if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
 
       const matched = matchRoute(url.pathname, routes);

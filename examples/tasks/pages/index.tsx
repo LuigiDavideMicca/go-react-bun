@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import type { LoaderContext } from "borgo";
+import { useState } from "react";
+import { redirect, type ActionContext, type LoaderContext } from "borgo";
 
 type Task = { ID: number; title: string; body: string };
 
@@ -14,51 +14,47 @@ export async function loader({ api }: LoaderContext) {
   return { tasks };
 }
 
-export default function Home({ tasks: initialTasks }: { tasks: Task[] }) {
+// classic form post: works without client javascript, redirects back on success
+export async function action({ request, api }: ActionContext) {
+  const form = await request.formData();
+  const title = String(form.get("title") ?? "").trim();
+  const body = String(form.get("body") ?? "");
+
+  if (!title) return { error: "give the task a title" };
+
+  await fetch(`${api}/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, body }),
+  });
+  return redirect("/");
+}
+
+export default function Home({
+  tasks: initialTasks,
+  actionData,
+}: {
+  tasks: Task[];
+  actionData?: { error?: string };
+}) {
   const [tasks, setTasks] = useState(initialTasks);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-
-  const refresh = async () => {
-    const res = await fetch("/api/tasks");
-    setTasks((await res.json()).tasks);
-  };
-
-  const add = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
-    await fetch("/api/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, body }),
-    });
-    setTitle("");
-    setBody("");
-    refresh();
-  };
 
   const remove = async (id: number) => {
     await fetch(`/api/tasks/${id}`, { method: "DELETE" });
-    refresh();
+    const res = await fetch("/api/tasks");
+    setTasks((await res.json()).tasks);
   };
 
   return (
     <main>
       <h1>Tasks</h1>
-      <p>Server-rendered by Bun, data from the Go API, hydrated in the browser.</p>
-      <form onSubmit={add}>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Title"
-        />
-        <input
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Details (optional)"
-        />
+      <p>Server-rendered by Bun, data from the Go API, mutations through a borgo action.</p>
+      <form method="post">
+        <input name="title" placeholder="Title" />
+        <input name="body" placeholder="Details (optional)" />
         <button>Add</button>
       </form>
+      {actionData?.error && <p className="error">{actionData.error}</p>}
       <ul>
         {tasks.map((t) => (
           <li key={t.ID}>
@@ -67,7 +63,6 @@ export default function Home({ tasks: initialTasks }: { tasks: Task[] }) {
           </li>
         ))}
       </ul>
-      <a href="/about">About this project</a>
     </main>
   );
 }

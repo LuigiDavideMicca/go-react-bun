@@ -1,3 +1,5 @@
+// everything exported here is browser-safe: pages import from "borgo" and
+// end up in the client bundle. server-only entry points live in borgo/server.
 export { filePathToPattern, matchRoute, resolveHead } from "./router";
 export type {
   ActionContext,
@@ -7,5 +9,6 @@ export type {
   PageModule,
   Route,
 } from "./router";
-export { buildAssets, generateManifest } from "./build";
-export { serve } from "./server";
+
+export const redirect = (to: string, status = 303) =>
+  new Response(null, { status, headers: { Location: to } });
