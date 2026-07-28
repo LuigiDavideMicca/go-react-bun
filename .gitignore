@@ -6,3 +6,6 @@ dist
 **/.borgo/*
 !**/.borgo/api-types.d.ts
 **/public/assets
+test-results
+playwright-report
+*.exe
