@@ -5,11 +5,14 @@ export type ActionContext = { request: Request; params: Record<string, string>; 
 
 export type Head = { title?: string; meta?: Array<Record<string, string>> };
 
+export type HydrateMode = boolean | "visible";
+
 export type PageModule = {
   default: ComponentType<any>;
   loader?: (ctx: LoaderContext) => Promise<Record<string, unknown>>;
   action?: (ctx: ActionContext) => Promise<Response | Record<string, unknown>>;
   head?: Head | ((props: Record<string, unknown>) => Head);
+  hydrate?: HydrateMode;
 };
 
 export type LayoutModule = {
@@ -32,7 +35,7 @@ export function filePathToPattern(file: string): string {
   return "/" + cleaned.replace(/^\//, "");
 }
 
-export function matchRoute(pathname: string, routes: Route[]) {
+export function matchRoute<R extends { pattern: string }>(pathname: string, routes: R[]) {
   const path = pathname.replace(/\/+$/, "") || "/";
   for (const route of routes) {
     const params = matchPattern(route.pattern, path);

@@ -10,12 +10,13 @@ const command = process.argv[2];
 
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} kB`;
 
-async function assetLine(path: string) {
+async function assetLine(path: string, note = "") {
   const file = Bun.file(path);
   if (!(await file.exists())) return;
   const bytes = new Uint8Array(await file.arrayBuffer());
   const gzip = Bun.gzipSync(bytes).length;
-  console.log(`  ${c.sage("✓")} ${path.padEnd(28)} ${kb(bytes.length).padStart(9)} ${c.dim(`gzip: ${kb(gzip)}`)}`);
+  const label = note ? c.dim(note) : c.dim(`gzip: ${kb(gzip)}`);
+  console.log(`  ${c.sage("✓")} ${path.padEnd(40)} ${kb(bytes.length).padStart(9)} ${label}`);
 }
 
 switch (command) {
@@ -28,8 +29,11 @@ switch (command) {
     const t0 = performance.now();
     console.log(`\n  ${banner("build")}\n`);
 
-    await buildAssets();
-    await assetLine("public/assets/client.js");
+    const assets = await buildAssets();
+    const rel = (p: string) => p.replaceAll("\\", "/").replace(/^.*?(public\/assets\/)/, "$1");
+    for (const asset of assets.sort((a, b) => (a.kind === b.kind ? b.size - a.size : a.kind === "entry-point" ? -1 : 1))) {
+      await assetLine(rel(asset.path), asset.kind === "entry-point" ? "entry (runtime + react)" : "");
+    }
     await assetLine("public/assets/style.css");
 
     const bin = `dist/${goBinName()}`;

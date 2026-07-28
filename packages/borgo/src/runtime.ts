@@ -2,7 +2,7 @@
 // always comes from the app's own node_modules
 import type { createElement as CreateElement } from "react";
 import type { hydrateRoot as HydrateRoot, Root } from "react-dom/client";
-import { matchRoute, resolveHead, type Head, type Route } from "./router";
+import { matchRoute, resolveHead, type Head, type LayoutModule, type PageModule } from "./router";
 
 declare global {
   interface Window {
@@ -11,6 +11,17 @@ declare global {
     __BORGO_DEV__?: number;
   }
 }
+
+// the client-side page module: loader and action are stripped at build time
+export type ClientPageModule = Omit<PageModule, "loader" | "action">;
+
+export type ClientRoute = {
+  pattern: string;
+  file: string;
+  hydrate: true | "visible";
+  load: () => Promise<ClientPageModule>;
+  layouts: LayoutModule[];
+};
 
 function showOverlay(title: string, detail: string) {
   document.getElementById("borgo-overlay")?.remove();
@@ -47,16 +58,17 @@ function attachDevOverlay() {
 export type MountOptions = {
   createElement: typeof CreateElement;
   hydrateRoot: typeof HydrateRoot;
-  routes: Route[];
-  notFound: Route | null;
+  routes: ClientRoute[];
+  notFound: ClientRoute | null;
 };
 
 function compose(
   createElement: MountOptions["createElement"],
-  route: Route,
+  route: ClientRoute,
+  module: ClientPageModule,
   props: Record<string, unknown>,
 ) {
-  let element = createElement(route.module.default, props);
+  let element = createElement(module.default, props);
   for (let i = route.layouts.length - 1; i >= 0; i--) {
     element = createElement(route.layouts[i].default, null, element);
   }
@@ -71,10 +83,26 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   if (!initialRoute) return;
 
   const container = document.getElementById("root")!;
-  const root: Root = hydrateRoot(
-    container,
-    compose(createElement, initialRoute, window.__PROPS__ ?? {}),
-  );
+  let root: Root;
+
+  async function hydrate(route: ClientRoute) {
+    const module = await route.load();
+    root = hydrateRoot(container, compose(createElement, route, module, window.__PROPS__ ?? {}));
+    attachNavigation();
+  }
+
+  if (initialRoute.hydrate === "visible") {
+    const target = document.querySelector("[data-borgo-visible]") ?? container;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        observer.disconnect();
+        hydrate(initialRoute);
+      }
+    });
+    observer.observe(target);
+  } else {
+    hydrate(initialRoute);
+  }
 
   const defaultTitle = window.__BORGO_TITLE__ || document.title;
 
@@ -96,13 +124,18 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       return;
     }
 
+    let module: ClientPageModule;
     let props: Record<string, unknown>;
     try {
       const sep = to.search ? "&" : "?";
-      const res = await fetch(to.pathname + to.search + sep + "__borgo=props", {
-        headers: { Accept: "application/json" },
-      });
+      const [loaded, res] = await Promise.all([
+        matched.route.load(),
+        fetch(to.pathname + to.search + sep + "__borgo=props", {
+          headers: { Accept: "application/json" },
+        }),
+      ]);
       if (!res.ok) throw new Error(`props fetch failed: ${res.status}`);
+      module = loaded;
       props = (await res.json()).props ?? {};
     } catch {
       location.assign(to.href);
@@ -110,28 +143,30 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     }
 
     if (push) history.pushState(null, "", to.pathname + to.search + to.hash);
-    root.render(compose(createElement, matched.route, props));
-    applyHead(resolveHead(matched.route.module, props));
+    root.render(compose(createElement, matched.route, module, props));
+    applyHead(resolveHead(module, props));
     scrollTo(0, 0);
   }
 
-  document.addEventListener("click", (event) => {
-    if (event.defaultPrevented || event.button !== 0) return;
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  function attachNavigation() {
+    document.addEventListener("click", (event) => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 
-    const anchor = (event.target as Element).closest("a");
-    if (!anchor || anchor.hasAttribute("download")) return;
-    if (anchor.target && anchor.target !== "_self") return;
+      const anchor = (event.target as Element).closest("a");
+      if (!anchor || anchor.hasAttribute("download")) return;
+      if (anchor.target && anchor.target !== "_self") return;
 
-    const to = new URL(anchor.href, location.href);
-    if (to.origin !== location.origin) return;
-    if (to.pathname === location.pathname && to.search === location.search && to.hash) return;
+      const to = new URL(anchor.href, location.href);
+      if (to.origin !== location.origin) return;
+      if (to.pathname === location.pathname && to.search === location.search && to.hash) return;
 
-    event.preventDefault();
-    navigate(to, true);
-  });
+      event.preventDefault();
+      navigate(to, true);
+    });
 
-  window.addEventListener("popstate", () => {
-    navigate(new URL(location.href), false);
-  });
+    window.addEventListener("popstate", () => {
+      navigate(new URL(location.href), false);
+    });
+  }
 }
