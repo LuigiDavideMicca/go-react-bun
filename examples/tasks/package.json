@@ -8,7 +8,7 @@
     "start": "borgo start"
   },
   "dependencies": {
-    "borgo": "^0.1.0",
+    "borgo": "workspace:*",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
