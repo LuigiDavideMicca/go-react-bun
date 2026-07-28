@@ -50,6 +50,16 @@ code {
     padding: 0.35rem 1rem;
     font-size: 0.9rem;
   }
+
+  .credit {
+    margin-top: 2.5rem;
+    font-size: 0.85rem;
+    color: rgba($ink, 0.55);
+
+    a {
+      color: inherit;
+    }
+  }
 }
 
 .cards {

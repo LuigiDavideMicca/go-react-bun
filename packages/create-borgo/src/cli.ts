@@ -54,4 +54,6 @@ console.log(`
     bun run dev
 
   then open ${bold("http://localhost:3000")}
+
+  ${dim("borgo is built by Luigi Micca ·")} ${terracotta("https://luigimicca.com")}
 `);

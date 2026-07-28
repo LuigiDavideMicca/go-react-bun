@@ -37,3 +37,7 @@ If you are developing against a local borgo checkout, uncomment the `replace` di
 - `index.html` — HTML shell. `style.scss` — global styles.
 
 Ports: front server on `PORT` (default 3000), Go API on `API_PORT` (default 3501).
+
+---
+
+borgo is built by [Luigi Micca](https://luigimicca.com).

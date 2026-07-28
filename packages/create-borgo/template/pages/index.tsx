@@ -61,6 +61,11 @@ export default function Home({ actionData }: { actionData?: { greeting?: string 
           <p>Conventions, the roadmap and the whole framework source, small enough to read.</p>
         </a>
       </div>
+
+      <p className="credit">
+        Built with <a href="https://github.com/LuigiDavideMicca/borgo">borgo</a> · a framework by{" "}
+        <a href="https://luigimicca.com">Luigi Micca</a>
+      </p>
     </main>
   );
 }
