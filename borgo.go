@@ -41,6 +41,13 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+// JSON writes v as a JSON response with the given status code. Unlike
+// WriteJSON its type parameter is visible to static analysis: borgogen reads
+// T from every JSON call in a handler to type the route for TypeScript.
+func JSON[T any](w http.ResponseWriter, status int, v T) {
+	WriteJSON(w, status, v)
+}
+
 // Serve mounts every registered route and listens on API_PORT (default 3501).
 func Serve() {
 	mux := http.NewServeMux()

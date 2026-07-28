@@ -1,7 +1,15 @@
 import type { ComponentType, ReactNode } from "react";
+import type { ApiClient } from "./api";
 
-export type LoaderContext = { params: Record<string, string>; api: string };
-export type ActionContext = { request: Request; params: Record<string, string>; api: string };
+// api is the typed client for the go routes; apiUrl is the raw base url
+// (e.g. http://localhost:3501/api) for anything the client doesn't cover
+export type LoaderContext = { params: Record<string, string>; api: ApiClient; apiUrl: string };
+export type ActionContext = {
+  request: Request;
+  params: Record<string, string>;
+  api: ApiClient;
+  apiUrl: string;
+};
 
 export type Head = { title?: string; meta?: Array<Record<string, string>> };
 

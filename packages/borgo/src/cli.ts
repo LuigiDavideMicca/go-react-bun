@@ -4,7 +4,7 @@ import { buildAssets } from "./build";
 import { banner, c, fmtMs } from "./colors";
 import { dev } from "./dev";
 import { serve } from "./server";
-import { goBinName } from "./util";
+import { goBinName, runBorgogen } from "./util";
 
 const command = process.argv[2];
 
@@ -29,6 +29,7 @@ switch (command) {
     const t0 = performance.now();
     console.log(`\n  ${banner("build")}\n`);
 
+    await runBorgogen();
     const assets = await buildAssets();
     const rel = (p: string) => p.replaceAll("\\", "/").replace(/^.*?(public\/assets\/)/, "$1");
     for (const asset of assets.sort((a, b) => (a.kind === b.kind ? b.size - a.size : a.kind === "entry-point" ? -1 : 1))) {

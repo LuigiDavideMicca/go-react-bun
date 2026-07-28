@@ -1,6 +1,5 @@
-import type { Head, LoaderContext } from "borgo";
-
-type Task = { ID: number; CreatedAt: string; title: string; body: string };
+import { ApiError, type Head, type LoaderContext } from "borgo";
+import type { Task } from "../../.borgo/api-types";
 
 export const head = (props: Record<string, unknown>): Head => {
   const task = props.task as Task | null;
@@ -8,10 +7,13 @@ export const head = (props: Record<string, unknown>): Head => {
 };
 
 export async function loader({ params, api }: LoaderContext) {
-  const res = await fetch(`${api}/tasks/${params.id}`);
-  if (!res.ok) return { task: null };
-  const { task } = await res.json();
-  return { task };
+  try {
+    const { task } = await api("GET /api/tasks/{id}", { params: { id: params.id } });
+    return { task };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return { task: null };
+    throw error;
+  }
 }
 
 export default function TaskDetail({ task }: { task: Task | null }) {

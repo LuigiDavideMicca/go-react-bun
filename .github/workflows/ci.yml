@@ -33,6 +33,12 @@ jobs:
           go build ./...
           go vet ./...
 
+      - name: generated api types are fresh
+        working-directory: examples/tasks
+        run: |
+          go tool borgogen
+          git diff --exit-code -- .borgo/api-types.d.ts
+
       - name: typecheck
         run: bun run typecheck
 

@@ -17,6 +17,18 @@ type Task struct {
 	Body  string `json:"body"`
 }
 
+type TaskList struct {
+	Tasks []Task `json:"tasks"`
+}
+
+type TaskItem struct {
+	Task Task `json:"task"`
+}
+
+type Deleted struct {
+	Deleted bool `json:"deleted"`
+}
+
 func init() {
 	borgo.Handle("GET /api/tasks", listTasks)
 	borgo.Handle("POST /api/tasks", createTask)
@@ -30,7 +42,7 @@ func listTasks(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	borgo.WriteJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+	borgo.JSON(w, http.StatusOK, TaskList{Tasks: tasks})
 }
 
 func createTask(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +60,7 @@ func createTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	borgo.WriteJSON(w, http.StatusCreated, map[string]any{"task": task})
+	borgo.JSON(w, http.StatusCreated, TaskItem{Task: task})
 }
 
 func getTask(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +74,7 @@ func getTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	borgo.WriteJSON(w, http.StatusOK, map[string]any{"task": task})
+	borgo.JSON(w, http.StatusOK, TaskItem{Task: task})
 }
 
 func deleteTask(w http.ResponseWriter, r *http.Request) {
@@ -70,5 +82,5 @@ func deleteTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	borgo.WriteJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	borgo.JSON(w, http.StatusOK, Deleted{Deleted: true})
 }

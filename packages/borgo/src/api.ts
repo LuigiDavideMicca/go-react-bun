@@ -1,0 +1,65 @@
+// the typed api client handed to loaders and actions. borgogen augments the
+// ApiRoutes interface (declared in index.ts so `declare module "borgo"`
+// merges with it) with one entry per go route pattern.
+import type { ApiRoutes } from "./index";
+
+type Registered = keyof ApiRoutes & string;
+export type ApiRouteKey = [Registered] extends [never] ? string : Registered;
+export type ApiResponse<K extends string> = K extends keyof ApiRoutes ? ApiRoutes[K] : unknown;
+
+type ParamNames<S extends string> = S extends `${string}{${infer P}}${infer Rest}`
+  ? P | ParamNames<Rest>
+  : never;
+
+export type ApiOptions<K extends string> = {
+  query?: Record<string, string | number | boolean>;
+  body?: unknown;
+  headers?: Record<string, string>;
+} & ([ParamNames<K>] extends [never]
+  ? { params?: Record<string, string | number> }
+  : { params: Record<ParamNames<K>, string | number> });
+
+export type ApiClient = <K extends ApiRouteKey>(
+  route: K,
+  ...opts: [ParamNames<K>] extends [never] ? [ApiOptions<K>?] : [ApiOptions<K>]
+) => Promise<ApiResponse<K>>;
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public body: string,
+    route: string,
+  ) {
+    super(`api ${route} responded ${status}`);
+    this.name = "ApiError";
+  }
+}
+
+export function makeApiClient(base: string): ApiClient {
+  return (async (route: string, opts: ApiOptions<string> = {}) => {
+    const space = route.indexOf(" ");
+    const method = route.slice(0, space);
+    const path = route.slice(space + 1).replace(/\{(\w+)\}/g, (_, name) => {
+      const value = opts.params?.[name];
+      if (value === undefined) throw new Error(`api ${route}: missing param "${name}"`);
+      return encodeURIComponent(String(value));
+    });
+
+    const url = new URL(base + path);
+    for (const [key, value] of Object.entries(opts.query ?? {})) {
+      url.searchParams.set(key, String(value));
+    }
+
+    const res = await fetch(url, {
+      method,
+      headers: {
+        ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...opts.headers,
+      },
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
+    if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""), route);
+    if (res.status === 204) return undefined;
+    return res.json();
+  }) as ApiClient;
+}

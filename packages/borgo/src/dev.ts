@@ -2,7 +2,7 @@ import { watch } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
 import { c } from "./colors";
-import { goBinName } from "./util";
+import { goBinName, runBorgogen } from "./util";
 
 const serverEntry = fileURLToPath(new URL("serve-entry.ts", import.meta.url));
 const ignored = /^(node_modules|\.git|\.borgo|public|dist)([\\/]|$)/;
@@ -17,6 +17,7 @@ export async function dev() {
     goProc?.kill();
     await goProc?.exited;
 
+    await runBorgogen();
     const build = Bun.spawn(["go", "build", "-o", goBin, "."], {
       stdout: "inherit",
       stderr: "inherit",

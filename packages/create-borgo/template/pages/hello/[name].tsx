@@ -5,8 +5,8 @@ export const head = (props: Record<string, unknown>): Head => ({
 });
 
 export async function loader({ params, api }: LoaderContext) {
-  const res = await fetch(`${api}/hello/${params.name}`);
-  return { message: (await res.json()).message as string };
+  const { message } = await api("GET /api/hello/{name}", { params: { name: params.name } });
+  return { message };
 }
 
 export default function Hello({ message }: { message: string }) {

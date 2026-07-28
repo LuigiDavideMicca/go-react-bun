@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { makeApiClient } from "./api";
 import { buildAssets } from "./build";
 import { banner, c, fmtMs, statusColor } from "./colors";
 import { overlayHtml } from "./overlay";
@@ -61,6 +62,8 @@ export async function serve({ dev = false } = {}) {
 
   const port = Number(process.env.PORT || 3000);
   const api = `http://localhost:${process.env.API_PORT || 3501}`;
+  const apiClient = makeApiClient(api);
+  const apiUrl = `${api}/api`;
 
   async function renderPage(
     route: Route,
@@ -68,7 +71,9 @@ export async function serve({ dev = false } = {}) {
     status: number,
     extraProps?: Record<string, unknown>,
   ): Promise<Response> {
-    const loaded = route.module.loader ? await route.module.loader({ params, api: `${api}/api` }) : {};
+    const loaded = route.module.loader
+      ? await route.module.loader({ params, api: apiClient, apiUrl })
+      : {};
     const props = extraProps ? { ...loaded, ...extraProps } : loaded;
 
     const head = resolveHead(route.module, props);
@@ -142,7 +147,7 @@ export async function serve({ dev = false } = {}) {
         if (typeof action !== "function") {
           throw new Error(`the action export of pages/${target.route.file} must be a function`);
         }
-        const result = await action({ request: req, params: target.params, api: `${api}/api` });
+        const result = await action({ request: req, params: target.params, api: apiClient, apiUrl });
         if (result instanceof Response) return result;
         return renderPage(target.route, target.params, 200, { actionData: result });
       }
@@ -162,7 +167,7 @@ export async function serve({ dev = false } = {}) {
     if (wantsProps) {
       const { route, params } = matched;
       const props = route.module.loader
-        ? await route.module.loader({ params, api: `${api}/api` })
+        ? await route.module.loader({ params, api: apiClient, apiUrl })
         : {};
       return Response.json({ props });
     }

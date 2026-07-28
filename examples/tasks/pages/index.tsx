@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { redirect, type ActionContext, type LoaderContext } from "borgo";
-
-type Task = { ID: number; title: string; body: string };
+import type { Task } from "../.borgo/api-types";
 
 export const head = {
   title: "Tasks · borgo",
@@ -10,10 +9,9 @@ export const head = {
 
 // the sentinel header proves in ci that loader code never reaches the client bundle
 export async function loader({ api }: LoaderContext) {
-  const res = await fetch(`${api}/tasks`, {
+  const { tasks } = await api("GET /api/tasks", {
     headers: { "x-borgo-sentinel": "borgo-server-only-sentinel" },
   });
-  const { tasks } = await res.json();
   return { tasks };
 }
 
@@ -25,11 +23,7 @@ export async function action({ request, api }: ActionContext) {
 
   if (!title) return { error: "give the task a title" };
 
-  await fetch(`${api}/tasks`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, body }),
-  });
+  await api("POST /api/tasks", { body: { title, body } });
   return redirect("/");
 }
 
