@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ActionContext } from "borgo";
+import type { ActionContext } from "borgo-framework";
 
 export const head = {
   title: "borgo app",

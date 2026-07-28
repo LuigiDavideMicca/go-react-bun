@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { subscribe, type Channel } from "borgo";
+import { subscribe, type Channel } from "borgo-framework";
 
 export const head = { title: "Live · borgo tasks" };
 

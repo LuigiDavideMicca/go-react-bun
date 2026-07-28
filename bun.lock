@@ -11,7 +11,7 @@
     "examples/tasks": {
       "name": "tasks-example",
       "dependencies": {
-        "borgo": "^0.1.0",
+        "borgo-framework": "workspace:*",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
       },
@@ -23,8 +23,8 @@
       },
     },
     "packages/borgo": {
-      "name": "borgo",
-      "version": "0.1.0",
+      "name": "borgo-framework",
+      "version": "0.9.0",
       "bin": {
         "borgo": "./src/cli.ts",
       },
@@ -45,7 +45,7 @@
     },
     "packages/create-borgo": {
       "name": "create-borgo",
-      "version": "0.1.0",
+      "version": "0.9.0",
       "bin": {
         "create-borgo": "./src/cli.ts",
       },
@@ -91,7 +91,7 @@
 
     "@types/react-dom": ["@types/react-dom@19.2.3", "", { "peerDependencies": { "@types/react": "^19.2.0" } }, "sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ=="],
 
-    "borgo": ["borgo@workspace:packages/borgo"],
+    "borgo-framework": ["borgo-framework@workspace:packages/borgo"],
 
     "bun-types": ["bun-types@1.3.14", "", { "dependencies": { "@types/node": "*" } }, "sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ=="],
 

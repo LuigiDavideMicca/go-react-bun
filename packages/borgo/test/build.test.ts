@@ -58,7 +58,7 @@ describe("generateManifest", () => {
     await write("pages/index.tsx", "export default function Home() { return null; }");
     await write(
       "pages/about.tsx",
-      'import { Island } from "borgo";\nexport const hydrate = false;\nexport default function About() { return <Island name="Counter" />; }',
+      'import { Island } from "borgo-framework";\nexport const hydrate = false;\nexport default function About() { return <Island name="Counter" />; }',
     );
     await write(
       "pages/deep/lazy.tsx",

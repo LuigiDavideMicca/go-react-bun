@@ -26,7 +26,7 @@ export interface Deleted {
   deleted: boolean;
 }
 
-declare module "borgo" {
+declare module "borgo-framework" {
   interface ApiRoutes {
     "GET /api/events": { response: unknown };
     "GET /api/tasks": { response: TaskList };

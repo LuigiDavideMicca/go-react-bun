@@ -134,7 +134,7 @@ func run(root string) (err error) {
 		out.WriteString(def)
 		out.WriteString("\n")
 	}
-	out.WriteString("declare module \"borgo\" {\n  interface ApiRoutes {\n")
+	out.WriteString("declare module \"borgo-framework\" {\n  interface ApiRoutes {\n")
 	for _, p := range patterns {
 		fmt.Fprintf(&out, "    %q: %s;\n", p, entries[p])
 	}

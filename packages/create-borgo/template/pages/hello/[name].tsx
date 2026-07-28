@@ -1,4 +1,4 @@
-import type { Head, LoaderContext } from "borgo";
+import type { Head, LoaderContext } from "borgo-framework";
 
 export const head = (props: Record<string, unknown>): Head => ({
   title: `${props.message ?? "Hello"} · borgo app`,

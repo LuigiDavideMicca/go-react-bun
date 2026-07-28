@@ -1,5 +1,5 @@
 {
-  "name": "borgo",
+  "name": "borgo-framework",
   "version": "0.9.0",
   "description": "Mini Vercel-style fullstack framework: file-based React SSR on Bun, API routes in Go, one binary + one server, self-hosted.",
   "type": "module",

@@ -37,7 +37,7 @@ To poke at the full demo instead, clone this repo and run `bun install`, then `c
 A page may export a `loader` that runs on the server before rendering; its result becomes the component's props, both for SSR and after hydration. The `api` argument is a typed client over the Go routes — pattern, path params and response shape are all checked by `tsc`:
 
 ```tsx
-import type { LoaderContext } from "borgo";
+import type { LoaderContext } from "borgo-framework";
 import type { Task } from "../.borgo/api-types";
 
 export async function loader({ params, api }: LoaderContext) {
@@ -139,7 +139,7 @@ The default is eager hydration. Client-side navigation *to* a `"visible"` page h
 For finer granularity than the page, drop a component in `islands/` and mark it in any page:
 
 ```tsx
-import { Island } from "borgo";
+import { Island } from "borgo-framework";
 
 export const hydrate = false; // the page ships no page bundle at all
 
@@ -160,7 +160,7 @@ Pages render through `renderToReadableStream`, so a `<Suspense>` boundary that s
 A page may export an `action`; the front server runs it for `POST` requests to that page's URL — classic form posts work without any client JavaScript:
 
 ```tsx
-import { redirect, type ActionContext } from "borgo";
+import { redirect, type ActionContext } from "borgo-framework";
 
 export async function action({ request, params, api }: ActionContext) {
   const form = await request.formData();
@@ -181,7 +181,7 @@ Return a `Response` and it is sent as-is — `redirect(to, status = 303)` gives 
 The Bun front server is also a native WebSocket server. Browsers join named topics with the `subscribe` helper; every `{event, data}` published on a topic reaches every subscriber, including the publisher's other tabs:
 
 ```tsx
-import { subscribe } from "borgo";
+import { subscribe } from "borgo-framework";
 
 const channel = subscribe("live", (event, data) => { /* ... */ });
 channel.publish("message", "hello");   // browser -> everyone on the topic

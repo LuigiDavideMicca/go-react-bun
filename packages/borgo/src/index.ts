@@ -1,4 +1,4 @@
-// everything exported here is browser-safe: pages import from "borgo" and
+// everything exported here is browser-safe: pages import from "borgo-framework" and
 // end up in the client bundle. server-only entry points live in borgo/server.
 export { filePathToPattern, matchRoute, resolveHead } from "./router";
 export type {

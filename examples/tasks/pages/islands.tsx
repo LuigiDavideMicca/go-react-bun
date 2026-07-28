@@ -1,4 +1,4 @@
-import { Island } from "borgo";
+import { Island } from "borgo-framework";
 
 export const head = { title: "Islands · borgo tasks" };
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { redirect, type ActionContext, type LoaderContext } from "borgo";
+import { redirect, type ActionContext, type LoaderContext } from "borgo-framework";
 import type { Task } from "../.borgo/api-types";
 
 export const head = {

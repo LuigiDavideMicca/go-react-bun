@@ -52,7 +52,7 @@ jobs:
         working-directory: examples/tasks
         run: |
           printf '%s\n' \
-            'import type { ActionContext } from "borgo";' \
+            'import type { ActionContext } from "borgo-framework";' \
             'export async function action({ api }: ActionContext) {' \
             '  await api("POST /api/tasks", { body: { titel: "typo" } });' \
             '  return {};' \
@@ -96,7 +96,7 @@ jobs:
           cd smoke-app
           echo "replace github.com/LuigiDavideMicca/borgo => $GITHUB_WORKSPACE" >> go.mod
           tgz="$(ls ../borgo-*.tgz | head -1)"
-          sed -i "s#\"borgo\": \"[^\"]*\"#\"borgo\": \"file:$tgz\"#" package.json
+          sed -i "s#\"borgo-framework\": \"[^\"]*\"#\"borgo-framework\": \"file:$tgz\"#" package.json
           bun install
           go mod tidy
           bun run build

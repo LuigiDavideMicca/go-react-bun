@@ -1,5 +1,5 @@
 // the typed api client handed to loaders and actions. borgogen augments the
-// ApiRoutes interface (declared in index.ts so `declare module "borgo"`
+// ApiRoutes interface (declared in index.ts so `declare module "borgo-framework"`
 // merges with it) with one entry per go route pattern.
 import type { ApiRoutes } from "./index";
 

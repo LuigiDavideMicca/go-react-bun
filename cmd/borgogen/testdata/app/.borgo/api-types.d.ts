@@ -22,7 +22,7 @@ export interface Deleted {
   ok: boolean;
 }
 
-declare module "borgo" {
+declare module "borgo-framework" {
   interface ApiRoutes {
     "GET /api/manual": { response: string };
     "GET /api/widgets": { response: WidgetList };
