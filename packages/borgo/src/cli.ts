@@ -30,7 +30,7 @@ switch (command) {
     console.log(`\n  ${banner("build")}\n`);
 
     await runBorgogen();
-    const assets = await buildAssets();
+    const { assets } = await buildAssets();
     const rel = (p: string) => p.replaceAll("\\", "/").replace(/^.*?(public\/assets\/)/, "$1");
     for (const asset of assets.sort((a, b) => (a.kind === b.kind ? b.size - a.size : a.kind === "entry-point" ? -1 : 1))) {
       await assetLine(rel(asset.path), asset.kind === "entry-point" ? "entry (runtime + react)" : "");

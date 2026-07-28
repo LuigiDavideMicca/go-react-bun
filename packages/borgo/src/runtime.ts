@@ -113,12 +113,16 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
 
   const container = document.getElementById("root")!;
   let root: Root;
+  let currentRoute: ClientRoute | null = null;
 
   async function hydrate(route: ClientRoute) {
     const module = await route.load();
+    currentRoute = route;
     root = hydrateRoot(container, compose(createElement, route, module, window.__PROPS__ ?? {}));
     attachNavigation();
   }
+
+  if (window.__BORGO_DEV__) attachDevChannel();
 
   if (initialRoute.hydrate === "visible") {
     const target = document.querySelector("[data-borgo-visible]") ?? container;
@@ -221,6 +225,7 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       entryKey = newKey();
       history.pushState({ __borgo: entryKey }, "", to.pathname + to.search + to.hash);
     }
+    currentRoute = matched.route;
     root.render(compose(createElement, matched.route, module, props));
     applyHead(resolveHead(module, props));
     const key = entryKey;
@@ -307,5 +312,61 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       entryKey = history.state?.__borgo ?? newKey();
       navigate(new URL(location.href), false);
     });
+  }
+
+  // dev channel: fast refresh for the current page, css hot swap, full
+  // reload for anything not refreshable (layouts, the shell, go changes)
+  function attachDevChannel() {
+    // the stamp survives reloads, so a boot's welcome message is applied once
+    let lastStamp = Number(sessionStorage.getItem("borgo:devstamp") ?? 0);
+
+    async function applyUpdate(msg: { file: string; chunks: Record<string, string>; stamp: number }) {
+      const { file, chunks } = msg;
+      if (msg.stamp && msg.stamp <= lastStamp) return;
+      lastStamp = msg.stamp;
+      try {
+        sessionStorage.setItem("borgo:devstamp", String(msg.stamp));
+      } catch {}
+      if (!/\.tsx$/.test(file) || /(^|\/)_(layout|404|500)\.tsx$/.test(file)) {
+        return location.reload();
+      }
+      for (const route of [...routes, ...(notFound ? [notFound] : [])]) {
+        const chunk = chunks[route.file];
+        if (chunk) route.load = () => import(chunk);
+      }
+      if (!currentRoute || !root) return location.reload();
+      if (file.startsWith("pages/") && file !== "pages/" + currentRoute.file) return;
+      const chunk = chunks[currentRoute.file];
+      if (!chunk) return location.reload();
+      try {
+        const route = currentRoute;
+        const [module, res] = await Promise.all([
+          import(chunk) as Promise<ClientPageModule>,
+          fetchProps(new URL(location.href)),
+        ]);
+        if (!res.ok) throw new Error(`props fetch failed: ${res.status}`);
+        const props = (await res.json()).props ?? {};
+        root.render(compose(createElement, route, module, props));
+        applyHead(resolveHead(module, props));
+        (globalThis as { $RefreshRuntime$?: { performReactRefresh: () => void } }).$RefreshRuntime$?.performReactRefresh();
+      } catch {
+        location.reload();
+      }
+    }
+
+    const connect = () => {
+      const ws = new WebSocket(`ws://${location.host}/__borgo/dev`);
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "reload") location.reload();
+        else if (msg.type === "css") {
+          for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) {
+            link.href = link.href.split("?")[0] + "?t=" + Date.now();
+          }
+        } else if (msg.type === "js") applyUpdate(msg);
+      };
+      ws.onclose = () => setTimeout(connect, 300);
+    };
+    connect();
   }
 }

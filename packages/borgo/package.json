@@ -8,6 +8,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./refresh-runtime": "./src/refresh-runtime.ts",
     "./router": "./src/router.ts",
     "./runtime": "./src/runtime.ts",
     "./server": "./src/server.ts"
@@ -19,7 +20,8 @@
     "bun": ">=1.3.0"
   },
   "dependencies": {
-    "sass": "^1.93.0"
+    "sass": "^1.93.0",
+    "react-refresh": "^0.16.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",

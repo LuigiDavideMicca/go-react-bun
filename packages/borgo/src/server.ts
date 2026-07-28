@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { makeApiClient } from "./api";
-import { buildAssets } from "./build";
+import { buildAssets, compileCss } from "./build";
 import { banner, c, fmtMs, statusColor } from "./colors";
 import { registerIslands } from "./index";
 import { overlayHtml } from "./overlay";
@@ -47,8 +47,9 @@ function composeElement(route: Route, props: Record<string, unknown>) {
 
 export async function serve({ dev = false } = {}) {
   const started = performance.now();
+  let chunkMap: Record<string, string> = {};
   if (dev || !existsSync(".borgo/routes.gen.tsx") || !existsSync("public/assets/client.js")) {
-    await buildAssets(dev);
+    ({ chunkMap } = await buildAssets(dev));
   }
 
   const manifest = pathToFileURL(join(process.cwd(), ".borgo/routes.gen.tsx")).href;
@@ -100,11 +101,19 @@ export async function serve({ dev = false } = {}) {
     if (route.module.hydrate === false) {
       // the page opted out of hydration: ship no props and no client script.
       // pages with islands get the islands entry, which hydrates only those.
+      // in dev a tiny inline client keeps the page live: css swaps in place,
+      // anything else is a full reload.
       const islandsTag = route.islands
         ? '<script type="module" src="/assets/islands-client.js"></script>'
         : "";
+      const devTag = dev
+        ? "<script>(()=>{const c=()=>{const w=new WebSocket(`ws://${location.host}/__borgo/dev`);" +
+          'w.onmessage=(e)=>{const m=JSON.parse(e.data);if(m.type==="css"){for(const l of document.querySelectorAll(\'link[rel="stylesheet"]\'))l.href=l.href.split("?")[0]+"?t="+Date.now();}' +
+          'else if(!m.stamp||Number(sessionStorage.getItem("borgo:devstamp")||0)<m.stamp){if(m.stamp)sessionStorage.setItem("borgo:devstamp",String(m.stamp));location.reload();}};' +
+          "w.onclose=()=>setTimeout(c,300);};c();})()</script>"
+        : "";
       end = shellEnd
-        .replace("<!--props-->", "")
+        .replace("<!--props-->", devTag)
         .replace(
           /[ \t]*<script type="module" src="\/assets\/client\.js"><\/script>\r?\n?/,
           islandsTag,
@@ -195,12 +204,48 @@ export async function serve({ dev = false } = {}) {
     console.log(`  ${method} ${path.padEnd(24)} ${statusColor(status)(String(status))} ${c.dim(fmtMs(ms))}`);
   }
 
-  Bun.serve({
+  // dev channel: browsers connect over ws; a fresh boot after a code change
+  // greets them with the changed file and the new page -> chunk map
+  const devSockets = new Set<import("bun").ServerWebSocket<unknown>>();
+  const bootStamp = Date.now();
+  const changed = process.env.BORGO_CHANGED;
+  const broadcast = (msg: Record<string, unknown>) => {
+    const data = JSON.stringify(msg);
+    for (const ws of devSockets) ws.send(data);
+  };
+
+  const server = Bun.serve({
     port,
     // long-lived proxied streams (sse) must not be killed by the default 10s
     idleTimeout: 0,
+    websocket: {
+      open(ws) {
+        devSockets.add(ws);
+        if (changed) {
+          ws.send(JSON.stringify({ type: "js", file: changed, chunks: chunkMap, stamp: bootStamp }));
+        }
+      },
+      close(ws) {
+        devSockets.delete(ws);
+      },
+      message() {},
+    },
     async fetch(req) {
       const t0 = performance.now();
+      const url = new URL(req.url);
+      if (dev && url.pathname.startsWith("/__borgo/dev")) {
+        if (url.pathname === "/__borgo/dev" && server.upgrade(req)) return undefined as never;
+        if (req.method === "POST" && url.pathname === "/__borgo/dev/css") {
+          await compileCss(true);
+          broadcast({ type: "css" });
+          return new Response(null, { status: 204 });
+        }
+        if (req.method === "POST" && url.pathname === "/__borgo/dev/reload") {
+          broadcast({ type: "reload" });
+          return new Response(null, { status: 204 });
+        }
+        return new Response("not found", { status: 404 });
+      }
       let response: Response;
       try {
         response = await handle(req);

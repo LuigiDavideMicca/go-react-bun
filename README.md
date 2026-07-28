@@ -174,6 +174,16 @@ Return a `Response` and it is sent as-is — `redirect(to, status = 303)` gives 
 
 `borgo.SSE(w, r)` turns any handler into an event stream; `borgo.NewSSEHub()` adds broadcast — `hub.Publish(event, data)` from anywhere, `hub.ServeHTTP` as the route handler. The front server proxies streams without buffering, so an `EventSource` in the browser just works. All stdlib; WebSockets are deliberately left out (Go's standard library has no server implementation, and a dependency is not worth it — SSE covers live updates). See the tasks example: create a task in one tab, watch it appear in another.
 
+### Fast refresh in dev
+
+`borgo dev` keeps the browser hot over a WebSocket channel (`/__borgo/dev`):
+
+- **Component and page edits** apply through [react-refresh](https://www.npmjs.com/package/react-refresh) — the current route's new chunk is imported, loader props are refetched, and component state (hooks) survives the edit.
+- **CSS edits** recompile and swap the stylesheet in place, no reload, no state loss.
+- **Everything else falls back to a full reload**: layouts and error pages (they live in the entry chunk), `index.html`, and any Go change (the API binary is rebuilt and restarted first). Non-hydrated pages carry a tiny dev-only client that reloads on change and hot-swaps CSS.
+
+The mechanics, honestly: an edit restarts the front server for a clean server module graph; the browser never reloads — it reconnects and hot-applies the change from the boot greeting. Component registration is name-based (top-level capitalized functions), without the full babel transform — editing a component's *hooks* may keep stale state; save again or reload if a hook edit looks off.
+
 ### Error pages
 
 - `pages/_404.tsx` renders unmatched routes with status 404.
@@ -206,7 +216,8 @@ Not production-grade, yet, and honest about it. The old caveats are gone — rou
 - The typed bridge is static analysis: helpers in the `api` package are followed and `//borgo:type` covers custom marshalers, but responses written through `json.NewEncoder` or helpers in other packages still type as `unknown`.
 - Islands hydrate independently but their code is bundled eagerly with the entry: `client="visible"` defers work, not bytes.
 - Loader data on client navigations arrives as one JSON payload fetched in parallel with the route chunk — it is not streamed.
-- One process each side, no HMR (rebuilds are full page reloads), sessions/auth/caching are yours to bring, and the codegen tool (not the runtime) depends on `golang.org/x/tools`.
+- Fast refresh is registration-based, not the full babel transform: component edits keep state, hook-signature edits may need a reload.
+- One process each side, sessions/auth/caching are yours to bring, and the codegen tool (not the runtime) depends on `golang.org/x/tools`.
 - No WebSockets — SSE only, by choice.
 
 ## Roadmap

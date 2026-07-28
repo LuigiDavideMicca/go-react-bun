@@ -9,9 +9,15 @@ const ignored = /^(node_modules|\.git|\.borgo|public|dist)([\\/]|$)|borgo\.gen\.
 
 export async function dev() {
   const goBin = `.borgo/${goBinName()}`;
+  const frontPort = process.env.PORT || "3000";
   let goProc: Subprocess | null = null;
   let frontProc: Subprocess | null = null;
   let reload = false;
+
+  // the front server owns the dev websocket; these endpoints let this
+  // process trigger a css hot swap or a full reload in connected browsers
+  const notifyFront = (path: string) =>
+    fetch(`http://localhost:${frontPort}/__borgo/dev/${path}`, { method: "POST" }).catch(() => {});
 
   const startGo = async () => {
     goProc?.kill();
@@ -31,15 +37,26 @@ export async function dev() {
       stderr: "inherit",
       env: reload ? { ...process.env, BORGO_RELOAD: "1" } : process.env,
     });
+    if (reload) {
+      await Bun.sleep(200);
+      await notifyFront("reload");
+    }
   };
 
-  const startFront = async () => {
+  // a code change restarts the front server for a clean module graph; the
+  // browser keeps its state and hot-applies the change when it reconnects
+  const startFront = async (changed?: string) => {
     frontProc?.kill();
     await frontProc?.exited;
     frontProc = Bun.spawn(["bun", serverEntry], {
       stdout: "inherit",
       stderr: "inherit",
-      env: { ...process.env, DEV: "1", ...(reload ? { BORGO_RELOAD: "1" } : {}) },
+      env: {
+        ...process.env,
+        DEV: "1",
+        ...(reload ? { BORGO_RELOAD: "1" } : {}),
+        ...(changed ? { BORGO_CHANGED: changed } : {}),
+      },
     });
   };
 
@@ -49,13 +66,15 @@ export async function dev() {
 
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   let queue = Promise.resolve();
-  const schedule = (file: string, side: string, fn: () => Promise<void>) => {
+  const schedule = (file: string, side: string, fn: () => Promise<void>, log = true) => {
     const timer = timers.get(side);
     if (timer) clearTimeout(timer);
     timers.set(
       side,
       setTimeout(() => {
-        console.log(`  ${c.terracotta("↻")} ${file.replaceAll("\\", "/")} ${c.dim(`changed, rebuilding ${side}`)}`);
+        if (log) {
+          console.log(`  ${c.terracotta("↻")} ${file.replaceAll("\\", "/")} ${c.dim(`changed, rebuilding ${side}`)}`);
+        }
         queue = queue.then(fn);
       }, 100),
     );
@@ -63,8 +82,13 @@ export async function dev() {
 
   watch(".", { recursive: true }, (_, file) => {
     if (!file || ignored.test(file)) return;
+    const normalized = file.replaceAll("\\", "/");
     if (file.endsWith(".go")) schedule(file, "api", startGo);
-    else if (/\.(tsx?|scss|html)$/.test(file)) schedule(file, "app", startFront);
+    else if (file.endsWith(".scss")) {
+      schedule(file, "css", async () => void (await notifyFront("css")));
+    } else if (/\.(tsx?|html)$/.test(file)) {
+      schedule(file, "app", () => startFront(normalized));
+    }
   });
 
   process.on("SIGINT", () => {
