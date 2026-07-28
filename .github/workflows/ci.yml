@@ -37,7 +37,7 @@ jobs:
         working-directory: examples/tasks
         run: |
           go tool borgogen
-          git diff --exit-code -- .borgo/api-types.d.ts
+          git diff --exit-code -- .borgo/api-types.d.ts api/borgo.gen.go
 
       - name: typecheck
         run: bun run typecheck

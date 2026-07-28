@@ -29,14 +29,8 @@ type Deleted struct {
 	Deleted bool `json:"deleted"`
 }
 
-func init() {
-	borgo.Handle("GET /api/tasks", listTasks)
-	borgo.Handle("POST /api/tasks", createTask)
-	borgo.Handle("GET /api/tasks/{id}", getTask)
-	borgo.Handle("DELETE /api/tasks/{id}", deleteTask)
-}
-
-func listTasks(w http.ResponseWriter, r *http.Request) {
+//borgo:route GET /api/tasks
+func ListTasks(w http.ResponseWriter, r *http.Request) {
 	var tasks []Task
 	if err := db.DB.Order("created_at desc").Find(&tasks).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -45,7 +39,8 @@ func listTasks(w http.ResponseWriter, r *http.Request) {
 	borgo.JSON(w, http.StatusOK, TaskList{Tasks: tasks})
 }
 
-func createTask(w http.ResponseWriter, r *http.Request) {
+//borgo:route POST /api/tasks
+func CreateTask(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Title string
 		Body  string
@@ -63,7 +58,8 @@ func createTask(w http.ResponseWriter, r *http.Request) {
 	borgo.JSON(w, http.StatusCreated, TaskItem{Task: task})
 }
 
-func getTask(w http.ResponseWriter, r *http.Request) {
+//borgo:route GET /api/tasks/{id}
+func GetTask(w http.ResponseWriter, r *http.Request) {
 	var task Task
 	err := db.DB.First(&task, "id = ?", r.PathValue("id")).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -77,7 +73,8 @@ func getTask(w http.ResponseWriter, r *http.Request) {
 	borgo.JSON(w, http.StatusOK, TaskItem{Task: task})
 }
 
-func deleteTask(w http.ResponseWriter, r *http.Request) {
+//borgo:route DELETE /api/tasks/{id}
+func DeleteTask(w http.ResponseWriter, r *http.Request) {
 	if err := db.DB.Delete(&Task{}, "id = ?", r.PathValue("id")).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

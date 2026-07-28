@@ -5,7 +5,7 @@ import { c } from "./colors";
 import { goBinName, runBorgogen } from "./util";
 
 const serverEntry = fileURLToPath(new URL("serve-entry.ts", import.meta.url));
-const ignored = /^(node_modules|\.git|\.borgo|public|dist)([\\/]|$)/;
+const ignored = /^(node_modules|\.git|\.borgo|public|dist)([\\/]|$)|borgo\.gen\.go$/;
 
 export async function dev() {
   const goBin = `.borgo/${goBinName()}`;
