@@ -146,6 +146,52 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     }
   }
 
+  // props prefetched on hover are kept briefly and consumed by the next
+  // navigation; the route chunk import is idempotent and needs no cache
+  const propsTtl = 10_000;
+  const propsCache = new Map<string, { promise: Promise<Response>; time: number }>();
+
+  function fetchProps(to: URL) {
+    const sep = to.search ? "&" : "?";
+    return fetch(to.pathname + to.search + sep + "__borgo=props", {
+      headers: { Accept: "application/json" },
+    });
+  }
+
+  function prefetch(to: URL, withProps: boolean) {
+    const matched = matchRoute(to.pathname, routes);
+    if (!matched) return;
+    matched.route.load();
+    if (!withProps) return;
+    const cacheKey = to.pathname + to.search;
+    const hit = propsCache.get(cacheKey);
+    if (hit && performance.now() - hit.time < propsTtl) return;
+    const promise = fetchProps(to);
+    promise.catch(() => {});
+    propsCache.set(cacheKey, { promise, time: performance.now() });
+  }
+
+  // scroll restoration: every history entry gets a key, positions are saved
+  // to sessionStorage as you scroll and restored on back/forward
+  const newKey = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  let entryKey: string = history.state?.__borgo ?? newKey();
+
+  function saveScroll() {
+    try {
+      sessionStorage.setItem(`borgo:scroll:${entryKey}`, `${scrollX},${scrollY}`);
+    } catch {}
+  }
+
+  function restoreScroll(key: string) {
+    const saved = sessionStorage.getItem(`borgo:scroll:${key}`);
+    if (!saved) return scrollTo(0, 0);
+    const [x, y] = saved.split(",").map(Number);
+    scrollTo(x, y);
+  }
+
+  const afterRender = (fn: () => void) =>
+    requestAnimationFrame(() => requestAnimationFrame(fn));
+
   async function navigate(to: URL, push: boolean) {
     const matched = matchRoute(to.pathname, routes);
     if (!matched) {
@@ -156,13 +202,12 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     let module: ClientPageModule;
     let props: Record<string, unknown>;
     try {
-      const sep = to.search ? "&" : "?";
-      const [loaded, res] = await Promise.all([
-        matched.route.load(),
-        fetch(to.pathname + to.search + sep + "__borgo=props", {
-          headers: { Accept: "application/json" },
-        }),
-      ]);
+      const cacheKey = to.pathname + to.search;
+      const cached = propsCache.get(cacheKey);
+      propsCache.delete(cacheKey);
+      const propsPromise =
+        cached && performance.now() - cached.time < propsTtl ? cached.promise : fetchProps(to);
+      const [loaded, res] = await Promise.all([matched.route.load(), propsPromise]);
       if (!res.ok) throw new Error(`props fetch failed: ${res.status}`);
       module = loaded;
       props = (await res.json()).props ?? {};
@@ -171,23 +216,87 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       return;
     }
 
-    if (push) history.pushState(null, "", to.pathname + to.search + to.hash);
+    if (push) {
+      saveScroll();
+      entryKey = newKey();
+      history.pushState({ __borgo: entryKey }, "", to.pathname + to.search + to.hash);
+    }
     root.render(compose(createElement, matched.route, module, props));
     applyHead(resolveHead(module, props));
-    scrollTo(0, 0);
+    const key = entryKey;
+    afterRender(() => {
+      if (push) {
+        const target = to.hash && document.getElementById(to.hash.slice(1));
+        target ? target.scrollIntoView() : scrollTo(0, 0);
+      } else {
+        restoreScroll(key);
+      }
+      observeLinks();
+    });
+  }
+
+  // same checks as the click handler: internal, same-origin, no download
+  function linkTarget(anchor: HTMLAnchorElement | null): URL | null {
+    if (!anchor || anchor.hasAttribute("download")) return null;
+    if (anchor.target && anchor.target !== "_self") return null;
+    const to = new URL(anchor.href, location.href);
+    if (to.origin !== location.origin) return null;
+    return to;
+  }
+
+  // links scrolled into view get their route chunk prefetched
+  const seenLinks = new WeakSet<Element>();
+  const linkObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      linkObserver.unobserve(entry.target);
+      const to = linkTarget(entry.target as HTMLAnchorElement);
+      if (to) prefetch(to, false);
+    }
+  });
+
+  function observeLinks() {
+    for (const anchor of document.querySelectorAll("a[href]")) {
+      if (seenLinks.has(anchor)) continue;
+      seenLinks.add(anchor);
+      linkObserver.observe(anchor);
+    }
   }
 
   function attachNavigation() {
+    history.scrollRestoration = "manual";
+    if (!history.state?.__borgo) {
+      history.replaceState({ ...history.state, __borgo: entryKey }, "");
+    }
+    let scrollTimer: ReturnType<typeof setTimeout> | undefined;
+    addEventListener(
+      "scroll",
+      () => {
+        clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(saveScroll, 100);
+      },
+      { passive: true },
+    );
+
+    // hover or focus prefetches the chunk and the loader props
+    const onIntent = (event: Event) => {
+      const anchor = (event.target as Element).closest?.("a");
+      const to = anchor && linkTarget(anchor);
+      if (to && to.pathname !== location.pathname) prefetch(to, true);
+    };
+    document.addEventListener("mouseover", onIntent);
+    document.addEventListener("focusin", onIntent);
+    document.addEventListener("touchstart", onIntent, { passive: true });
+
+    observeLinks();
+
     document.addEventListener("click", (event) => {
       if (event.defaultPrevented || event.button !== 0) return;
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 
       const anchor = (event.target as Element).closest("a");
-      if (!anchor || anchor.hasAttribute("download")) return;
-      if (anchor.target && anchor.target !== "_self") return;
-
-      const to = new URL(anchor.href, location.href);
-      if (to.origin !== location.origin) return;
+      const to = linkTarget(anchor);
+      if (!to) return;
       if (to.pathname === location.pathname && to.search === location.search && to.hash) return;
 
       event.preventDefault();
@@ -195,6 +304,7 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     });
 
     window.addEventListener("popstate", () => {
+      entryKey = history.state?.__borgo ?? newKey();
       navigate(new URL(location.href), false);
     });
   }

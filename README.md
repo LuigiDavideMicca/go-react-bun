@@ -117,7 +117,11 @@ During SSR the title replaces the shell's `<title>` and metas are injected into 
 
 Plain `<a>` tags become client-side transitions — no `<Link>` component. The runtime intercepts same-origin left clicks (no modifier keys, no `target`, no `download`), fetches the destination's route chunk and its loader props as JSON (`?__borgo=props`) in parallel, swaps the composed tree in place and updates head, history and scroll. Anything it cannot handle — external links, unknown routes, a failed fetch — falls back to a normal full navigation.
 
-The build emits one lazy chunk per route; React, the runtime and layouts live in the shared entry chunk, loaded once. A page's code is downloaded the first time you visit or navigate to it.
+The build emits one lazy chunk per route; React, the runtime and layouts live in the shared entry chunk, loaded once.
+
+**Prefetching.** Links scrolled into the viewport get their route chunk prefetched; hovering (or focusing, or touching) a link additionally prefetches its loader props, kept for ten seconds and consumed by the navigation — so a hover-then-click usually renders with zero waiting. By design, props arrive as one JSON payload fetched in parallel with the chunk; loader data is not streamed on client navigations.
+
+**Scroll restoration.** Every history entry gets a key; scroll positions are saved per entry (in `sessionStorage`, surviving reloads) and restored on back/forward. New navigations scroll to top, or to the `#fragment` target if the URL has one.
 
 ### Partial hydration
 
@@ -201,7 +205,7 @@ Not production-grade, yet, and honest about it. The old caveats are gone — rou
 
 - The typed bridge is static analysis: helpers in the `api` package are followed and `//borgo:type` covers custom marshalers, but responses written through `json.NewEncoder` or helpers in other packages still type as `unknown`.
 - Islands hydrate independently but their code is bundled eagerly with the entry: `client="visible"` defers work, not bytes.
-- No streaming of loader data on client-side navigations, no prefetching route chunks on hover, no scroll restoration on back/forward beyond the browser default.
+- Loader data on client navigations arrives as one JSON payload fetched in parallel with the route chunk — it is not streamed.
 - One process each side, no HMR (rebuilds are full page reloads), sessions/auth/caching are yours to bring, and the codegen tool (not the runtime) depends on `golang.org/x/tools`.
 - No WebSockets — SSE only, by choice.
 
