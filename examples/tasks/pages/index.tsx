@@ -8,8 +8,11 @@ export const head = {
   meta: [{ name: "description", content: "tasks demo app for the borgo framework" }],
 };
 
+// the sentinel header proves in ci that loader code never reaches the client bundle
 export async function loader({ api }: LoaderContext) {
-  const res = await fetch(`${api}/tasks`);
+  const res = await fetch(`${api}/tasks`, {
+    headers: { "x-borgo-sentinel": "borgo-server-only-sentinel" },
+  });
   const { tasks } = await res.json();
   return { tasks };
 }

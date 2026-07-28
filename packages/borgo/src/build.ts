@@ -1,5 +1,6 @@
 import { Glob } from "bun";
 import { existsSync, readdirSync, rmSync } from "node:fs";
+import { join, sep } from "node:path";
 import { filePathToPattern } from "./router";
 
 const outDir = "public/assets";
@@ -146,13 +147,39 @@ export async function buildAssets(dev = false): Promise<Asset[]> {
     }
   }
 
+  const define = { "process.env.NODE_ENV": JSON.stringify(dev ? "development" : "production") };
   const result = await Bun.build({
     entrypoints: [`${genDir}/client.tsx`],
     outdir: outDir,
     splitting: true,
     minify: !dev,
     naming: { entry: "[name].[ext]", chunk: "[name]-[hash].[ext]" },
-    define: { "process.env.NODE_ENV": JSON.stringify(dev ? "development" : "production") },
+    define,
+    plugins: [stripServerExports(define)],
   });
   return result.outputs.map((o) => ({ path: o.path, kind: o.kind, size: o.size }));
+}
+
+// pages are rewritten for the client build with their loader and action
+// eliminated, so server-only code and its imports never reach the browser
+function stripServerExports(define: Record<string, string>): import("bun").BunPlugin {
+  const pagesDir = join(process.cwd(), "pages") + sep;
+  const transpiler = new Bun.Transpiler({
+    loader: "tsx",
+    exports: { eliminate: ["loader", "action"] },
+    trimUnusedImports: true,
+    treeShaking: true,
+    autoImportJSX: true,
+    define,
+  });
+  return {
+    name: "borgo-strip-server-exports",
+    setup(build) {
+      build.onLoad({ filter: /[\\/]pages[\\/].*\.tsx$/ }, async (args) => {
+        if (!args.path.startsWith(pagesDir)) return undefined;
+        const source = await Bun.file(args.path).text();
+        return { contents: transpiler.transformSync(source), loader: "js" };
+      });
+    },
+  };
 }

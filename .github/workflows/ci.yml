@@ -40,6 +40,12 @@ jobs:
         working-directory: examples/tasks
         run: bun run build
 
+      - name: server-only code stays out of client assets
+        working-directory: examples/tasks
+        run: |
+          grep -q "borgo-server-only-sentinel" pages/index.tsx
+          ! grep -rq "borgo-server-only-sentinel" public/assets
+
       - name: smoke test example app
         working-directory: examples/tasks
         run: |
