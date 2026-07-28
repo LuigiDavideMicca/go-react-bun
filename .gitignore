@@ -1,2 +1,8 @@
-/fe/node_modules
+node_modules
 .DS_Store
+.env
+*.db
+/dist
+/.dev
+/public/assets
+/framework/routes.gen.tsx
