@@ -47,14 +47,18 @@ export async function dev() {
   await startFront();
   reload = true;
 
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
   let queue = Promise.resolve();
   const schedule = (file: string, side: string, fn: () => Promise<void>) => {
+    const timer = timers.get(side);
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      console.log(`  ${c.terracotta("↻")} ${file.replaceAll("\\", "/")} ${c.dim(`changed, rebuilding ${side}`)}`);
-      queue = queue.then(fn);
-    }, 100);
+    timers.set(
+      side,
+      setTimeout(() => {
+        console.log(`  ${c.terracotta("↻")} ${file.replaceAll("\\", "/")} ${c.dim(`changed, rebuilding ${side}`)}`);
+        queue = queue.then(fn);
+      }, 100),
+    );
   };
 
   watch(".", { recursive: true }, (_, file) => {
