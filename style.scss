@@ -1,0 +1,25 @@
+main {
+  max-width: 40rem;
+  margin: 3rem auto;
+  padding: 0 1rem;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+
+  form {
+    display: flex;
+    gap: 0.5rem;
+    margin: 1rem 0;
+  }
+
+  ul {
+    padding: 0;
+    list-style: none;
+
+    li {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid #ddd;
+    }
+  }
+}
