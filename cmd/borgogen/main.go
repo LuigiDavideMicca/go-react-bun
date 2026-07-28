@@ -43,44 +43,64 @@ type route struct {
 	handler *types.Func
 }
 
+type genError struct{ msg string }
+
 func fail(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "borgogen: "+format+"\n", args...)
-	os.Exit(1)
+	panic(genError{fmt.Sprintf(format, args...)})
 }
 
 func main() {
-	if _, err := os.Stat("api"); err != nil {
+	if err := run("."); err != nil {
+		fmt.Fprintln(os.Stderr, "borgogen: "+err.Error())
+		os.Exit(1)
+	}
+}
+
+func run(root string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			ge, ok := r.(genError)
+			if !ok {
+				panic(r)
+			}
+			err = fmt.Errorf("%s", ge.msg)
+		}
+	}()
+
+	if _, statErr := os.Stat(filepath.Join(root, "api")); statErr != nil {
 		fail("no api/ directory here; run borgogen from the app root")
 	}
 
 	// the previous generated mounting may reference deleted handlers; type
 	// check against an empty stub of it instead
-	genGoAbs, _ := filepath.Abs(genGoFile)
+	genGoAbs, _ := filepath.Abs(filepath.Join(root, genGoFile))
 	cfg := &packages.Config{
+		Dir: root,
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
 			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedDeps | packages.NeedImports,
-		Overlay: map[string][]byte{genGoAbs: []byte("package " + apiPackageName() + "\n")},
+		Overlay: map[string][]byte{genGoAbs: []byte("package " + apiPackageName(root) + "\n")},
 	}
-	pkgs, err := packages.Load(cfg, "./api")
-	if err != nil {
-		fail("loading api package: %v", err)
+	pkgs, loadErr := packages.Load(cfg, "./api")
+	if loadErr != nil {
+		fail("loading api package: %v", loadErr)
 	}
 	if len(pkgs) != 1 {
 		fail("expected one package in api/, got %d", len(pkgs))
 	}
 	pkg := pkgs[0]
-	for _, e := range pkg.Errors {
-		fmt.Fprintln(os.Stderr, "borgogen: "+e.Error())
-	}
 	if len(pkg.Errors) > 0 {
-		os.Exit(1)
+		msgs := make([]string, 0, len(pkg.Errors))
+		for _, e := range pkg.Errors {
+			msgs = append(msgs, e.Error())
+		}
+		fail("%s", strings.Join(msgs, "\n"))
 	}
 
 	routes := collectRoutes(pkg)
 	decls := funcDecls(pkg)
 	directives := collectDirectives(pkg, decls, routes)
 	routes = append(routes, directives...)
-	writeMounting(pkg.Name, directives, decls)
+	writeMounting(root, pkg.Name, directives, decls)
 
 	sort.Slice(routes, func(i, j int) bool {
 		a, b := strings.SplitN(routes[i].pattern, " ", 2), strings.SplitN(routes[j].pattern, " ", 2)
@@ -120,17 +140,18 @@ func main() {
 	}
 	out.WriteString("  }\n}\n\nexport {};\n")
 
-	if err := os.MkdirAll(".borgo", 0o755); err != nil {
-		fail("%v", err)
+	if mkErr := os.MkdirAll(filepath.Join(root, ".borgo"), 0o755); mkErr != nil {
+		fail("%v", mkErr)
 	}
-	writeIfChanged(filepath.Join(".borgo", "api-types.d.ts"), out.String())
+	writeIfChanged(filepath.Join(root, ".borgo", "api-types.d.ts"), out.String())
 	fmt.Printf("borgogen: %d routes -> .borgo/api-types.d.ts\n", len(patterns))
+	return nil
 }
 
 // apiPackageName reads the package clause of the first real api/*.go file so
 // the overlay stub and the generated mounting use the right name.
-func apiPackageName() string {
-	entries, err := os.ReadDir("api")
+func apiPackageName(root string) string {
+	entries, err := os.ReadDir(filepath.Join(root, "api"))
 	if err != nil {
 		fail("%v", err)
 	}
@@ -139,7 +160,7 @@ func apiPackageName() string {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || e.Name() == "borgo.gen.go" {
 			continue
 		}
-		f, err := parser.ParseFile(fset, filepath.Join("api", e.Name()), nil, parser.PackageClauseOnly)
+		f, err := parser.ParseFile(fset, filepath.Join(root, "api", e.Name()), nil, parser.PackageClauseOnly)
 		if err == nil {
 			return f.Name.Name
 		}
@@ -197,9 +218,9 @@ func collectDirectives(pkg *packages.Package, decls map[*types.Func]*ast.FuncDec
 
 // writeMounting generates api/borgo.gen.go registering every directive
 // handler, or removes it when no directives exist.
-func writeMounting(pkgName string, directives []route, decls map[*types.Func]*ast.FuncDecl) {
+func writeMounting(root, pkgName string, directives []route, decls map[*types.Func]*ast.FuncDecl) {
 	if len(directives) == 0 {
-		os.Remove(genGoFile)
+		os.Remove(filepath.Join(root, genGoFile))
 		return
 	}
 	sorted := append([]route(nil), directives...)
@@ -212,7 +233,7 @@ func writeMounting(pkgName string, directives []route, decls map[*types.Func]*as
 		fmt.Fprintf(&out, "\tborgo.Handle(%q, %s)\n", r.pattern, r.handler.Name())
 	}
 	out.WriteString("}\n")
-	writeIfChanged(genGoFile, out.String())
+	writeIfChanged(filepath.Join(root, genGoFile), out.String())
 }
 
 func writeIfChanged(path, content string) {

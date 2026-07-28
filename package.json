@@ -7,6 +7,12 @@
     "examples/*"
   ],
   "scripts": {
-    "typecheck": "cd packages/borgo && bunx tsc --noEmit && cd ../../examples/tasks && bunx tsc --noEmit"
+    "typecheck": "cd packages/borgo && bunx tsc --noEmit && cd ../../examples/tasks && bunx tsc --noEmit",
+    "test": "bun test packages/borgo/test",
+    "test:go": "go test ./...",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
   }
 }

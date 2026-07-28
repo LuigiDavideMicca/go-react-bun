@@ -121,7 +121,7 @@ export async function serve({ dev = false } = {}) {
       const devTag = dev
         ? "<script>(()=>{const c=()=>{const w=new WebSocket(`ws://${location.host}/__borgo/dev`);" +
           'w.onmessage=(e)=>{const m=JSON.parse(e.data);if(m.type==="css"){for(const l of document.querySelectorAll(\'link[rel="stylesheet"]\'))l.href=l.href.split("?")[0]+"?t="+Date.now();}' +
-          'else if(!m.stamp||Number(sessionStorage.getItem("borgo:devstamp")||0)<m.stamp){if(m.stamp)sessionStorage.setItem("borgo:devstamp",String(m.stamp));location.reload();}};' +
+          'else if(!m.stamp||(m.stamp>performance.timeOrigin&&Number(sessionStorage.getItem("borgo:devstamp")||0)<m.stamp)){if(m.stamp)sessionStorage.setItem("borgo:devstamp",String(m.stamp));location.reload();}};' +
           "w.onclose=()=>setTimeout(c,300);};c();})()</script>"
         : "";
       end = shellEnd

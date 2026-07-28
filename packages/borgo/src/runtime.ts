@@ -328,6 +328,8 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     async function applyUpdate(msg: { file: string; chunks: Record<string, string>; stamp: number }) {
       const { file, chunks } = msg;
       if (msg.stamp && msg.stamp <= lastStamp) return;
+      // a page loaded after the rebuild already runs the new code
+      if (msg.stamp && msg.stamp <= performance.timeOrigin) return;
       lastStamp = msg.stamp;
       try {
         sessionStorage.setItem("borgo:devstamp", String(msg.stamp));

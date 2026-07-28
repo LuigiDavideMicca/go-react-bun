@@ -27,6 +27,9 @@ jobs:
           go build ./...
           go vet ./...
 
+      - name: go tests
+        run: go test ./...
+
       - name: build example go module
         working-directory: examples/tasks
         run: |
@@ -41,6 +44,9 @@ jobs:
 
       - name: typecheck
         run: bun run typecheck
+
+      - name: bun tests
+        run: bun test packages/borgo/test
 
       - name: typed request bodies reject a wrong body
         working-directory: examples/tasks
@@ -75,6 +81,12 @@ jobs:
           curl -fs -X POST http://localhost:3000/api/tasks -H "Content-Type: application/json" -d '{"title":"ci smoke"}' | grep -q "ci smoke"
           curl -fs http://localhost:3000/ | grep -q "ci smoke"
           curl -fs http://localhost:3000/tasks/1 | grep -q "ci smoke"
+
+      - name: install playwright chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: e2e tests
+        run: npx playwright test
 
       - name: scaffold test
         run: |

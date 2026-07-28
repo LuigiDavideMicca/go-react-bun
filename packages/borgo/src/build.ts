@@ -18,7 +18,7 @@ async function writeIfChanged(path: string, content: string) {
 // the hydrate export must be a literal so it can be read without executing the page
 const hydrateRe = /export\s+const\s+hydrate\s*(?::[^=]+)?=\s*(false|true|["']visible["'])/;
 
-function parseHydrate(source: string): "false" | "true" | '"visible"' {
+export function parseHydrate(source: string): "false" | "true" | '"visible"' {
   const match = source.match(hydrateRe);
   if (!match) return "true";
   return match[1] === "false" ? "false" : match[1] === "true" ? "true" : '"visible"';
@@ -250,7 +250,7 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
 
 // registers top-level capitalized functions with react-refresh, so an edit
 // swaps implementations without losing component state
-function refreshFooter(js: string, moduleId: string) {
+export function refreshFooter(js: string, moduleId: string) {
   const names = new Set<string>();
   for (const m of js.matchAll(/(?:^|\n)\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Z]\w*)\s*\(/g)) {
     names.add(m[1]);

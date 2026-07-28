@@ -288,6 +288,14 @@ Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo bu
 
 Scaffolded apps ship a multi-stage `Dockerfile` (Go builds static, the runtime is `oven/bun:slim`) and a `docker-compose.yml` with a `/data` volume for SQLite — `docker compose up -d` is a deployment. The [deploy guide](docs/deploy.md) covers the single-container and two-service layouts, Caddy and nginx reverse-proxy samples (WebSockets and SSE included), a systemd unit for bare metal, and the full environment reference.
 
+## Tests
+
+Three layers, all run by CI on every push:
+
+- **Go** (`go test ./...`) — table-driven tests for the route registry, sessions (sign/verify/tamper/expiry), cache headers, SSE stream framing and hub broadcast/slow-client behavior, `borgo.Push`, and borgogen against a committed fixture app: route discovery (directives + `Handle` calls), helper following, `WriteJSON`, `Bind`, type overrides, snapshot freshness, and the error paths (duplicate patterns, malformed directives).
+- **TypeScript** (`bun test packages/borgo/test`) — the router (patterns, matching, params), the api client (URL building, headers, `ApiError`, typed bodies plumbing), hydrate/refresh source parsing, and manifest generation against a temp fixture (islands flags, client-route exclusion, precedence).
+- **End-to-end** (`npx playwright test`) — against a production build of `examples/tasks`: client navigation, hover/viewport prefetching, scroll restoration, islands, hydration modes, form actions, SSE, two-tab WebSockets with Go push, streaming SSR, error pages — plus a dev-server project asserting fast refresh preserves component state, CSS hot-swaps, and layouts fall back to a reload.
+
 ## Versioning and releases
 
 [release-please](https://github.com/googleapis/release-please) maintains a release PR from conventional commits; merging it tags `vX.Y.Z` and publishes both npm packages (`borgo`, `create-borgo`) with linked versions via npm trusted publishing, provenance attached. The Go module `github.com/LuigiDavideMicca/borgo` lives at the repo root and resolves the **same** `vX.Y.Z` tag — one version number across all three artifacts.
