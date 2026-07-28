@@ -1,6 +1,11 @@
-import type { LoaderContext } from "borgo";
+import type { Head, LoaderContext } from "borgo";
 
 type Task = { ID: number; CreatedAt: string; title: string; body: string };
+
+export const head = (props: Record<string, unknown>): Head => {
+  const task = props.task as Task | null;
+  return { title: task ? `${task.title} · borgo tasks` : "Not found · borgo tasks" };
+};
 
 export async function loader({ params, api }: LoaderContext) {
   const res = await fetch(`${api}/tasks/${params.id}`);

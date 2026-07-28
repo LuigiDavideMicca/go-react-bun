@@ -3,6 +3,11 @@ import type { LoaderContext } from "borgo";
 
 type Task = { ID: number; title: string; body: string };
 
+export const head = {
+  title: "Tasks · borgo",
+  meta: [{ name: "description", content: "tasks demo app for the borgo framework" }],
+};
+
 export async function loader({ api }: LoaderContext) {
   const res = await fetch(`${api}/tasks`);
   const { tasks } = await res.json();

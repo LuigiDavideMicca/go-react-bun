@@ -1,13 +1,27 @@
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 
 export type LoaderContext = { params: Record<string, string>; api: string };
+export type ActionContext = { request: Request; params: Record<string, string>; api: string };
+
+export type Head = { title?: string; meta?: Array<Record<string, string>> };
 
 export type PageModule = {
   default: ComponentType<any>;
   loader?: (ctx: LoaderContext) => Promise<Record<string, unknown>>;
+  action?: (ctx: ActionContext) => Promise<Response | Record<string, unknown>>;
+  head?: Head | ((props: Record<string, unknown>) => Head);
 };
 
-export type Route = { pattern: string; module: PageModule };
+export type LayoutModule = {
+  default: ComponentType<{ children: ReactNode }>;
+};
+
+export type Route = {
+  pattern: string;
+  file: string;
+  module: PageModule;
+  layouts: LayoutModule[];
+};
 
 // pages/index.tsx -> /, pages/about.tsx -> /about, pages/tasks/[id].tsx -> /tasks/:id
 export function filePathToPattern(file: string): string {
@@ -25,6 +39,11 @@ export function matchRoute(pathname: string, routes: Route[]) {
     if (params) return { route, params };
   }
   return null;
+}
+
+export function resolveHead(module: PageModule, props: Record<string, unknown>): Head {
+  const head = typeof module.head === "function" ? module.head(props) : module.head;
+  return head ?? {};
 }
 
 function matchPattern(pattern: string, path: string) {
