@@ -1,22 +1,12 @@
 {
-  "name": "go-react-bun",
+  "name": "borgo-monorepo",
+  "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
   "scripts": {
-    "dev": "bun framework/dev.ts",
-    "build": "bun framework/build.ts",
-    "start": "bun framework/server.ts"
-  },
-  "dependencies": {
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
-  },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "sass": "^1.93.0"
-  },
-  "peerDependencies": {
-    "typescript": "^5.9.0"
+    "typecheck": "cd packages/borgo && bunx tsc --noEmit && cd ../../examples/tasks && bunx tsc --noEmit"
   }
 }
