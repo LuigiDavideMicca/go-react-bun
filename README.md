@@ -172,7 +172,27 @@ Return a `Response` and it is sent as-is — `redirect(to, status = 303)` gives 
 
 ### Server-sent events
 
-`borgo.SSE(w, r)` turns any handler into an event stream; `borgo.NewSSEHub()` adds broadcast — `hub.Publish(event, data)` from anywhere, `hub.ServeHTTP` as the route handler. The front server proxies streams without buffering, so an `EventSource` in the browser just works. All stdlib; WebSockets are deliberately left out (Go's standard library has no server implementation, and a dependency is not worth it — SSE covers live updates). See the tasks example: create a task in one tab, watch it appear in another.
+`borgo.SSE(w, r)` turns any handler into an event stream; `borgo.NewSSEHub()` adds broadcast — `hub.Publish(event, data)` from anywhere, `hub.ServeHTTP` as the route handler. The front server proxies streams without buffering, so an `EventSource` in the browser just works. All stdlib. See the tasks example: create a task in one tab, watch it appear in another.
+
+### WebSockets
+
+The Bun front server is also a native WebSocket server. Browsers join named topics with the `subscribe` helper; every `{event, data}` published on a topic reaches every subscriber, including the publisher's other tabs:
+
+```tsx
+import { subscribe } from "borgo";
+
+const channel = subscribe("live", (event, data) => { /* ... */ });
+channel.publish("message", "hello");   // browser -> everyone on the topic
+channel.close();
+```
+
+The built-in `__count` event reports the topic's subscriber count (presence for free), and the connection reconnects itself. On the Go side, `borgo.Push(topic, event, data)` publishes into the same topics — it POSTs to the front server's internal endpoint, accepted from loopback (set `FRONT_URL` and a shared `BORGO_PUSH_KEY` when the two halves are on different hosts):
+
+```go
+borgo.Push("live", "task-created", task.Title)
+```
+
+Go itself stays stdlib-only — the WebSocket termination lives where Bun already provides it natively. Choose SSE for one-way server→browser feeds; choose WebSocket topics for anything browsers also write to. The `/live` page in `examples/tasks` demos both directions: two-tab chat plus Go pushes.
 
 ### Fast refresh in dev
 
@@ -218,7 +238,7 @@ Not production-grade, yet, and honest about it. The old caveats are gone — rou
 - Loader data on client navigations arrives as one JSON payload fetched in parallel with the route chunk — it is not streamed.
 - Fast refresh is registration-based, not the full babel transform: component edits keep state, hook-signature edits may need a reload.
 - One process each side, sessions/auth/caching are yours to bring, and the codegen tool (not the runtime) depends on `golang.org/x/tools`.
-- No WebSockets — SSE only, by choice.
+- WebSocket topics are a relay, not an RPC layer: the front server forwards `{event, data}` between subscribers and Go; per-message server logic belongs in Go routes.
 
 ## Roadmap
 

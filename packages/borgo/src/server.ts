@@ -206,7 +206,7 @@ export async function serve({ dev = false } = {}) {
 
   // dev channel: browsers connect over ws; a fresh boot after a code change
   // greets them with the changed file and the new page -> chunk map
-  const devSockets = new Set<import("bun").ServerWebSocket<unknown>>();
+  const devSockets = new Set<import("bun").ServerWebSocket<SocketData>>();
   const bootStamp = Date.now();
   const changed = process.env.BORGO_CHANGED;
   const broadcast = (msg: Record<string, unknown>) => {
@@ -214,27 +214,96 @@ export async function serve({ dev = false } = {}) {
     for (const ws of devSockets) ws.send(data);
   };
 
-  const server = Bun.serve({
+  type SocketData = { kind: "dev" } | { kind: "app"; topics: string[] };
+  const wsTopic = (topic: string) => "borgo:ws:" + topic;
+  const publishCount = (topic: string) => {
+    server.publish(
+      wsTopic(topic),
+      JSON.stringify({ topic, event: "__count", data: server.subscriberCount(wsTopic(topic)) }),
+    );
+  };
+  const isLoopback = (address: string | undefined) =>
+    address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+
+  const server = Bun.serve<SocketData, never>({
     port,
     // long-lived proxied streams (sse) must not be killed by the default 10s
     idleTimeout: 0,
     websocket: {
       open(ws) {
+        if (ws.data?.kind === "app") {
+          for (const topic of ws.data.topics) ws.subscribe(wsTopic(topic));
+          for (const topic of ws.data.topics) publishCount(topic);
+          return;
+        }
         devSockets.add(ws);
         if (changed) {
           ws.send(JSON.stringify({ type: "js", file: changed, chunks: chunkMap, stamp: bootStamp }));
         }
       },
       close(ws) {
+        if (ws.data?.kind === "app") {
+          const topics = ws.data.topics;
+          setTimeout(() => topics.forEach(publishCount), 0);
+          return;
+        }
         devSockets.delete(ws);
       },
-      message() {},
+      // clients may publish to topics they are subscribed to; everything is
+      // json {topic, event, data}, relayed verbatim to every subscriber
+      message(ws, raw) {
+        if (ws.data?.kind !== "app") return;
+        try {
+          const msg = JSON.parse(String(raw));
+          if (
+            typeof msg.topic === "string" &&
+            typeof msg.event === "string" &&
+            ws.data.topics.includes(msg.topic)
+          ) {
+            server.publish(
+              wsTopic(msg.topic),
+              JSON.stringify({ topic: msg.topic, event: msg.event, data: msg.data }),
+            );
+          }
+        } catch {}
+      },
     },
     async fetch(req) {
       const t0 = performance.now();
       const url = new URL(req.url);
+
+      // app websockets: /ws?topics=a,b subscribes the browser to topics
+      if (url.pathname === "/ws") {
+        const topics = (url.searchParams.get("topics") ?? "")
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
+        if (server.upgrade(req, { data: { kind: "app", topics } })) return undefined as never;
+        return new Response("upgrade required", { status: 426 });
+      }
+
+      // go -> browser push: accepted from loopback (or with the shared key)
+      if (req.method === "POST" && url.pathname === "/__borgo/publish") {
+        const key = process.env.BORGO_PUSH_KEY;
+        const authorized = key
+          ? req.headers.get("x-borgo-key") === key
+          : isLoopback(server.requestIP(req)?.address);
+        if (!authorized) return new Response("forbidden", { status: 403 });
+        const msg = await req.json().catch(() => null);
+        if (!msg || typeof msg.topic !== "string" || typeof msg.event !== "string") {
+          return new Response("bad request", { status: 400 });
+        }
+        server.publish(
+          wsTopic(msg.topic),
+          JSON.stringify({ topic: msg.topic, event: msg.event, data: msg.data }),
+        );
+        return new Response(null, { status: 204 });
+      }
+
       if (dev && url.pathname.startsWith("/__borgo/dev")) {
-        if (url.pathname === "/__borgo/dev" && server.upgrade(req)) return undefined as never;
+        if (url.pathname === "/__borgo/dev" && server.upgrade(req, { data: { kind: "dev" } })) {
+          return undefined as never;
+        }
         if (req.method === "POST" && url.pathname === "/__borgo/dev/css") {
           await compileCss(true);
           broadcast({ type: "css" });
