@@ -28,10 +28,14 @@
     "react",
     "ssr",
     "go",
+    "golang",
     "bun",
     "framework",
     "fullstack",
     "self-hosted",
-    "scaffold"
+    "scaffold",
+    "create-app",
+    "template",
+    "starter"
   ]
 }

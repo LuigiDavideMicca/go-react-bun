@@ -45,9 +45,18 @@
     "react",
     "ssr",
     "go",
+    "golang",
     "bun",
     "framework",
     "fullstack",
-    "self-hosted"
+    "self-hosted",
+    "typescript",
+    "code-generation",
+    "file-based-routing",
+    "islands",
+    "websockets",
+    "sse",
+    "fast-refresh",
+    "nextjs-alternative"
   ]
 }

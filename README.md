@@ -2,6 +2,14 @@
 
 # borgo
 
+<p>
+  <a href="https://www.npmjs.com/package/borgo-framework"><img src="https://img.shields.io/npm/v/borgo-framework?label=borgo-framework&color=c2552b" alt="npm borgo-framework"/></a>
+  <a href="https://www.npmjs.com/package/create-borgo"><img src="https://img.shields.io/npm/v/create-borgo?color=c2552b" alt="npm create-borgo"/></a>
+  <a href="https://github.com/LuigiDavideMicca/borgo/actions/workflows/ci.yml"><img src="https://github.com/LuigiDavideMicca/borgo/actions/workflows/ci.yml/badge.svg" alt="ci"/></a>
+  <a href="https://pkg.go.dev/github.com/LuigiDavideMicca/borgo"><img src="https://pkg.go.dev/badge/github.com/LuigiDavideMicca/borgo.svg" alt="go reference"/></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-sage" alt="license MIT"/></a>
+</p>
+
 *Italian for "village": small, self-governing, self-hosted.*
 
 borgo is a mini Vercel-style full-stack framework: file-based React pages server-rendered by Bun, API routes written in Go. You get the DX — `bunx create-borgo my-app`, drop a file in `pages/`, drop a file in `api/`, one dev command — without the platform. Deployment is one Go binary and one Bun server on any box you control.
