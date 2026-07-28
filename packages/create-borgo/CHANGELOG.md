@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0](https://github.com/LuigiDavideMicca/borgo/compare/create-borgo-v0.1.0...create-borgo-v0.2.0) (2026-07-28)
+## 0.9.0 (2026-07-29)
 
 
 ### Features

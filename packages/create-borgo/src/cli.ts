@@ -30,8 +30,9 @@ if (existsSync(target) && readdirSync(target).length > 0) {
 const template = fileURLToPath(new URL("../template", import.meta.url));
 cpSync(template, target, { recursive: true });
 
-// npm strips .gitignore from published packages, so the template ships it unprefixed
+// npm strips dotfiles from published packages, so the template ships them unprefixed
 renameSync(join(target, "gitignore"), join(target, ".gitignore"));
+renameSync(join(target, "dockerignore"), join(target, ".dockerignore"));
 
 for (const file of ["package.json", "go.mod", "main.go", "README.md"]) {
   const path = join(target, file);
@@ -43,7 +44,7 @@ console.log(`
 
   ${sage("✓")} created ${bold(name)}/
     pages/      ${dim("react pages, file name = route")}
-    api/        ${dim("go api routes, self-registered in init()")}
+    api/        ${dim("go api routes, mounted via //borgo:route directives")}
     main.go     ${dim("go entrypoint: import api, borgo.Serve()")}
     index.html  ${dim("html shell")} · style.scss ${dim("global styles")}
 

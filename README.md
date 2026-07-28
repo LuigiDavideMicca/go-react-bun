@@ -309,7 +309,7 @@ Honest comparison with the frameworks a borgo adopter would otherwise pick. ✓ 
 | Backend language | **Go** | Node | Node | Node |
 | File-based routing, nested layouts | ✓ | ✓ | ✓ | ✓ |
 | SSR + streaming Suspense | ✓ | ✓ | ✓ | ✓ |
-| Typed server↔client bridge | ✓ generated from Go source, request bodies included | manual / tRPC | ✓ Nitro `$fetch` | ✓ server functions |
+| Typed server↔client bridge | ✓ generated from Go source, request bodies included | ✓ Server Actions (API routes: manual / tRPC) | ✓ Nitro `$fetch` | ✓ server functions |
 | Client nav, prefetch, scroll restoration | ✓ | ✓ | ✓ | ✓ |
 | Per-route code splitting | ✓ | ✓ | ✓ | ✓ |
 | Hydration control | ✓ page-level opt-out, deferred, islands | — (RSC instead) | ✓ islands (experimental) | — (fine-grained reactivity instead) |
@@ -322,7 +322,7 @@ Honest comparison with the frameworks a borgo adopter would otherwise pick. ✓ 
 | Image/font optimization | — | ✓ | ✓ | — |
 | Plugin ecosystem | — | ✓ | ✓ | ✓ |
 | Deploy story | one box: Docker/compose/systemd, guide included | Vercel or DIY | many presets | many presets |
-| Framework size | ~2k lines, readable in an evening | large | large | medium |
+| Framework size | ~2.5k lines incl. codegen, readable in an evening | large | large | medium |
 
 ## What this is not
 

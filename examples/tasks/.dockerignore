@@ -2,8 +2,5 @@ node_modules
 .borgo
 dist
 public/assets
-.git
-.env
 *.db
-Dockerfile
-docker-compose.yml
+.git
