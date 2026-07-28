@@ -1,3 +1,5 @@
+export const head = { title: "About · borgo tasks" };
+
 export default function About() {
   return (
     <main>

@@ -53,6 +53,7 @@ export async function serve({ dev = false } = {}) {
   };
   const shell = await Bun.file("index.html").text();
   const [shellStart, shellEnd = ""] = shell.split("<!--app-->");
+  const shellTitle = shell.match(/<title>(.*?)<\/title>/s)?.[1] ?? "";
 
   const port = Number(process.env.PORT || 3000);
   const api = `http://localhost:${process.env.API_PORT || 3501}`;
@@ -81,7 +82,8 @@ export async function serve({ dev = false } = {}) {
     }
 
     const propsJson = JSON.stringify(props).replaceAll("<", "\\u003c");
-    const end = shellEnd.replace("<!--props-->", `<script>window.__PROPS__=${propsJson}</script>`);
+    const state = `<script>window.__PROPS__=${propsJson};window.__BORGO_TITLE__=${JSON.stringify(shellTitle)}</script>`;
+    const end = shellEnd.replace("<!--props-->", state);
 
     const encoder = new TextEncoder();
     const body = new ReadableStream({
@@ -125,9 +127,20 @@ export async function serve({ dev = false } = {}) {
       if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
 
       const matched = matchRoute(url.pathname, routes);
+      const wantsProps = url.searchParams.get("__borgo") === "props";
+
       if (!matched) {
+        if (wantsProps) return Response.json({ notFound: true }, { status: 404 });
         if (notFound) return renderPage(notFound, {}, 404);
         return new Response("not found", { status: 404 });
+      }
+
+      if (wantsProps) {
+        const { route, params } = matched;
+        const props = route.module.loader
+          ? await route.module.loader({ params, api: `${api}/api` })
+          : {};
+        return Response.json({ props });
       }
 
       return renderPage(matched.route, matched.params, 200);
