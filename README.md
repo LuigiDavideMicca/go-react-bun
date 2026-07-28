@@ -282,7 +282,7 @@ examples/tasks          demo app: tasks crud with gorm + sqlite, sse, websockets
 docs/deploy.md          docker, compose, reverse proxy, systemd
 ```
 
-Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo build` (client assets + Go binary in `dist/`), `borgo start` (run from build output, supervising both processes; `--front-only` for split deployments with `API_URL`). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
+Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo build` (client assets in `public/assets/`, Go binary in `dist/`), `borgo start` (run from build output, supervising both processes; `--front-only` for split deployments with `API_URL`). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
 
 ### Deploying
 

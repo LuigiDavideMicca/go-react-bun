@@ -22,7 +22,7 @@ If you are developing against a local borgo checkout, uncomment the `replace` di
 ## Commands
 
 - `bun run dev` — both servers with watch, fast refresh and css hot swap
-- `bun run build` — production client assets and the Go API binary in `dist/`
+- `bun run build` — production client assets in `public/assets/` and the Go API binary in `dist/`
 - `bun run start` — run from the build output (supervises both processes)
 
 ## Deploy
