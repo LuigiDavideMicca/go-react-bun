@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -11,8 +10,15 @@ import (
 	"tasks/db"
 )
 
+//borgo:type gorm.io/gorm.DeletedAt string | null
+
 type Task struct {
 	gorm.Model
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+type TaskCreate struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 }
@@ -29,6 +35,11 @@ type Deleted struct {
 	Deleted bool `json:"deleted"`
 }
 
+// a helper: borgogen follows it, so callers still get the TaskItem type
+func respondTask(w http.ResponseWriter, status int, task Task) {
+	borgo.JSON(w, status, TaskItem{Task: task})
+}
+
 //borgo:route GET /api/tasks
 func ListTasks(w http.ResponseWriter, r *http.Request) {
 	var tasks []Task
@@ -41,11 +52,8 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 
 //borgo:route POST /api/tasks
 func CreateTask(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Title string
-		Body  string
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	body, err := borgo.Bind[TaskCreate](r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -56,7 +64,7 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events.Publish("task-created", task)
-	borgo.JSON(w, http.StatusCreated, TaskItem{Task: task})
+	respondTask(w, http.StatusCreated, task)
 }
 
 //borgo:route GET /api/tasks/{id}
@@ -71,7 +79,7 @@ func GetTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	borgo.JSON(w, http.StatusOK, TaskItem{Task: task})
+	respondTask(w, http.StatusOK, task)
 }
 
 //borgo:route DELETE /api/tasks/{id}
@@ -81,5 +89,5 @@ func DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events.Publish("task-deleted", r.PathValue("id"))
-	borgo.JSON(w, http.StatusOK, Deleted{Deleted: true})
+	borgo.WriteJSON(w, http.StatusOK, Deleted{Deleted: true})
 }

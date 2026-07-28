@@ -42,6 +42,20 @@ jobs:
       - name: typecheck
         run: bun run typecheck
 
+      - name: typed request bodies reject a wrong body
+        working-directory: examples/tasks
+        run: |
+          printf '%s\n' \
+            'import type { ActionContext } from "borgo";' \
+            'export async function action({ api }: ActionContext) {' \
+            '  await api("POST /api/tasks", { body: { titel: "typo" } });' \
+            '  return {};' \
+            '}' \
+            'export default function Wrong() { return null; }' \
+            > pages/__wrong-body.tsx
+          if bunx tsc --noEmit; then echo "wrong body was accepted" && exit 1; fi
+          rm pages/__wrong-body.tsx
+
       - name: build example app
         working-directory: examples/tasks
         run: bun run build

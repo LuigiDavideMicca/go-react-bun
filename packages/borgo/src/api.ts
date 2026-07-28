@@ -5,7 +5,10 @@ import type { ApiRoutes } from "./index";
 
 type Registered = keyof ApiRoutes & string;
 export type ApiRouteKey = [Registered] extends [never] ? string : Registered;
-export type ApiResponse<K extends string> = K extends keyof ApiRoutes ? ApiRoutes[K] : unknown;
+
+type Entry<K extends string> = K extends keyof ApiRoutes ? ApiRoutes[K] : unknown;
+export type ApiResponse<K extends string> = Entry<K> extends { response: infer R } ? R : Entry<K>;
+export type ApiRequest<K extends string> = Entry<K> extends { request: infer B } ? B : never;
 
 type ParamNames<S extends string> = S extends `${string}{${infer P}}${infer Rest}`
   ? P | ParamNames<Rest>
@@ -13,15 +16,21 @@ type ParamNames<S extends string> = S extends `${string}{${infer P}}${infer Rest
 
 export type ApiOptions<K extends string> = {
   query?: Record<string, string | number | boolean>;
-  body?: unknown;
   headers?: Record<string, string>;
-} & ([ParamNames<K>] extends [never]
-  ? { params?: Record<string, string | number> }
-  : { params: Record<ParamNames<K>, string | number> });
+} & ([ApiRequest<K>] extends [never] ? { body?: unknown } : { body: ApiRequest<K> }) &
+  ([ParamNames<K>] extends [never]
+    ? { params?: Record<string, string | number> }
+    : { params: Record<ParamNames<K>, string | number> });
+
+type OptsRequired<K extends string> = [ParamNames<K>] extends [never]
+  ? [ApiRequest<K>] extends [never]
+    ? false
+    : true
+  : true;
 
 export type ApiClient = <K extends ApiRouteKey>(
   route: K,
-  ...opts: [ParamNames<K>] extends [never] ? [ApiOptions<K>?] : [ApiOptions<K>]
+  ...opts: OptsRequired<K> extends true ? [ApiOptions<K>] : [ApiOptions<K>?]
 ) => Promise<ApiResponse<K>>;
 
 export class ApiError extends Error {

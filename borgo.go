@@ -48,6 +48,15 @@ func JSON[T any](w http.ResponseWriter, status int, v T) {
 	WriteJSON(w, status, v)
 }
 
+// Bind decodes the request body as JSON into T. Its type parameter is
+// visible to static analysis: borgogen reads T to type the route's request
+// body for the TypeScript api client.
+func Bind[T any](r *http.Request) (T, error) {
+	var v T
+	err := json.NewDecoder(r.Body).Decode(&v)
+	return v, err
+}
+
 // Serve mounts every registered route and listens on API_PORT (default 3501).
 func Serve() {
 	mux := http.NewServeMux()

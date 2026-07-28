@@ -4,13 +4,18 @@ export interface Task {
   ID: number;
   CreatedAt: string;
   UpdatedAt: string;
-  DeletedAt: unknown;
+  DeletedAt: string | null;
   title: string;
   body: string;
 }
 
 export interface TaskList {
   tasks: Array<Task>;
+}
+
+export interface TaskCreate {
+  title: string;
+  body: string;
 }
 
 export interface TaskItem {
@@ -23,11 +28,11 @@ export interface Deleted {
 
 declare module "borgo" {
   interface ApiRoutes {
-    "GET /api/events": unknown;
-    "GET /api/tasks": TaskList;
-    "POST /api/tasks": TaskItem;
-    "DELETE /api/tasks/{id}": Deleted;
-    "GET /api/tasks/{id}": TaskItem;
+    "GET /api/events": { response: unknown };
+    "GET /api/tasks": { response: TaskList };
+    "POST /api/tasks": { response: TaskItem; request: TaskCreate };
+    "DELETE /api/tasks/{id}": { response: Deleted };
+    "GET /api/tasks/{id}": { response: TaskItem };
   }
 }
 

@@ -11,7 +11,7 @@ export type {
   Route,
 } from "./router";
 export { ApiError } from "./api";
-export type { ApiClient, ApiOptions, ApiResponse, ApiRouteKey } from "./api";
+export type { ApiClient, ApiOptions, ApiRequest, ApiResponse, ApiRouteKey } from "./api";
 
 // route pattern -> response type, filled in by the generated
 // .borgo/api-types.d.ts through declaration merging

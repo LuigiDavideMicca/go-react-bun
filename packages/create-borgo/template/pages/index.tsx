@@ -1,11 +1,20 @@
 import { useState } from "react";
+import type { ActionContext } from "borgo";
 
 export const head = {
   title: "borgo app",
   meta: [{ name: "description", content: "react pages server-rendered by bun, api routes in go" }],
 };
 
-export default function Home() {
+// classic form post handled on the server; the body of the api call is typed
+export async function action({ request, api }: ActionContext) {
+  const form = await request.formData();
+  const name = String(form.get("name") ?? "").trim() || "stranger";
+  const { message } = await api("POST /api/hello", { body: { name } });
+  return { greeting: message };
+}
+
+export default function Home({ actionData }: { actionData?: { greeting?: string } }) {
   const [message, setMessage] = useState("");
 
   const greet = async () => {
@@ -41,6 +50,12 @@ export default function Home() {
             )}
           </p>
         </button>
+        <form className="card" method="post">
+          <h2>Form action →</h2>
+          <p>{actionData?.greeting ?? "Posts to a server action, typed body end to end."}</p>
+          <input name="name" placeholder="Your name" />
+          <button>Greet</button>
+        </form>
         <a className="card" href="https://github.com/LuigiDavideMicca/borgo">
           <h2>Docs →</h2>
           <p>Conventions, the roadmap and the whole framework source, small enough to read.</p>

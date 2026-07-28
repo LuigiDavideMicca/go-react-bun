@@ -1,9 +1,12 @@
 // Command borgogen statically analyzes an app's api/ package (go/ast +
 // go/types, no runtime reflection) and generates two files:
 //
-//   - .borgo/api-types.d.ts - route pattern -> TypeScript response type; the
-//     response type of a route is the union of the T in every borgo.JSON[T]
-//     call made directly in its handler's body.
+//   - .borgo/api-types.d.ts - route pattern -> response and request types.
+//     The response type of a route is the union of the T in every
+//     borgo.JSON[T] and borgo.WriteJSON call reachable from its handler
+//     (helper functions in the same package are followed); the request type
+//     comes from borgo.Bind[T] calls the same way. A "//borgo:type Go TS"
+//     directive overrides the mapping for any named Go type.
 //   - api/borgo.gen.go - mounting for handlers annotated with a
 //     "//borgo:route METHOD /path" directive, so init() boilerplate is
 //     optional. Manual borgo.Handle registration keeps working alongside.
@@ -30,7 +33,10 @@ const (
 	genGoFile = "api/borgo.gen.go"
 )
 
-var directiveRe = regexp.MustCompile(`^//borgo:route\s+(.+)$`)
+var (
+	directiveRe = regexp.MustCompile(`^//borgo:route\s+(.+)$`)
+	typeRe      = regexp.MustCompile(`^//borgo:type\s+(\S+)\s+(.+)$`)
+)
 
 type route struct {
 	pattern string
@@ -84,11 +90,21 @@ func main() {
 		return a[0] < b[0]
 	})
 
-	gen := &tsGen{names: map[*types.TypeName]string{}, taken: map[string]bool{}}
+	gen := &tsGen{
+		names:     map[*types.TypeName]string{},
+		taken:     map[string]bool{},
+		apiPkg:    pkg.Types,
+		overrides: collectTypeOverrides(pkg),
+	}
 	entries := make(map[string]string, len(routes))
 	patterns := make([]string, 0, len(routes))
 	for _, r := range routes {
-		entries[r.pattern] = gen.responseType(pkg, decls[r.handler])
+		resp, req := gen.bridgeTypes(pkg, decls, decls[r.handler])
+		entry := "{ response: " + resp
+		if req != "" {
+			entry += "; request: " + req
+		}
+		entries[r.pattern] = entry + " }"
 		patterns = append(patterns, r.pattern)
 	}
 
@@ -211,7 +227,12 @@ func writeIfChanged(path, content string) {
 // borgoFunc resolves a call expression's callee to a function of the borgo
 // package, returning its name, or "" when it is anything else.
 func borgoFunc(info *types.Info, call *ast.CallExpr) (string, *ast.Ident) {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
+	fun := call.Fun
+	if idx, ok := fun.(*ast.IndexExpr); ok {
+		// explicit type arguments, e.g. borgo.Bind[T](r)
+		fun = idx.X
+	}
+	sel, ok := fun.(*ast.SelectorExpr)
 	if !ok {
 		return "", nil
 	}
@@ -277,42 +298,118 @@ func funcDecls(pkg *packages.Package) map[*types.Func]*ast.FuncDecl {
 }
 
 type tsGen struct {
-	names map[*types.TypeName]string
-	taken map[string]bool
-	defs  []string
+	names     map[*types.TypeName]string
+	taken     map[string]bool
+	defs      []string
+	apiPkg    *types.Package
+	overrides map[string]string
 }
 
-// responseType unions the T of every borgo.JSON[T] call in the handler body.
-func (g *tsGen) responseType(pkg *packages.Package, decl *ast.FuncDecl) string {
-	if decl == nil || decl.Body == nil {
-		return "unknown"
+// collectTypeOverrides gathers every "//borgo:type Go TS" directive. The Go
+// type is "pkgpath.Name" for imported types or a bare name for api types.
+func collectTypeOverrides(pkg *packages.Package) map[string]string {
+	out := map[string]string{}
+	for _, file := range pkg.Syntax {
+		for _, group := range file.Comments {
+			for _, comment := range group.List {
+				m := typeRe.FindStringSubmatch(comment.Text)
+				if m == nil {
+					if strings.HasPrefix(comment.Text, "//borgo:type") {
+						pos := pkg.Fset.Position(comment.Pos())
+						fail("%s: malformed directive, want //borgo:type <go type> <ts type>", pos)
+					}
+					continue
+				}
+				out[m[1]] = strings.TrimSpace(m[2])
+			}
+		}
 	}
-	seen := map[string]bool{}
-	var parts []string
-	ast.Inspect(decl.Body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		name, sel := borgoFunc(pkg.TypesInfo, call)
-		if name != "JSON" {
-			return true
-		}
-		inst, ok := pkg.TypesInfo.Instances[sel]
-		if !ok || inst.TypeArgs.Len() != 1 {
-			return true
-		}
-		ts := g.tsType(inst.TypeArgs.At(0))
-		if !seen[ts] {
-			seen[ts] = true
-			parts = append(parts, ts)
-		}
-		return true
-	})
-	if len(parts) == 0 {
-		return "unknown"
+	return out
+}
+
+type union struct {
+	seen  map[string]bool
+	parts []string
+}
+
+func (u *union) add(ts string) {
+	if u.seen == nil {
+		u.seen = map[string]bool{}
 	}
-	return strings.Join(parts, " | ")
+	if !u.seen[ts] {
+		u.seen[ts] = true
+		u.parts = append(u.parts, ts)
+	}
+}
+
+func (u *union) String() string {
+	return strings.Join(u.parts, " | ")
+}
+
+// localCallee resolves a call to a function of the api package itself, so
+// borgo.JSON/WriteJSON/Bind calls inside helpers are followed.
+func localCallee(pkg *packages.Package, call *ast.CallExpr) *types.Func {
+	var fn *types.Func
+	switch e := call.Fun.(type) {
+	case *ast.Ident:
+		fn, _ = pkg.TypesInfo.Uses[e].(*types.Func)
+	case *ast.SelectorExpr:
+		fn, _ = pkg.TypesInfo.Uses[e.Sel].(*types.Func)
+	}
+	if fn == nil || fn.Pkg() != pkg.Types {
+		return nil
+	}
+	return fn
+}
+
+// bridgeTypes unions the response type (borgo.JSON[T] and borgo.WriteJSON
+// calls) and the request type (borgo.Bind[T] calls) reachable from the
+// handler, following calls into same-package helper functions.
+func (g *tsGen) bridgeTypes(pkg *packages.Package, decls map[*types.Func]*ast.FuncDecl, decl *ast.FuncDecl) (response, request string) {
+	var resp, req union
+	visited := map[*ast.FuncDecl]bool{}
+
+	var walk func(d *ast.FuncDecl)
+	walk = func(d *ast.FuncDecl) {
+		if d == nil || d.Body == nil || visited[d] {
+			return
+		}
+		visited[d] = true
+		ast.Inspect(d.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch name, sel := borgoFunc(pkg.TypesInfo, call); name {
+			case "JSON", "Bind":
+				if inst, ok := pkg.TypesInfo.Instances[sel]; ok && inst.TypeArgs.Len() == 1 {
+					ts := g.tsType(inst.TypeArgs.At(0))
+					if name == "JSON" {
+						resp.add(ts)
+					} else {
+						req.add(ts)
+					}
+				}
+			case "WriteJSON":
+				if len(call.Args) == 3 {
+					if tv := pkg.TypesInfo.Types[call.Args[2]]; tv.Type != nil {
+						resp.add(g.tsType(types.Default(tv.Type)))
+					}
+				}
+			case "":
+				if fn := localCallee(pkg, call); fn != nil {
+					walk(decls[fn])
+				}
+			}
+			return true
+		})
+	}
+	walk(decl)
+
+	if len(resp.parts) == 0 {
+		return "unknown", req.String()
+	}
+	return resp.String(), req.String()
 }
 
 func hasCustomMarshal(t types.Type) bool {
@@ -328,6 +425,9 @@ func (g *tsGen) tsType(t types.Type) string {
 	switch t := t.(type) {
 	case *types.Named:
 		obj := t.Obj()
+		if ts, ok := g.override(obj); ok {
+			return ts
+		}
 		if obj.Pkg() != nil && obj.Pkg().Path() == "time" && obj.Name() == "Time" {
 			return "string"
 		}
@@ -368,6 +468,20 @@ func (g *tsGen) tsType(t types.Type) string {
 		return "{ " + strings.Join(g.fields(t), "; ") + " }"
 	}
 	return "unknown"
+}
+
+func (g *tsGen) override(obj *types.TypeName) (string, bool) {
+	if obj.Pkg() != nil {
+		if ts, ok := g.overrides[obj.Pkg().Path()+"."+obj.Name()]; ok {
+			return ts, true
+		}
+	}
+	if obj.Pkg() == nil || obj.Pkg() == g.apiPkg {
+		if ts, ok := g.overrides[obj.Name()]; ok {
+			return ts, true
+		}
+	}
+	return "", false
 }
 
 func (g *tsGen) interfaceFor(obj *types.TypeName, s *types.Struct) string {

@@ -63,10 +63,31 @@ Prefer explicitness? `init()` + `borgo.Handle("GET /api/tasks", listTasks)` stil
 
 `borgogen` (run automatically by `borgo dev` on every `api/*.go` change, and by `borgo build`) statically analyzes the `api` package with `go/ast` + `go/types` — no reflection, nothing at runtime — and generates:
 
-- `.borgo/api-types.d.ts` — route pattern → response type, plus a TypeScript interface for every Go struct involved (import them in your pages). A route's response type is the union of `T` across the `borgo.JSON[T]` calls in its handler.
+- `.borgo/api-types.d.ts` — route pattern → response and request types, plus a TypeScript interface for every Go struct involved (import them in your pages). A route's response type is the union of `T` across the `borgo.JSON[T]` and `borgo.WriteJSON` calls reachable from its handler — calls into helper functions in the `api` package are followed.
 - `api/borgo.gen.go` — the mounting for `//borgo:route` handlers.
 
-The convention, and its honest limits: only `borgo.JSON` calls made directly in the handler's body are seen (respond through a helper function and the route types as `unknown`, as does `borgo.WriteJSON`); types with a custom `MarshalJSON` (except `time.Time`) become `unknown`; request bodies are not typed. Struct fields follow `encoding/json` semantics — tags, `omitempty`, embedded structs flattened. The tool is wired through the `tool` directive in the app's `go.mod`.
+**Typed request bodies.** Decode with `borgo.Bind[T](r)` and borgogen types the route's request too — the api client then *requires* a matching `body`, so `api("POST /api/tasks", { body })` is checked end to end and a wrong body fails `tsc` (CI proves this with a deliberate wrong-body file):
+
+```go
+type TaskCreate struct {
+    Title string `json:"title"`
+    Body  string `json:"body"`
+}
+
+//borgo:route POST /api/tasks
+func CreateTask(w http.ResponseWriter, r *http.Request) {
+    body, err := borgo.Bind[TaskCreate](r)
+    // ...
+}
+```
+
+**Type overrides.** A type borgogen can't see through — anything with a custom `MarshalJSON` — maps to `unknown` by default (`time.Time` is built in as `string`). Override the mapping for any named type with a directive anywhere in the `api` package:
+
+```go
+//borgo:type gorm.io/gorm.DeletedAt string | null
+```
+
+Struct fields follow `encoding/json` semantics — tags, `omitempty`, embedded structs flattened. What remains invisible to static analysis: responses written through `json.NewEncoder` or helpers outside the `api` package, and dynamically chosen types (`borgo.JSON(w, s, any(x))` types as the static type of `x`). The tool is wired through the `tool` directive in the app's `go.mod`.
 
 ### Layouts
 
@@ -161,7 +182,7 @@ Commands (in an app): `borgo dev` (both servers, watch and rebuild), `borgo buil
 
 Not production-grade, yet, and honest about it. The old caveats are gone — routes are code-split into lazy chunks, loaders and actions are stripped from client bundles (and CI proves it), pages can opt out of or defer hydration, and Go handlers mount through generated code instead of hand-written `init()`. What remains true:
 
-- The typed bridge sees only `borgo.JSON` calls made directly in a handler's body; anything else — helpers, `borgo.WriteJSON`, custom marshalers — is typed `unknown`, and request bodies are not typed at all.
+- The typed bridge is static analysis: helpers in the `api` package are followed and `//borgo:type` covers custom marshalers, but responses written through `json.NewEncoder` or helpers in other packages still type as `unknown`.
 - Hydration granularity is the page, not the component: `hydrate = "visible"` defers the whole page, there are no islands.
 - No streaming of loader data on client-side navigations, no prefetching route chunks on hover, no scroll restoration on back/forward beyond the browser default.
 - One process each side, no HMR (rebuilds are full page reloads), sessions/auth/caching are yours to bring, and the codegen tool (not the runtime) depends on `golang.org/x/tools`.
