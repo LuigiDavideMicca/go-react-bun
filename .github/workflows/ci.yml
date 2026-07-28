@@ -95,7 +95,8 @@ jobs:
           bun "$GITHUB_WORKSPACE/packages/create-borgo/src/cli.ts" smoke-app
           cd smoke-app
           echo "replace github.com/LuigiDavideMicca/borgo => $GITHUB_WORKSPACE" >> go.mod
-          sed -i 's#"borgo": "\^0.1.0"#"borgo": "file:../borgo-0.1.0.tgz"#' package.json
+          tgz="$(ls ../borgo-*.tgz | head -1)"
+          sed -i "s#\"borgo\": \"[^\"]*\"#\"borgo\": \"file:$tgz\"#" package.json
           bun install
           go mod tidy
           bun run build
