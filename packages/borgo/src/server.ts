@@ -10,6 +10,11 @@ import { registerIslands } from "./index";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, type Head, type Route } from "./router";
 
+const isConnRefused = (err: unknown) => {
+  const e = err as { code?: string; message?: string };
+  return e?.code === "ConnectionRefused" || e?.code === "ECONNREFUSED" || /unable to connect|refused/i.test(e?.message ?? "");
+};
+
 // resolve react from the app, not from this package: with a linked borgo
 // checkout the two would otherwise be different copies and hooks would break
 const appRequire = createRequire(join(process.cwd(), "package.json"));
@@ -201,11 +206,27 @@ export async function serve({ dev = false } = {}) {
     const url = new URL(req.url);
 
     if (url.pathname.startsWith("/api/")) {
-      // decompress: false passes go's response through untouched, encoding
-      // included; bun would otherwise inflate it and resend identity
-      return fetch(new Request(api + url.pathname + url.search, req), {
-        decompress: false,
-      } as RequestInit);
+      // the go api restarts on every .go edit in dev: a refused connection
+      // never reached it, so retrying briefly is safe even for mutations.
+      // the body is buffered once so the request can be re-sent.
+      const target = api + url.pathname + url.search;
+      const hasBody = req.method !== "GET" && req.method !== "HEAD";
+      const body = hasBody ? await req.arrayBuffer() : undefined;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          // decompress: false passes go's response through untouched, encoding
+          // included; bun would otherwise inflate it and resend identity
+          return await fetch(target, {
+            method: req.method,
+            headers: req.headers,
+            ...(hasBody ? { body } : {}),
+            decompress: false,
+          } as RequestInit);
+        } catch (err) {
+          if (attempt >= 15 || !isConnRefused(err)) throw err;
+          await Bun.sleep(250);
+        }
+      }
     }
 
     if (!url.pathname.includes("..")) {

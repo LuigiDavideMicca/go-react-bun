@@ -3,6 +3,11 @@
 // merges with it) with one entry per go route pattern.
 import type { ApiRoutes } from "./index";
 
+const isConnRefused = (err: unknown) => {
+  const e = err as { code?: string; message?: string };
+  return e?.code === "ConnectionRefused" || e?.code === "ECONNREFUSED" || /unable to connect|refused/i.test(e?.message ?? "");
+};
+
 type Registered = keyof ApiRoutes & string;
 export type ApiRouteKey = [Registered] extends [never] ? string : Registered;
 
@@ -59,7 +64,7 @@ export function makeApiClient(base: string, defaults: Record<string, string> = {
       url.searchParams.set(key, String(value));
     }
 
-    const res = await fetch(url, {
+    const init = {
       method,
       headers: {
         ...defaults,
@@ -67,7 +72,19 @@ export function makeApiClient(base: string, defaults: Record<string, string> = {
         ...opts.headers,
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    });
+    };
+    // loaders and actions run while the go api may be mid-restart in dev; a
+    // refused connection never reached it, so a short retry is always safe
+    let res: Response;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await fetch(url, init);
+        break;
+      } catch (err) {
+        if (attempt >= 15 || !isConnRefused(err)) throw err;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
     if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""), route);
     if (res.status === 204) return undefined;
     return res.json();
