@@ -99,6 +99,9 @@ jobs:
           sed -i "s#\"borgo-framework\": \"[^\"]*\"#\"borgo-framework\": \"file:$tgz\"#" package.json
           bun install
           go mod tidy
+          cp .borgo/api-types.d.ts "$tmp/shipped-api-types.d.ts"
+          go tool borgogen
+          diff "$tmp/shipped-api-types.d.ts" .borgo/api-types.d.ts
           bun run build
           PORT=3100 API_PORT=3601 bun run start &
           for i in $(seq 1 20); do curl -fs http://localhost:3100/ > /dev/null && break; sleep 1; done

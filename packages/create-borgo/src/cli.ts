@@ -33,6 +33,8 @@ cpSync(template, target, { recursive: true });
 // npm strips dotfiles from published packages, so the template ships them unprefixed
 renameSync(join(target, "gitignore"), join(target, ".gitignore"));
 renameSync(join(target, "dockerignore"), join(target, ".dockerignore"));
+// pregenerated api types, so the api client is typed before the first `dev` run
+renameSync(join(target, "_borgo"), join(target, ".borgo"));
 
 for (const file of ["package.json", "go.mod", "main.go", "README.md"]) {
   const path = join(target, file);
