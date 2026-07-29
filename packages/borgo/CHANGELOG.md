@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/LuigiDavideMicca/borgo/compare/v0.9.1...v0.9.2) (2026-07-29)
+
+
+### Bug Fixes
+
+* serve precompressed assets and gzip dynamic responses ([e68a8ef](https://github.com/LuigiDavideMicca/borgo/commit/e68a8ef6eac4c156d316e7511174c9a0f62e1569))
+
 ## [0.9.1](https://github.com/LuigiDavideMicca/borgo/compare/v0.9.0...v0.9.1) (2026-07-29)
 
 
