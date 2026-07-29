@@ -346,6 +346,12 @@ Everything here is a deliberate choice, with the reason attached:
 - **The typed bridge is static analysis, no runtime reflection.** Helpers inside `api/` are followed and `//borgo:type` covers custom marshalers; a response written through `json.NewEncoder` or a helper in another package types as `unknown` — the escape hatch is visible, not silent.
 - **WebSocket topics are a relay, not RPC.** The front server forwards `{event, data}` between subscribers and Go; per-message business logic belongs in Go routes.
 
+## Troubleshooting
+
+- **`error: bun is not installed in %PATH%`** — the `borgo` bin shim locates `bun` through `PATH`. Start the app through Bun itself (`bun run dev`): Bun resolves its own shims even when `bun` is not on `PATH`. The error appears when something else spawns the shim, e.g. `npm run dev` or calling `node_modules/.bin/borgo` directly. To make the shim callable from anywhere, install Bun with the [official installer](https://bun.sh) so `bun` lands on `PATH`.
+- **Two Buns on one machine** — an npm-installed Bun (`npm i -g bun`) puts a wrapper ahead of the official install on `PATH`. `borgo dev` spawns its workers by absolute path, so either install works for the dev loop, but prefer the official installer and check `where bun` (`which bun`) points where you expect.
+- **Odd characters like `âŒ‚` in the terminal** — a legacy Windows console codepage renders UTF-8 as mojibake; borgo detects this and falls back to plain ASCII marks. `chcp 65001`, or Windows Terminal, brings the branded glyphs back.
+
 ## Roadmap
 
 - ~~**Phase 2 — pages that feel like an app**: layouts, `<head>` management, client-side navigation, streaming SSR, form actions, error pages~~ done

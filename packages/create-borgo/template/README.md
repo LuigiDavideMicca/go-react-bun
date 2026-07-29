@@ -19,6 +19,8 @@ Open http://localhost:3000.
 
 If you are developing against a local borgo checkout, uncomment the `replace` directive in `go.mod` and point it at the checkout; drop it again once you depend on the published module.
 
+> **`error: bun is not installed in %PATH%`?** Start the app with `bun run dev` — Bun resolves its own bin shims even when `bun` is not on `PATH`. The error appears when the shim is spawned by something else (`npm run dev`, or `node_modules/.bin/borgo` directly). To call the shim from anywhere, install Bun with the [official installer](https://bun.sh).
+
 ## Commands
 
 - `bun run dev` — both servers with watch, fast refresh and css hot swap

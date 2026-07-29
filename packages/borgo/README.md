@@ -14,6 +14,8 @@ bunx create-borgo my-app
 - `borgo build` — production client assets in `public/assets/` and the Go binary in `dist/`
 - `borgo start` — runs both servers from the build output (`--front-only` for split deployments, with `API_URL`)
 
+Run the CLI through Bun (`bun run dev` in an app). If you hit `error: bun is not installed in %PATH%`, the bin shim was spawned without Bun on `PATH` (e.g. by `npm run`) — see the [troubleshooting section](https://github.com/LuigiDavideMicca/borgo#troubleshooting).
+
 ## Exports
 
 - `borgo` — browser-safe: `redirect`, `Island`/`registerIslands`, the websocket `subscribe` helper, `ApiError`, plus `LoaderContext`, `ActionContext`, `Head`, `PageModule`, `Route` types and the router functions
