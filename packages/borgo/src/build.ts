@@ -217,7 +217,7 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
   // precompressed siblings so dev never serves an outdated .gz/.br
   if (existsSync(outDir)) {
     for (const f of readdirSync(outDir)) {
-      if (/\.(js|gz|br)$/.test(f)) rmSync(`${outDir}/${f}`);
+      if (/\.(js|gz|br)$/.test(f)) rmSync(`${outDir}/${f}`, { force: true });
     }
   }
 

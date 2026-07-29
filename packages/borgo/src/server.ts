@@ -280,7 +280,23 @@ export async function serve({ dev = false } = {}) {
   const isLoopback = (address: string | undefined) =>
     address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 
-  const server = Bun.serve<SocketData, never>({
+  // a dev restart can try to bind before the os releases the previous
+  // server's port; dying here would take the dev channel down for good
+  const bindRetry = async <T>(start: () => T): Promise<T> => {
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+      try {
+        return start();
+      } catch (error) {
+        if (!dev || (error as { code?: string }).code !== "EADDRINUSE" || Date.now() > deadline) {
+          throw error;
+        }
+        await Bun.sleep(150);
+      }
+    }
+  };
+
+  const server = await bindRetry(() => Bun.serve<SocketData, never>({
     port,
     // long-lived proxied streams (sse) must not be killed by the default 10s
     idleTimeout: 0,
@@ -398,7 +414,7 @@ export async function serve({ dev = false } = {}) {
       if (dev) logRequest(req, response.status, performance.now() - t0);
       return response;
     },
-  });
+  }));
 
   const ready = performance.now() - started;
   if (process.env.BORGO_RELOAD) {

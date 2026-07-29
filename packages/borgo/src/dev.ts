@@ -1,4 +1,4 @@
-import { renameSync, watch } from "node:fs";
+import { readFileSync, renameSync, watch } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
 import { c, g } from "./colors";
@@ -91,7 +91,7 @@ export async function dev() {
     await frontProc?.exited;
     // process.execPath, not "bun": a PATH lookup can resolve to a shim (npm
     // installs one) whose kill leaves the real server orphaned on the port
-    frontProc = Bun.spawn([process.execPath, serverEntry], {
+    const proc = Bun.spawn([process.execPath, serverEntry], {
       stdout: "inherit",
       stderr: "inherit",
       env: {
@@ -101,6 +101,20 @@ export async function dev() {
         ...(changed ? { BORGO_CHANGED: changed } : {}),
       },
     });
+    frontProc = proc;
+    // hold the rebuild queue until the new server answers, so the fs noise
+    // of its own boot lands inside the busy window instead of triggering a
+    // second restart and a spurious reload
+    const deadline = Date.now() + 30_000;
+    let exited = false;
+    proc.exited.then(() => (exited = true));
+    while (Date.now() < deadline && !exited) {
+      try {
+        await fetch(`http://localhost:${frontPort}/__borgo/dev`, { signal: AbortSignal.timeout(1_000) });
+        break;
+      } catch {}
+      await Bun.sleep(100);
+    }
   };
 
   // a css edit normally hot-swaps in place; if the front server is parked on
@@ -141,6 +155,18 @@ export async function dev() {
     );
   };
 
+  // windows can deliver a straggler event for a write that was already
+  // rebuilt; identical content must not trigger a second restart and reload
+  const lastSeen = new Map<string, string>();
+  const isUnchanged = (file: string) => {
+    try {
+      const hash = String(Bun.hash(readFileSync(file)));
+      if (lastSeen.get(file) === hash) return true;
+      lastSeen.set(file, hash);
+    } catch {}
+    return false;
+  };
+
   watch(".", { recursive: true }, (_, file) => {
     if (file && ignored.test(file)) return;
     if (!file) {
@@ -150,9 +176,12 @@ export async function dev() {
       return;
     }
     const normalized = file.replaceAll("\\", "/");
-    if (file.endsWith(".go")) schedule(file, "api", startGo);
-    else if (file.endsWith(".scss")) schedule(file, "css", () => swapCss(normalized));
+    if (file.endsWith(".go")) {
+      if (isUnchanged(file)) return;
+      schedule(file, "api", startGo);
+    } else if (file.endsWith(".scss")) schedule(file, "css", () => swapCss(normalized));
     else if (/\.(tsx?|html)$/.test(file)) {
+      if (isUnchanged(file)) return;
       schedule(file, "app", () => startFront(normalized));
     }
   });

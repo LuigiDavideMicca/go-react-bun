@@ -59,11 +59,26 @@ async function openRefreshPage(page: import("@playwright/test").Page) {
 }
 
 test.beforeAll(async () => {
+  test.setTimeout(180_000);
   for (const f of [pageFile, cssFile, layoutFile, refreshFile, hookFile, pingFile]) snapshot(f);
+  // a dev server from a previous worker still winding down would answer the
+  // readiness probe below and poison every test against a stale process
+  const freeDeadline = Date.now() + 30_000;
+  for (;;) {
+    try {
+      await fetch(base + "/", { signal: AbortSignal.timeout(1_000) });
+    } catch {
+      break;
+    }
+    if (Date.now() > freeDeadline) throw new Error("port 3410 is still held by a previous dev server");
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  const { openSync } = await import("node:fs");
+  const logFd = openSync("C:/Users/luigi/AppData/Local/Temp/claude/devserver-e2e.log", "a");
   server = spawn("bun", ["run", "dev"], {
     cwd: appDir,
     shell: process.platform === "win32",
-    stdio: "ignore",
+    stdio: ["ignore", logFd, logFd],
     env: { ...process.env, PORT: "3410", API_PORT: "3911", DB_PATH: "e2e-dev.db" },
   });
   const deadline = Date.now() + 120_000;
@@ -77,14 +92,27 @@ test.beforeAll(async () => {
   }
 });
 
-test.afterAll(() => {
-  restoreAll();
-  if (!server?.pid) return;
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(server.pid), "/T", "/F"]);
-  } else {
-    server.kill("SIGINT");
+// kill first, restore after: restoring while the watcher is alive respawns
+// the front server mid-teardown, and the kill's process-tree snapshot misses
+// it — the orphan keeps the port and poisons the next worker
+test.afterAll(async () => {
+  if (server?.pid) {
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/pid", String(server.pid), "/T", "/F"]);
+    } else {
+      server.kill("SIGINT");
+    }
+    if (server.exitCode === null) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 15_000);
+        server.once("exit", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
   }
+  restoreAll();
 });
 
 test("component edits fast-refresh and keep state", async ({ page }) => {
@@ -92,7 +120,8 @@ test("component edits fast-refresh and keep state", async ({ page }) => {
   await page.evaluate(() => ((window as any).__stayed = true));
 
   await page.locator("[data-borgo-visible]").scrollIntoViewIfNeeded();
-  await page.waitForTimeout(600);
+  // clicks before deferred hydration lands are silently lost
+  await page.waitForFunction(() => (window as any).__hydrated, undefined, { timeout: 30_000 });
   for (let i = 0; i < 3; i++) await page.click("section button");
   await expect(page.locator("section button")).toContainText("clicked 3 times");
 
@@ -255,6 +284,18 @@ test("go edits reload exactly once each, only after the api answers", async ({ p
 });
 
 test("layout edits fall back to a full reload", async ({ page }) => {
+  const { appendFileSync } = await import("node:fs");
+  const dbg: string[] = [];
+  const t = () => Date.now();
+  page.on("websocket", (ws) => {
+    dbg.push(`${t()} ws-open ${ws.url()}`);
+    ws.on("framereceived", (f) => dbg.push(`${t()} ws-recv ${f.payload}`));
+    ws.on("close", () => dbg.push(`${t()} ws-close`));
+  });
+  page.on("framenavigated", (f) => {
+    if (f === page.mainFrame()) dbg.push(`${t()} nav ${f.url()}`);
+  });
+  try {
   await page.goto(base + "/");
   await page.evaluate(() => ((window as any).__stayed = true));
 
@@ -266,7 +307,15 @@ test("layout edits fall back to a full reload", async ({ page }) => {
     ),
   );
 
+  dbg.push(`${t()} write layout`);
   await expect(page.locator("footer")).toContainText("framework — edited", { timeout: 20_000 });
+  dbg.push(`${t()} footer asserted`);
   expect(await page.evaluate(() => (window as any).__stayed)).toBeUndefined();
   writeFileSync(layoutFile, originals.get(layoutFile)!);
+  } finally {
+    appendFileSync(
+      "C:/Users/luigi/AppData/Local/Temp/claude/layout-debug.log",
+      `\n===== ${new Date().toISOString()}\n` + dbg.join("\n") + "\n",
+    );
+  }
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export const head = { title: "Hydration · borgo tasks" };
 
@@ -8,6 +8,10 @@ export const hydrate = "visible";
 
 export default function Hydration() {
   const [clicks, setClicks] = useState(0);
+
+  useEffect(() => {
+    (window as unknown as { __hydrated?: boolean }).__hydrated = true;
+  }, []);
 
   return (
     <main>
