@@ -1,6 +1,7 @@
 import { Glob } from "bun";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join, sep } from "node:path";
+import { precompressAssets } from "./compress";
 import { filePathToPattern } from "./router";
 
 const outDir = "public/assets";
@@ -212,10 +213,11 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
   const { hasIslands } = await generateManifest(dev);
   await compileCss(dev);
 
-  // hashed chunk names change between builds; drop the stale ones
+  // hashed chunk names change between builds; drop the stale ones and any
+  // precompressed siblings so dev never serves an outdated .gz/.br
   if (existsSync(outDir)) {
     for (const f of readdirSync(outDir)) {
-      if (f.endsWith(".js")) rmSync(`${outDir}/${f}`);
+      if (/\.(js|gz|br)$/.test(f)) rmSync(`${outDir}/${f}`);
     }
   }
 
@@ -233,6 +235,10 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
     plugins: [appTranspile(define, dev)],
   });
   const assets = result.outputs.map((o) => ({ path: o.path, kind: o.kind, size: o.size }));
+
+  // prod only: emit .gz/.br siblings once here instead of compressing on
+  // every request; dev skips the cost and serves identity
+  if (!dev) await precompressAssets(outDir);
 
   // dev: page chunks carry an injected marker, so the fast-refresh channel
   // can tell the browser which chunk file belongs to which page

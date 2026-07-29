@@ -79,7 +79,7 @@ func Serve() {
 	}
 
 	printStartup(patterns, port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	log.Fatal(http.ListenAndServe(":"+port, gzipMiddleware(mux)))
 }
 
 func colorEnabled() bool {

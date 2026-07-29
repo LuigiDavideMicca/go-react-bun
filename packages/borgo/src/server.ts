@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { makeApiClient } from "./api";
 import { buildAssets, compileCss } from "./build";
 import { banner, c, fmtMs, g, statusColor } from "./colors";
+import { gzipStream, isCompressiblePath, isHashedAsset, jsonResponse, pickEncoding } from "./compress";
 import { registerIslands } from "./index";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, type Head, type Route } from "./router";
@@ -156,22 +157,61 @@ export async function serve({ dev = false } = {}) {
       },
     });
 
-    return new Response(body, {
-      status,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
+    const headers: Record<string, string> = {
+      "Content-Type": "text/html; charset=utf-8",
+      Vary: "Accept-Encoding",
+    };
+    // gzip only: brotli is too slow for dynamic responses. no size threshold
+    // here - a rendered document is virtually always past it, and the length
+    // of a stream is unknown up front. the per-chunk sync flush in gzipStream
+    // keeps streamed suspense content progressive.
+    if (!dev && pickEncoding(req.headers.get("accept-encoding"), ["gzip"])) {
+      headers["Content-Encoding"] = "gzip";
+      return new Response(gzipStream(body), { status, headers });
+    }
+    return new Response(body, { status, headers });
   }
+
+  // static files: hashed build outputs cache forever, compressible types are
+  // served from the .gz/.br siblings that `borgo build` emitted. dev has no
+  // siblings (precompression is skipped) and serves identity.
+  async function serveAsset(req: Request, path: string, asset: ReturnType<typeof Bun.file>) {
+    const headers: Record<string, string> = {};
+    if (isHashedAsset(path)) headers["Cache-Control"] = "public, max-age=31536000, immutable";
+    if (!isCompressiblePath(path)) return new Response(asset, { headers });
+    headers["Vary"] = "Accept-Encoding";
+    if (!dev) {
+      const encoding = pickEncoding(req.headers.get("accept-encoding"), ["br", "gzip"]);
+      if (encoding) {
+        const sibling = Bun.file(`${path}.${encoding === "br" ? "br" : "gz"}`);
+        if (await sibling.exists()) {
+          headers["Content-Encoding"] = encoding;
+          headers["Content-Type"] = asset.type;
+          return new Response(sibling, { headers });
+        }
+      }
+    }
+    return new Response(asset, { headers });
+  }
+
+  const sendJson = (req: Request, value: unknown, init?: ResponseInit) =>
+    dev ? Response.json(value, init) : jsonResponse(req, value, init);
 
   async function handle(req: Request): Promise<Response> {
     const url = new URL(req.url);
 
     if (url.pathname.startsWith("/api/")) {
-      return fetch(api + url.pathname + url.search, req);
+      // decompress: false passes go's response through untouched, encoding
+      // included; bun would otherwise inflate it and resend identity
+      return fetch(new Request(api + url.pathname + url.search, req), {
+        decompress: false,
+      } as RequestInit);
     }
 
     if (!url.pathname.includes("..")) {
-      const asset = Bun.file("public" + url.pathname);
-      if (url.pathname !== "/" && (await asset.exists())) return new Response(asset);
+      const path = "public" + url.pathname;
+      const asset = Bun.file(path);
+      if (url.pathname !== "/" && (await asset.exists())) return serveAsset(req, path, asset);
     }
 
     if (req.method === "POST") {
@@ -193,7 +233,7 @@ export async function serve({ dev = false } = {}) {
     const wantsProps = url.searchParams.get("__borgo") === "props";
 
     if (!matched) {
-      if (wantsProps) return Response.json({ notFound: true }, { status: 404 });
+      if (wantsProps) return sendJson(req, { notFound: true }, { status: 404 });
       if (notFound) return renderPage(req, notFound, {}, 404);
       return new Response("not found", { status: 404 });
     }
@@ -203,10 +243,10 @@ export async function serve({ dev = false } = {}) {
       if (props instanceof Response) {
         // surface loader redirects as data, so the client runtime can follow
         const location = props.headers.get("Location");
-        if (location) return Response.json({ redirect: location });
+        if (location) return sendJson(req, { redirect: location });
         return props;
       }
-      return Response.json({ props });
+      return sendJson(req, { props });
     }
 
     return renderPage(req, matched.route, matched.params, 200);

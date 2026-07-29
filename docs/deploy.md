@@ -54,11 +54,10 @@ volumes:
 
 ## Reverse proxy
 
-Only the front server needs to be reachable — it proxies `/api/*` to Go and speaks WebSockets natively. Caddy gives you TLS in four lines:
+Only the front server needs to be reachable — it proxies `/api/*` to Go and speaks WebSockets natively. Compression is built-in — static assets are precompressed to `.gz`/`.br` at build time, dynamic responses are gzipped on the fly — so the proxy should not compress again (no `encode` directive in Caddy, `gzip off` is nginx's default). Caddy gives you TLS in three lines:
 
 ```caddy
 example.com {
-    encode gzip
     reverse_proxy localhost:3000
 }
 ```
