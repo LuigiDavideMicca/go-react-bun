@@ -18,7 +18,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </nav>
       </header>
       {children}
-      <footer>demo app for the borgo framework — edited</footer>
+      <footer>demo app for the borgo framework</footer>
     </div>
   );
 }

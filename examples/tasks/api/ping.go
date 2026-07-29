@@ -12,5 +12,5 @@ type Ping struct {
 
 //borgo:route GET /api/ping
 func PingHandler(w http.ResponseWriter, r *http.Request) {
-	borgo.JSON(w, http.StatusOK, Ping{Pong: "v3"})
+	borgo.JSON(w, http.StatusOK, Ping{Pong: "v1"})
 }

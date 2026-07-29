@@ -21,7 +21,7 @@ export default function Hydration() {
         <p>Scroll down to wake the page up ↓</p>
       </div>
       <section data-borgo-visible>
-        <h2>Now hydrated — EDITED</h2>
+        <h2>Now hydrated</h2>
         <button onClick={() => setClicks((c) => c + 1)}>
           clicked {clicks} {clicks === 1 ? "time" : "times"}
         </button>
