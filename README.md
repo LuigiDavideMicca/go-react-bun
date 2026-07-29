@@ -3,8 +3,8 @@
 # borgo
 
 <p>
-  <a href="https://www.npmjs.com/package/borgo-framework"><img src="https://img.shields.io/npm/v/borgo-framework?label=borgo-framework&color=c2552b" alt="npm borgo-framework"/></a>
-  <a href="https://www.npmjs.com/package/create-borgo"><img src="https://img.shields.io/npm/v/create-borgo?color=c2552b" alt="npm create-borgo"/></a>
+  <a href="https://www.npmjs.com/package/borgo-framework"><img src="https://img.shields.io/npm/v/borgo-framework?label=borgo-framework&amp;color=c2552b" alt="npm borgo-framework"/></a>
+  <a href="https://www.npmjs.com/package/create-borgo"><img src="https://img.shields.io/npm/v/create-borgo?label=create-borgo&amp;color=c2552b" alt="npm create-borgo"/></a>
   <a href="https://github.com/LuigiDavideMicca/borgo/actions/workflows/ci.yml"><img src="https://github.com/LuigiDavideMicca/borgo/actions/workflows/ci.yml/badge.svg" alt="ci"/></a>
   <a href="https://pkg.go.dev/github.com/LuigiDavideMicca/borgo"><img src="https://pkg.go.dev/badge/github.com/LuigiDavideMicca/borgo.svg" alt="go reference"/></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-sage" alt="license MIT"/></a>

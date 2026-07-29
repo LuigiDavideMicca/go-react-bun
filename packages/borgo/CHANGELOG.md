@@ -1,6 +1,8 @@
 # Changelog
 
-## [0.9.2](https://github.com/LuigiDavideMicca/borgo/compare/v0.9.1...v0.9.2) (2026-07-29)
+## 0.10.1 (2026-07-29)
+
+Version convergence: both packages now share one linked version.
 
 
 ### Bug Fixes
