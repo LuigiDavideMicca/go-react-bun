@@ -10,18 +10,18 @@ const dim = wrap("2");
 const terracotta = wrap("38;5;173");
 const sage = wrap("38;5;108");
 
-// legacy windows consoles (codepage != 65001) render utf-8 as mojibake
+// on windows, utf-8 marks survive only a real console in codepage 65001
 const unicode = await (async () => {
   if (process.platform !== "win32") return true;
+  if (process.stdout.isTTY !== true) return false;
   try {
     const { dlopen, FFIType } = await import("bun:ffi");
     const kernel32 = dlopen("kernel32.dll", {
       GetConsoleOutputCP: { args: [], returns: FFIType.u32 },
     });
-    const cp = kernel32.symbols.GetConsoleOutputCP();
-    return cp === 65001 || cp === 0;
+    return kernel32.symbols.GetConsoleOutputCP() === 65001;
   } catch {
-    return true;
+    return false;
   }
 })();
 const home = unicode ? "⌂" : "^";

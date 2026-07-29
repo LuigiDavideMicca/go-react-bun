@@ -13,20 +13,20 @@ export const c = {
   blue: wrap("38;5;109"),
 };
 
-// legacy windows consoles (codepage != 65001) render utf-8 as mojibake;
-// fall back to ascii marks there. 0 means no console at all: piped output
-// stays utf-8
+// on windows, utf-8 marks survive only a real console in codepage 65001:
+// legacy consoles render mojibake, and piped output gets decoded with
+// powershell's legacy default. everywhere else utf-8 is safe
 export const consoleUnicode: boolean = await (async () => {
   if (process.platform !== "win32") return true;
+  if (process.stdout.isTTY !== true) return false;
   try {
     const { dlopen, FFIType } = await import("bun:ffi");
     const kernel32 = dlopen("kernel32.dll", {
       GetConsoleOutputCP: { args: [], returns: FFIType.u32 },
     });
-    const cp = kernel32.symbols.GetConsoleOutputCP();
-    return cp === 65001 || cp === 0;
+    return kernel32.symbols.GetConsoleOutputCP() === 65001;
   } catch {
-    return true;
+    return false;
   }
 })();
 
