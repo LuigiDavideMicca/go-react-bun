@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { makeApiClient } from "./api";
 import { buildAssets, compileCss } from "./build";
-import { banner, c, fmtMs, statusColor } from "./colors";
+import { banner, c, fmtMs, g, statusColor } from "./colors";
 import { registerIslands } from "./index";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, type Head, type Route } from "./router";
@@ -362,7 +362,7 @@ export async function serve({ dev = false } = {}) {
 
   const ready = performance.now() - started;
   if (process.env.BORGO_RELOAD) {
-    console.log(`  ${c.sage("✓")} rebuilt in ${fmtMs(ready)}`);
+    console.log(`  ${c.sage(g.ok)} rebuilt in ${fmtMs(ready)}`);
     return;
   }
 
@@ -376,7 +376,7 @@ export async function serve({ dev = false } = {}) {
     const colored = pattern.replace(/:(\w+)/g, (m) => c.terracotta(m));
     console.log(`  ${colored}${" ".repeat(width - pattern.length)}  ${c.dim(file)}`);
   }
-  console.log(`\n  ${c.sage("✓")} ready in ${c.bold(fmtMs(ready))}`);
-  console.log(`  ${c.terracotta("➜")} app  ${c.blue(`http://localhost:${port}`)}`);
-  console.log(`  ${c.terracotta("➜")} api  ${c.blue(api)} ${c.dim("go, proxied at /api")}\n`);
+  console.log(`\n  ${c.sage(g.ok)} ready in ${c.bold(fmtMs(ready))}`);
+  console.log(`  ${c.terracotta(g.arrow)} app  ${c.blue(`http://localhost:${port}`)}`);
+  console.log(`  ${c.terracotta(g.arrow)} api  ${c.blue(api)} ${c.dim("go, proxied at /api")}\n`);
 }

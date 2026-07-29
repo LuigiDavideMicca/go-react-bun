@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { c } from "./colors";
+import { c, g } from "./colors";
 
 export const goBinName = () => "api" + (process.platform === "win32" ? ".exe" : "");
 
@@ -12,7 +12,7 @@ export async function runBorgogen() {
     const stderr = await new Response(proc.stderr).text();
     console.error(stderr.trimEnd());
     console.error(
-      `  ${c.red("✗")} borgogen failed - api types are stale ${c.dim("(is `tool github.com/LuigiDavideMicca/borgo/cmd/borgogen` in go.mod?)")}`,
+      `  ${c.red(g.err)} borgogen failed - api types are stale ${c.dim("(is `tool github.com/LuigiDavideMicca/borgo/cmd/borgogen` in go.mod?)")}`,
     );
   }
 }

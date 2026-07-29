@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
 import { existsSync } from "node:fs";
 import { buildAssets } from "./build";
-import { banner, c, fmtMs } from "./colors";
-import { dev } from "./dev";
-import { serve } from "./server";
+import { banner, c, fmtMs, g } from "./colors";
 import { goBinName, runBorgogen } from "./util";
 
 const command = process.argv[2];
@@ -16,11 +14,14 @@ async function assetLine(path: string, note = "") {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const gzip = Bun.gzipSync(bytes).length;
   const label = note ? c.dim(note) : c.dim(`gzip: ${kb(gzip)}`);
-  console.log(`  ${c.sage("✓")} ${path.padEnd(40)} ${kb(bytes.length).padStart(9)} ${label}`);
+  console.log(`  ${c.sage(g.ok)} ${path.padEnd(40)} ${kb(bytes.length).padStart(9)} ${label}`);
 }
 
 switch (command) {
   case "dev": {
+    // lazy: the server module resolves react from the app, which does not
+    // exist when the cli runs outside a project (e.g. bare `borgo`)
+    const { dev } = await import("./dev");
     await dev();
     break;
   }
@@ -43,11 +44,11 @@ switch (command) {
       stderr: "inherit",
     });
     if ((await goBuild.exited) !== 0) {
-      console.error(`  ${c.red("✗")} go build failed`);
+      console.error(`  ${c.red(g.err)} go build failed`);
       process.exit(1);
     }
     const binSize = Bun.file(bin).size;
-    console.log(`  ${c.sage("✓")} ${bin.padEnd(28)} ${kb(binSize).padStart(9)} ${c.dim("go api binary")}`);
+    console.log(`  ${c.sage(g.ok)} ${bin.padEnd(28)} ${kb(binSize).padStart(9)} ${c.dim("go api binary")}`);
     console.log(`\n  done in ${c.bold(fmtMs(performance.now() - t0))}\n`);
     break;
   }
@@ -58,7 +59,7 @@ switch (command) {
     if (!process.argv.includes("--front-only")) {
       const bin = `dist/${goBinName()}`;
       if (!existsSync(bin)) {
-        console.error(`  ${c.red("✗")} ${bin} not found - run \`borgo build\` first`);
+        console.error(`  ${c.red(g.err)} ${bin} not found - run \`borgo build\` first`);
         process.exit(1);
       }
 
@@ -69,11 +70,12 @@ switch (command) {
       });
       // if the api dies, exit too, so a supervisor restarts the pair
       apiProc.exited.then((code) => {
-        console.error(`  ${c.red("✗")} api process exited (${code})`);
+        console.error(`  ${c.red(g.err)} api process exited (${code})`);
         process.exit(code || 1);
       });
     }
 
+    const { serve } = await import("./server");
     await serve({ dev: false });
     break;
   }

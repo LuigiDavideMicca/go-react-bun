@@ -95,11 +95,15 @@ func printStartup(patterns []string, port string) {
 	if colorEnabled() {
 		dim, sage, terra, reset = "\x1b[2m", "\x1b[38;5;108m", "\x1b[38;5;173m", "\x1b[0m"
 	}
+	home, ok, dot := "⌂", "✓", "·"
+	if !consoleUnicode() {
+		home, ok, dot = "^", "+", "-"
+	}
 	if os.Getenv("BORGO_RELOAD") != "" {
-		fmt.Printf("  %s✓%s api restarted on :%s\n", sage, reset, port)
+		fmt.Printf("  %s%s%s api restarted on :%s\n", sage, ok, reset, port)
 		return
 	}
-	fmt.Printf("\n  %s⌂%s api %s· :%s%s\n", terra, reset, dim, port, reset)
+	fmt.Printf("\n  %s%s%s api %s%s :%s%s\n", terra, home, reset, dim, dot, port, reset)
 	for _, p := range patterns {
 		parts := strings.SplitN(p, " ", 2)
 		fmt.Printf("  %s%-7s%s %s\n", sage, parts[0], reset, parts[1])

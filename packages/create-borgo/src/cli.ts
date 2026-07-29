@@ -10,6 +10,24 @@ const dim = wrap("2");
 const terracotta = wrap("38;5;173");
 const sage = wrap("38;5;108");
 
+// legacy windows consoles (codepage != 65001) render utf-8 as mojibake
+const unicode = await (async () => {
+  if (process.platform !== "win32") return true;
+  try {
+    const { dlopen, FFIType } = await import("bun:ffi");
+    const kernel32 = dlopen("kernel32.dll", {
+      GetConsoleOutputCP: { args: [], returns: FFIType.u32 },
+    });
+    const cp = kernel32.symbols.GetConsoleOutputCP();
+    return cp === 65001 || cp === 0;
+  } catch {
+    return true;
+  }
+})();
+const home = unicode ? "⌂" : "^";
+const ok = unicode ? "✓" : "+";
+const dot = unicode ? "·" : "-";
+
 const version = JSON.parse(
   readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
 ).version as string;
@@ -42,13 +60,13 @@ for (const file of ["package.json", "go.mod", "main.go", "README.md"]) {
 }
 
 console.log(`
-  ${terracotta("⌂")} ${bold("create-borgo")} ${dim(`v${version}`)}
+  ${terracotta(home)} ${bold("create-borgo")} ${dim(`v${version}`)}
 
-  ${sage("✓")} created ${bold(name)}/
+  ${sage(ok)} created ${bold(name)}/
     pages/      ${dim("react pages, file name = route")}
     api/        ${dim("go api routes, mounted via //borgo:route directives")}
     main.go     ${dim("go entrypoint: import api, borgo.Serve()")}
-    index.html  ${dim("html shell")} · style.scss ${dim("global styles")}
+    index.html  ${dim("html shell")} ${dot} style.scss ${dim("global styles")}
 
   next steps
     cd ${name}
@@ -58,5 +76,5 @@ console.log(`
 
   then open ${bold("http://localhost:3000")}
 
-  ${dim("borgo is built by Luigi Micca ·")} ${terracotta("https://luigimicca.com")}
+  ${dim(`borgo is built by Luigi Micca ${dot}`)} ${terracotta("https://luigimicca.com")}
 `);

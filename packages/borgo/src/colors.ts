@@ -13,7 +13,28 @@ export const c = {
   blue: wrap("38;5;109"),
 };
 
-export const mark = c.terracotta("⌂") + " " + c.bold("borgo");
+// legacy windows consoles (codepage != 65001) render utf-8 as mojibake;
+// fall back to ascii marks there. 0 means no console at all: piped output
+// stays utf-8
+export const consoleUnicode: boolean = await (async () => {
+  if (process.platform !== "win32") return true;
+  try {
+    const { dlopen, FFIType } = await import("bun:ffi");
+    const kernel32 = dlopen("kernel32.dll", {
+      GetConsoleOutputCP: { args: [], returns: FFIType.u32 },
+    });
+    const cp = kernel32.symbols.GetConsoleOutputCP();
+    return cp === 65001 || cp === 0;
+  } catch {
+    return true;
+  }
+})();
+
+export const g = consoleUnicode
+  ? { home: "⌂", ok: "✓", err: "✗", change: "↻", arrow: "➜", dot: "·" }
+  : { home: "^", ok: "+", err: "x", change: "~", arrow: ">", dot: "-" };
+
+export const mark = c.terracotta(g.home) + " " + c.bold("borgo");
 
 export const version: string = await Bun.file(new URL("../package.json", import.meta.url))
   .json()

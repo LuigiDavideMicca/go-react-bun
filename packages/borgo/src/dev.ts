@@ -1,7 +1,7 @@
 import { renameSync, watch } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
-import { c } from "./colors";
+import { c, g } from "./colors";
 import { goBinName, runBorgogen } from "./util";
 
 const serverEntry = fileURLToPath(new URL("serve-entry.ts", import.meta.url));
@@ -59,7 +59,7 @@ export async function dev() {
       stderr: "inherit",
     });
     if ((await build.exited) !== 0) {
-      console.error(`  ${c.red("✗")} go build failed, the previous api keeps serving...`);
+      console.error(`  ${c.red(g.err)} go build failed, the previous api keeps serving...`);
       return;
     }
     goProc?.kill();
@@ -80,7 +80,7 @@ export async function dev() {
     });
     goProc = proc;
     const ready = await apiReady(proc);
-    if (!ready) console.error(`  ${c.red("✗")} api is not answering on :${apiPort}`);
+    if (!ready) console.error(`  ${c.red(g.err)} api is not answering on :${apiPort}`);
     if (reload && ready) await notifyFront("reload");
   };
 
@@ -124,7 +124,7 @@ export async function dev() {
       side,
       setTimeout(() => {
         if (log) {
-          console.log(`  ${c.terracotta("↻")} ${file.replaceAll("\\", "/")} ${c.dim(`changed, rebuilding ${side}`)}`);
+          console.log(`  ${c.terracotta(g.change)} ${file.replaceAll("\\", "/")} ${c.dim(`changed, rebuilding ${side}`)}`);
         }
         // errors must not poison the chain, or every later rebuild is skipped
         queue = queue
