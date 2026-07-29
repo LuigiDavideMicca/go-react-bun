@@ -55,6 +55,9 @@ async function openRefreshPage(page: import("@playwright/test").Page) {
     await page.reload();
     await page.waitForFunction(() => (window as any).__hydrated, undefined, { timeout: 30_000 });
   }
+  // never edit before the dev channel is open: an update sent while the
+  // socket is still connecting is silently lost on slow runners
+  await page.waitForFunction(() => (window as any).__borgoDevConnected, undefined, { timeout: 30_000 });
   await page.evaluate(() => ((window as any).__stayed = true));
 }
 
@@ -74,7 +77,9 @@ test.beforeAll(async () => {
     await new Promise((r) => setTimeout(r, 250));
   }
   const { openSync } = await import("node:fs");
-  const logFd = openSync("C:/Users/luigi/AppData/Local/Temp/claude/devserver-e2e.log", "a");
+  const { tmpdir } = await import("node:os");
+  const { join: joinPath } = await import("node:path");
+  const logFd = openSync(joinPath(tmpdir(), "borgo-devserver-e2e.log"), "a");
   server = spawn("bun", ["run", "dev"], {
     cwd: appDir,
     shell: process.platform === "win32",
@@ -284,19 +289,8 @@ test("go edits reload exactly once each, only after the api answers", async ({ p
 });
 
 test("layout edits fall back to a full reload", async ({ page }) => {
-  const { appendFileSync } = await import("node:fs");
-  const dbg: string[] = [];
-  const t = () => Date.now();
-  page.on("websocket", (ws) => {
-    dbg.push(`${t()} ws-open ${ws.url()}`);
-    ws.on("framereceived", (f) => dbg.push(`${t()} ws-recv ${f.payload}`));
-    ws.on("close", () => dbg.push(`${t()} ws-close`));
-  });
-  page.on("framenavigated", (f) => {
-    if (f === page.mainFrame()) dbg.push(`${t()} nav ${f.url()}`);
-  });
-  try {
   await page.goto(base + "/");
+  await page.waitForFunction(() => (window as any).__borgoDevConnected, undefined, { timeout: 30_000 });
   await page.evaluate(() => ((window as any).__stayed = true));
 
   writeFileSync(
@@ -307,15 +301,7 @@ test("layout edits fall back to a full reload", async ({ page }) => {
     ),
   );
 
-  dbg.push(`${t()} write layout`);
   await expect(page.locator("footer")).toContainText("framework — edited", { timeout: 20_000 });
-  dbg.push(`${t()} footer asserted`);
   expect(await page.evaluate(() => (window as any).__stayed)).toBeUndefined();
   writeFileSync(layoutFile, originals.get(layoutFile)!);
-  } finally {
-    appendFileSync(
-      "C:/Users/luigi/AppData/Local/Temp/claude/layout-debug.log",
-      `\n===== ${new Date().toISOString()}\n` + dbg.join("\n") + "\n",
-    );
-  }
 });

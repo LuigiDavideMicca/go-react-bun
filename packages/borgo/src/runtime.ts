@@ -372,6 +372,11 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
 
     const connect = () => {
       const ws = new WebSocket(`ws://${location.host}/__borgo/dev`);
+      // observable readiness: edits made before the channel is open are lost,
+      // so tests (and curious users) can wait on this flag
+      ws.onopen = () => {
+        (window as unknown as Record<string, unknown>).__borgoDevConnected = true;
+      };
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         if (msg.type === "reload") location.reload();
