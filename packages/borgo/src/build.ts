@@ -202,8 +202,8 @@ export type BuildResult = { assets: Asset[]; chunkMap: Record<string, string> };
 
 export async function compileCss(dev = false) {
   if (!existsSync("style.scss")) return;
-  const sass = await import("sass");
-  const css = sass.compile("style.scss", { style: dev ? "expanded" : "compressed" });
+  const sass = await import("sass-embedded");
+  const css = await sass.compileAsync("style.scss", { style: dev ? "expanded" : "compressed" });
   await Bun.write(`${outDir}/style.css`, css.css);
 }
 
