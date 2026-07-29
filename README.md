@@ -208,11 +208,12 @@ Go itself stays stdlib-only — the WebSocket termination lives where Bun alread
 
 `borgo dev` keeps the browser hot over a WebSocket channel (`/__borgo/dev`):
 
-- **Component and page edits** apply through [react-refresh](https://www.npmjs.com/package/react-refresh) — the current route's new chunk is imported, loader props are refetched, and component state (hooks) survives the edit.
+- **Component, page and hook edits** apply through [react-refresh](https://www.npmjs.com/package/react-refresh) with the full babel transform (dev builds only) — the current route's new chunk is imported, loader props are refetched, and component state survives a body edit. Changing a component's *hooks* (add, remove, reorder, or a signature change inside a custom hook) remounts just that component, Next-style; the rest of the page keeps its state. Custom hook body edits hot-apply with dependent state intact.
 - **CSS edits** recompile and swap the stylesheet in place, no reload, no state loss.
-- **Everything else falls back to a full reload**: layouts and error pages (they live in the entry chunk), `index.html`, and any Go change (the API binary is rebuilt and restarted first). Non-hydrated pages carry a tiny dev-only client that reloads on change and hot-swaps CSS.
+- **Everything else falls back to a full reload**: layouts and error pages (they live in the entry chunk), `index.html`, and any Go change — the API binary is rebuilt while the old one keeps serving, swapped in, and the browser reloads only once the new API actually answers.
+- **A broken build doesn't take the port down**: the front server keeps serving the error overlay and the dev channel, and the page reloads itself when the next good save lands.
 
-The mechanics, honestly: an edit restarts the front server for a clean server module graph; the browser never reloads — it reconnects and hot-applies the change from the boot greeting. Component registration is name-based (top-level capitalized functions), without the full babel transform — editing a component's *hooks* may keep stale state; save again or reload if a hook edit looks off.
+The mechanics, honestly: an edit restarts the front server for a clean server module graph; the browser never reloads — it reconnects and hot-applies the change from the boot greeting.
 
 ### Sessions, auth and caching
 
@@ -302,7 +303,7 @@ Three layers, all run by CI on every push:
 
 - **Go** (`go test ./...`) — table-driven tests for the route registry, sessions (sign/verify/tamper/expiry), cache headers, SSE stream framing and hub broadcast/slow-client behavior, `borgo.Push`, and borgogen against a committed fixture app: route discovery (directives + `Handle` calls), helper following, `WriteJSON`, `Bind`, type overrides, snapshot freshness, and the error paths (duplicate patterns, malformed directives).
 - **TypeScript** (`bun test packages/borgo/test`) — the router (patterns, matching, params), the api client (URL building, headers, `ApiError`, typed bodies plumbing), hydrate/refresh source parsing, and manifest generation against a temp fixture (islands flags, client-route exclusion, precedence).
-- **End-to-end** (`npx playwright test`) — against a production build of `examples/tasks`: client navigation, hover/viewport prefetching, scroll restoration, islands, hydration modes, form actions, SSE, two-tab WebSockets with Go push, streaming SSR, error pages — plus a dev-server project asserting fast refresh preserves component state, CSS hot-swaps, and layouts fall back to a reload.
+- **End-to-end** (`npx playwright test`) — against a production build of `examples/tasks`: client navigation, hover/viewport prefetching, scroll restoration, islands, hydration modes, form actions, SSE, two-tab WebSockets with Go push, streaming SSR, error pages — plus a dev-server project asserting fast refresh preserves component state (including five consecutive rapid edits), hook add/remove remounts without a reload, custom hook edits hot-apply, Go edits reload exactly once and only after the api answers, CSS hot-swaps, and layouts fall back to a reload.
 
 ## Versioning and releases
 
@@ -324,7 +325,7 @@ Honest comparison with the frameworks a borgo adopter would otherwise pick. ✓ 
 | Form actions | ✓ | ✓ | ✓ | ✓ |
 | SSE + WebSockets first-class | ✓ | bring your own | ✓ Nitro | bring your own |
 | Sessions/auth | ✓ signed cookie + recipes | libraries | modules | libraries |
-| Fast refresh | ✓ registration-based | ✓ full transform | ✓ | ✓ |
+| Fast refresh | ✓ full transform | ✓ full transform | ✓ | ✓ |
 | React Server Components | — | ✓ | n/a | n/a |
 | ISR / edge / serverless targets | — | ✓ | ✓ | ✓ |
 | Image/font optimization | — | ✓ | ✓ | — |
@@ -340,7 +341,6 @@ Everything here is a deliberate choice, with the reason attached:
 - **No edge, serverless or ISR targets.** borgo is self-hosted by conviction — one box, two processes, a reverse proxy. `borgo.Cache` headers plus proxy caching cover what ISR covers on a single-site scale.
 - **No image/font optimization pipeline.** The build is one `Bun.build` call and stays that way; put a CDN or `vips` in front if you need it.
 - **No plugin system.** The framework is small enough that the extension mechanism is reading the source and changing it.
-- **Fast refresh without the babel transform.** Component edits keep state through name-based react-refresh registration; a hook-signature edit may need one manual reload. The tradeoff buys a zero-babel toolchain.
 - **Loader data is not streamed on client navigations** — one JSON payload, fetched in parallel with the route chunk (and usually prefetched on hover). Streaming applies to initial SSR, where it matters most.
 - **Sessions are mechanics, not policy.** Signed cookie in, tamper-proof out; OAuth, user stores and CSRF strategy stay in your hands.
 - **The typed bridge is static analysis, no runtime reflection.** Helpers inside `api/` are followed and `//borgo:type` covers custom marshalers; a response written through `json.NewEncoder` or a helper in another package types as `unknown` — the escape hatch is visible, not silent.

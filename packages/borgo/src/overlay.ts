@@ -25,8 +25,22 @@ export function overlayHtml(error: unknown): string {
       <div class="mark">⌂ borgo</div>
       <h1>error while rendering</h1>
       <pre>${stack}</pre>
-      <p>this overlay only appears in dev · fix the error and save, the server restarts on change</p>
+      <p>this overlay only appears in dev · fix the error and save, the page reloads on its own</p>
     </div>
+    <script>
+      (() => {
+        const connect = () => {
+          const ws = new WebSocket("ws://" + location.host + "/__borgo/dev");
+          ws.onmessage = (e) => {
+            const m = JSON.parse(e.data);
+            if (m.type === "reload") return location.reload();
+            if (m.type === "js" && (!m.stamp || m.stamp > performance.timeOrigin)) location.reload();
+          };
+          ws.onclose = () => setTimeout(connect, 300);
+        };
+        connect();
+      })();
+    </script>
   </body>
 </html>`;
 }

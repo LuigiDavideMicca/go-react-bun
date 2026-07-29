@@ -7,6 +7,9 @@ const appDir = join(process.cwd(), "examples", "tasks");
 const pageFile = join(appDir, "pages", "hydration.tsx");
 const cssFile = join(appDir, "style.scss");
 const layoutFile = join(appDir, "pages", "_layout.tsx");
+const refreshFile = join(appDir, "pages", "refresh.tsx");
+const hookFile = join(appDir, "lib", "use-counter.ts");
+const pingFile = join(appDir, "api", "ping.go");
 const base = "http://localhost:3410";
 
 let server: ChildProcess;
@@ -20,8 +23,43 @@ function restoreAll() {
   for (const [path, content] of originals) writeFileSync(path, content);
 }
 
+// restore a file and wait until the dev server serves the restored content
+async function settle(path: string, contains: string) {
+  const deadline = Date.now() + 90_000;
+  for (;;) {
+    try {
+      const res = await fetch(base + path);
+      if (res.ok && (await res.text()).includes(contains)) return;
+    } catch {}
+    if (Date.now() > deadline) throw new Error(`dev server did not settle on ${path}`);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+// restore files, sit out the debounced server restart the writes trigger,
+// then wait for the server to come back; settling on content alone can pass
+// before the restart even begins
+async function resetPlayground(...files: string[]) {
+  for (const f of files) writeFileSync(f, originals.get(f)!);
+  await new Promise((r) => setTimeout(r, 3_000));
+  await settle("/refresh", "MARKER-0");
+}
+
+// the refresh page sets window.__hydrated from an effect; interacting before
+// hydration loses clicks and lets hydration reset the input
+async function openRefreshPage(page: import("@playwright/test").Page) {
+  await page.goto(base + "/refresh");
+  try {
+    await page.waitForFunction(() => (window as any).__hydrated, undefined, { timeout: 15_000 });
+  } catch {
+    await page.reload();
+    await page.waitForFunction(() => (window as any).__hydrated, undefined, { timeout: 30_000 });
+  }
+  await page.evaluate(() => ((window as any).__stayed = true));
+}
+
 test.beforeAll(async () => {
-  for (const f of [pageFile, cssFile, layoutFile]) snapshot(f);
+  for (const f of [pageFile, cssFile, layoutFile, refreshFile, hookFile, pingFile]) snapshot(f);
   server = spawn("bun", ["run", "dev"], {
     cwd: appDir,
     shell: process.platform === "win32",
@@ -81,6 +119,139 @@ test("css edits hot-swap without a reload", async ({ page }) => {
     .toBe("3px");
   expect(await page.evaluate(() => (window as any).__stayed)).toBe(true);
   writeFileSync(cssFile, originals.get(cssFile)!);
+});
+
+test("five consecutive component edits each hot-apply without a reload", async ({ page }) => {
+  test.setTimeout(180_000);
+  await resetPlayground(refreshFile);
+  await openRefreshPage(page);
+  await page.fill("input", "preserved");
+
+  for (let i = 1; i <= 5; i++) {
+    writeFileSync(refreshFile, readFileSync(refreshFile, "utf8").replace(/MARKER-\d+/, `MARKER-${i}`));
+    await expect(page.locator("[data-marker]")).toHaveText(`MARKER-${i}`, { timeout: 30_000 });
+  }
+  expect(await page.evaluate(() => (window as any).__stayed)).toBe(true);
+  await expect(page.locator("input")).toHaveValue("preserved");
+});
+
+test("adding and removing a hook remounts the component, no reload, no overlay", async ({ page }) => {
+  test.setTimeout(180_000);
+  const original = originals.get(refreshFile)!;
+  await resetPlayground(refreshFile);
+  await openRefreshPage(page);
+  await page.fill("input", "will-reset");
+
+  writeFileSync(
+    refreshFile,
+    original
+      .replace(
+        'const [text, setText] = useState("");',
+        'const [text, setText] = useState("");\n  const [extra] = useState("EXTRA-STATE");',
+      )
+      .replace(
+        "<h1>Fast refresh playground</h1>",
+        "<h1>Fast refresh playground</h1>\n      <p data-extra>{extra}</p>",
+      ),
+  );
+  await expect(page.locator("[data-extra]")).toHaveText("EXTRA-STATE", { timeout: 30_000 });
+  expect(await page.evaluate(() => (window as any).__stayed)).toBe(true);
+  await expect(page.locator("input")).toHaveValue("");
+  await expect(page.locator("#borgo-overlay")).toHaveCount(0);
+  await page.click("button");
+  await expect(page.locator("button")).toContainText("count 1");
+
+  writeFileSync(refreshFile, original);
+  await expect(page.locator("[data-extra]")).toHaveCount(0, { timeout: 30_000 });
+  expect(await page.evaluate(() => (window as any).__stayed)).toBe(true);
+  await expect(page.locator("#borgo-overlay")).toHaveCount(0);
+  await page.click("button");
+  await expect(page.locator("button")).toContainText("count 1");
+});
+
+test("custom hook body edit hot-applies and keeps dependent state", async ({ page }) => {
+  test.setTimeout(180_000);
+  await resetPlayground(refreshFile, hookFile);
+  await openRefreshPage(page);
+  await page.click("button");
+  await page.click("button");
+  await expect(page.locator("button")).toContainText("count 2");
+
+  writeFileSync(hookFile, originals.get(hookFile)!.replace("setCount((c) => c + 1)", "setCount((c) => c + 10)"));
+  // the edit hot-applies with state intact: a click starts jumping by ten
+  let prev = 2;
+  let current = 2;
+  await expect
+    .poll(
+      async () => {
+        await page.click("button");
+        const text = await page.locator("button").textContent();
+        current = Number(text?.match(/count (\d+)/)?.[1] ?? Number.NaN);
+        const delta = current - prev;
+        prev = current;
+        return delta;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(10);
+  // preserved state: 2 + the plain clicks + at least one ten-step; a remount
+  // would have restarted from zero and landed exactly on ten
+  expect(current).toBeGreaterThanOrEqual(12);
+  expect(await page.evaluate(() => (window as any).__stayed)).toBe(true);
+});
+
+test("hook edits inside a custom hook remount dependents cleanly", async ({ page }) => {
+  test.setTimeout(180_000);
+  await resetPlayground(refreshFile, hookFile);
+  await openRefreshPage(page);
+  await page.click("button");
+  await page.click("button");
+  await expect(page.locator("button")).toContainText("count 2");
+
+  writeFileSync(
+    hookFile,
+    originals.get(hookFile)!.replace(
+      "const [count, setCount] = useState(0);",
+      "const [count, setCount] = useState(0);\n  const [flag] = useState(false);\n  void flag;",
+    ),
+  );
+  await expect(page.locator("button")).toContainText("count 0", { timeout: 30_000 });
+  expect(await page.evaluate(() => (window as any).__stayed)).toBe(true);
+  await expect(page.locator("#borgo-overlay")).toHaveCount(0);
+  await page.click("button");
+  await expect(page.locator("button")).toContainText("count 1");
+});
+
+test("go edits reload exactly once each, only after the api answers", async ({ page }) => {
+  test.setTimeout(180_000);
+  writeFileSync(pingFile, originals.get(pingFile)!);
+  const deadline = Date.now() + 90_000;
+  for (;;) {
+    try {
+      const res = await fetch(base + "/api/ping");
+      if (res.ok && (await res.json()).pong === "v1") break;
+    } catch {}
+    if (Date.now() > deadline) throw new Error("api did not settle on v1");
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  await page.addInitScript(() => {
+    sessionStorage.setItem("loads", String(Number(sessionStorage.getItem("loads") || 0) + 1));
+  });
+  await page.goto(base + "/refresh");
+  // the reload under test can destroy the execution context mid-evaluate
+  const loads = () => page.evaluate(() => Number(sessionStorage.getItem("loads"))).catch(() => -1);
+  const ping = () => page.evaluate(async () => (await (await fetch("/api/ping")).json()).pong);
+  expect(await ping()).toBe("v1");
+
+  for (const v of ["v2", "v3"]) {
+    const before = await loads();
+    writeFileSync(pingFile, readFileSync(pingFile, "utf8").replace(/Pong: "v\d"/, `Pong: "${v}"`));
+    await expect.poll(loads, { timeout: 90_000 }).toBe(before + 1);
+    expect(await ping()).toBe(v);
+    await page.waitForTimeout(2_000);
+    expect(await loads()).toBe(before + 1);
+  }
 });
 
 test("layout edits fall back to a full reload", async ({ page }) => {

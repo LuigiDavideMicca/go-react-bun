@@ -6,6 +6,7 @@ import "github.com/LuigiDavideMicca/borgo"
 func init() {
 	borgo.Handle("DELETE /api/tasks/{id}", DeleteTask)
 	borgo.Handle("GET /api/events", Events)
+	borgo.Handle("GET /api/ping", PingHandler)
 	borgo.Handle("GET /api/tasks", ListTasks)
 	borgo.Handle("GET /api/tasks/{id}", GetTask)
 	borgo.Handle("POST /api/tasks", CreateTask)

@@ -320,7 +320,12 @@ export async function serve({ dev = false } = {}) {
           return undefined as never;
         }
         if (req.method === "POST" && url.pathname === "/__borgo/dev/css") {
-          await compileCss(true);
+          try {
+            await compileCss(true);
+          } catch (error) {
+            console.error(error instanceof Error ? error.message : error);
+            return new Response(null, { status: 500 });
+          }
           broadcast({ type: "css" });
           return new Response(null, { status: 204 });
         }

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateManifest, parseHydrate, refreshFooter } from "../src/build";
+import { generateManifest, parseHydrate, refreshTransform } from "../src/build";
 
 describe("parseHydrate", () => {
   const cases: Array<[string, string, string]> = [
@@ -20,27 +20,49 @@ describe("parseHydrate", () => {
   }
 });
 
-describe("refreshFooter", () => {
-  test("registers top-level capitalized functions and consts", () => {
+describe("refreshTransform", () => {
+  test("registers components and scopes ids to the module", async () => {
     const js = [
-      "function Page() {}",
-      "export default function Home() {}",
-      "const Card = () => null;",
-      "export const Nav = () => null;",
-      "function helper() {}",
-      "const util = 1;",
+      'import { useState } from "react";',
+      "export default function Home() { const [n] = useState(0); return n; }",
+      "function helper() { return 1; }",
     ].join("\n");
-    const footer = refreshFooter(js, "pages/index.tsx");
-    for (const name of ["Page", "Home", "Card", "Nav"]) {
-      expect(footer).toContain(`$RefreshRuntime$.register(${name},`);
-      expect(footer).toContain(`"pages/index.tsx#${name}"`);
-    }
-    expect(footer).not.toContain("helper");
-    expect(footer).not.toContain("util");
+    const out = await refreshTransform(js, "pages/index.tsx");
+    expect(out).toContain("$RefreshReg$");
+    expect(out).toContain('"pages/index.tsx"');
+    expect(out).toContain('"Home"');
+    expect(out).toContain("$borgoPrevReg");
   });
 
-  test("empty when no components", () => {
-    expect(refreshFooter("const x = 1;", "m")).toBe("");
+  test("emits hook signatures so hook edits remount instead of corrupting state", async () => {
+    const withState = await refreshTransform(
+      'import { useState } from "react";\nexport default function P() { const [a] = useState(1); return a; }',
+      "pages/p.tsx",
+    );
+    const withTwo = await refreshTransform(
+      'import { useState } from "react";\nexport default function P() { const [a] = useState(1); const [b] = useState(2); return a + b; }',
+      "pages/p.tsx",
+    );
+    expect(withState).toContain("$RefreshSig$");
+    expect(withTwo).toContain("$RefreshSig$");
+    const sigOf = (code: string) => code.match(/_s\d*\(P, "([^"]+)"/)?.[1];
+    expect(sigOf(withState)).toBeTruthy();
+    expect(sigOf(withTwo)).toBeTruthy();
+    expect(sigOf(withState)).not.toBe(sigOf(withTwo));
+  });
+
+  test("instruments custom hooks with signatures", async () => {
+    const out = await refreshTransform(
+      'import { useState } from "react";\nexport function useCounter() { const [n, setN] = useState(0); return [n, setN]; }',
+      "lib/use-counter.ts",
+    );
+    expect(out).toContain("$RefreshSig$");
+    expect(out).toContain("useCounter");
+  });
+
+  test("passes plain modules through untouched", async () => {
+    const js = "export const x = 1;\n";
+    expect(await refreshTransform(js, "lib/util.ts")).toBe(js);
   });
 });
 

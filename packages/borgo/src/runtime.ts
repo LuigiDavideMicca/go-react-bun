@@ -334,12 +334,15 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       try {
         sessionStorage.setItem("borgo:devstamp", String(msg.stamp));
       } catch {}
-      if (!/\.tsx$/.test(file) || /(^|\/)_(layout|404|500)\.tsx$/.test(file)) {
+      if (!/\.tsx?$/.test(file) || /(^|\/)_(layout|404|500)\.tsx$/.test(file)) {
         return location.reload();
       }
+      // reverting an edit restores the previous chunk hash, which the module
+      // cache would silently serve stale; the stamp forces re-execution
+      const bust = msg.stamp ? `?v=${msg.stamp}` : "";
       for (const route of [...routes, ...(notFound ? [notFound] : [])]) {
         const chunk = chunks[route.file];
-        if (chunk) route.load = () => import(chunk);
+        if (chunk) route.load = () => import(chunk + bust);
       }
       if (!currentRoute || !root) return location.reload();
       if (file.startsWith("pages/") && file !== "pages/" + currentRoute.file) return;
@@ -348,15 +351,21 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       try {
         const route = currentRoute;
         const [module, res] = await Promise.all([
-          import(chunk) as Promise<ClientPageModule>,
+          import(chunk + bust) as Promise<ClientPageModule>,
           fetchProps(new URL(location.href)),
         ]);
         if (!res.ok) throw new Error(`props fetch failed: ${res.status}`);
         const props = (await res.json()).props ?? {};
+        // refresh first: families must swap (and hook-signature changes
+        // remount) before the new module renders against existing fibers
+        (globalThis as { $RefreshRuntime$?: { performReactRefresh: () => void } }).$RefreshRuntime$?.performReactRefresh();
         root.render(compose(createElement, route, module, props));
         applyHead(resolveHead(module, props));
-        (globalThis as { $RefreshRuntime$?: { performReactRefresh: () => void } }).$RefreshRuntime$?.performReactRefresh();
       } catch {
+        // a rapid next edit restarts the server mid-apply and kills these
+        // fetches; give its welcome message a chance to take over first
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        if (lastStamp !== msg.stamp) return;
         location.reload();
       }
     }

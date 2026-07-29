@@ -208,6 +208,7 @@ export async function compileCss(dev = false) {
 }
 
 export async function buildAssets(dev = false): Promise<BuildResult> {
+  if (dev) void loadBabelRefresh();
   const { hasIslands } = await generateManifest(dev);
   await compileCss(dev);
 
@@ -248,24 +249,45 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
   return { assets, chunkMap };
 }
 
-// registers top-level capitalized functions with react-refresh, so an edit
-// swaps implementations without losing component state
-export function refreshFooter(js: string, moduleId: string) {
-  const names = new Set<string>();
-  for (const m of js.matchAll(/(?:^|\n)\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Z]\w*)\s*\(/g)) {
-    names.add(m[1]);
-  }
-  for (const m of js.matchAll(/(?:^|\n)\s*(?:export\s+)?(?:const|let|var)\s+([A-Z]\w*)\s*=/g)) {
-    names.add(m[1]);
-  }
-  if (names.size === 0) return "";
-  const regs = [...names]
-    .map(
-      (n) =>
-        `if (typeof ${n} === "function") globalThis.$RefreshRuntime$.register(${n}, ${JSON.stringify(moduleId + "#" + n)});`,
-    )
-    .join("\n  ");
-  return `\nif (globalThis.$RefreshRuntime$) {\n  ${regs}\n}\n`;
+// full react-refresh instrumentation: the babel plugin emits $RefreshReg$
+// registrations and $RefreshSig$ hook signatures, so a body edit keeps state
+// and a hook edit remounts just that component, like next. runs on the bun
+// transpiler's output (plain js), dev builds only.
+let babelRefresh: {
+  transformSync: typeof import("@babel/core").transformSync;
+  plugin: unknown;
+} | null = null;
+
+async function loadBabelRefresh() {
+  if (babelRefresh) return babelRefresh;
+  const babel = await import("@babel/core");
+  const mod = (await import("react-refresh/babel")) as { default?: unknown };
+  babelRefresh = { transformSync: babel.transformSync, plugin: mod.default ?? mod };
+  return babelRefresh;
+}
+
+export function refreshWrap(js: string, moduleId: string) {
+  const id = JSON.stringify(moduleId);
+  return (
+    `var $borgoPrevReg = globalThis.$RefreshReg$, $borgoPrevSig = globalThis.$RefreshSig$;\n` +
+    `globalThis.$RefreshReg$ = (type, name) => globalThis.$RefreshRuntime$ && globalThis.$RefreshRuntime$.register(type, ${id} + "#" + name);\n` +
+    `globalThis.$RefreshSig$ = () => globalThis.$RefreshRuntime$ ? globalThis.$RefreshRuntime$.createSignatureFunctionForTransform() : (type) => type;\n` +
+    js +
+    `\nglobalThis.$RefreshReg$ = $borgoPrevReg; globalThis.$RefreshSig$ = $borgoPrevSig;\n`
+  );
+}
+
+export async function refreshTransform(js: string, moduleId: string): Promise<string> {
+  const { transformSync, plugin } = await loadBabelRefresh();
+  const out = transformSync(js, {
+    configFile: false,
+    babelrc: false,
+    compact: false,
+    plugins: [[plugin, { skipEnvCheck: true }]],
+  });
+  const code = out?.code;
+  if (!code || !/\$Refresh(Reg|Sig)\$/.test(code)) return js;
+  return refreshWrap(code, moduleId);
 }
 
 // pages are rewritten for the client build with their loader and action
@@ -284,19 +306,24 @@ function appTranspile(define: Record<string, string>, dev: boolean): import("bun
     define,
   });
   const plainTranspiler = new Bun.Transpiler({ loader: "tsx", autoImportJSX: true, define });
+  const tsTranspiler = new Bun.Transpiler({ loader: "ts", define });
   return {
     name: "borgo-app-transpile",
     setup(build) {
-      build.onLoad({ filter: /\.tsx$/ }, async (args) => {
+      // .ts modules matter in dev too: custom hooks must carry signatures, or
+      // react-refresh force-remounts every component that uses them
+      build.onLoad({ filter: /\.tsx?$/ }, async (args) => {
         if (!args.path.startsWith(cwd) || args.path.includes("node_modules")) return undefined;
+        const rel = args.path.slice(cwd.length).replaceAll("\\", "/");
+        if (rel.startsWith(".borgo/")) return undefined;
         const isPage = args.path.startsWith(pagesDir);
         if (!isPage && !dev) return undefined;
-        const rel = args.path.slice(cwd.length).replaceAll("\\", "/");
         const source = await Bun.file(args.path).text();
-        let js = (isPage ? pageTranspiler : plainTranspiler).transformSync(source);
+        const transpiler = isPage ? pageTranspiler : rel.endsWith(".tsx") ? plainTranspiler : tsTranspiler;
+        let js = transpiler.transformSync(source);
         if (dev) {
+          js = await refreshTransform(js, rel);
           if (isPage) js += `\nglobalThis[${JSON.stringify("borgo-page:" + rel.slice("pages/".length))}] = 1;\n`;
-          js += refreshFooter(js, rel);
         }
         return { contents: js, loader: "js" };
       });
