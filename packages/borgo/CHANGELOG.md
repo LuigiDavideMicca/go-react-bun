@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.1](https://github.com/LuigiDavideMicca/borgo/compare/v0.9.0...v0.9.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* compile scss with sass-embedded, dropping the postinstall bun blocks on fresh installs ([bb4ba67](https://github.com/LuigiDavideMicca/borgo/commit/bb4ba67afab310ec5bbe4809f371cc3d29ced608))
+* document the bun shim path failure and the safe ways around it ([f6404d0](https://github.com/LuigiDavideMicca/borgo/commit/f6404d039255befde493e109dfe29a11ae1befd1))
+* fall back to ascii marks on legacy windows consoles ([f4ef03d](https://github.com/LuigiDavideMicca/borgo/commit/f4ef03dd95ccd6187b56a8746e350bbe4bce0100))
+* make hot reload reliable and give hook edits next-level fast refresh ([51ff7e1](https://github.com/LuigiDavideMicca/borgo/commit/51ff7e105827de7878bb0da3fde63616db0a1d2d))
+* publish the runtime as borgo-framework, npm rejects the short name ([1c8d5ca](https://github.com/LuigiDavideMicca/borgo/commit/1c8d5caa7128fc3eb137715d91eb14edccb46d0d))
+* rename the generated entry imports to borgo-framework ([35e1a73](https://github.com/LuigiDavideMicca/borgo/commit/35e1a73e91d20df7e54f81d85d25d07d625bb234))
+* treat piped windows output as legacy too, powershell decodes it as ansi ([a9450df](https://github.com/LuigiDavideMicca/borgo/commit/a9450df0684907b1ab68c5e9a1718be66c8837b4))
+
 ## 0.9.0 (2026-07-29)
 
 
