@@ -171,7 +171,11 @@ export async function dev() {
       const hash = String(Bun.hash(readFileSync(file)));
       if (lastSeen.get(file) === hash) return true;
       lastSeen.set(file, hash);
-    } catch {}
+    } catch {
+      // unreadable usually means deleted: forget the hash, or recreating the
+      // file with identical content (git stash pop) would never rebuild
+      lastSeen.delete(file);
+    }
     return false;
   };
 
