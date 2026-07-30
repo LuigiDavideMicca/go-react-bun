@@ -2,9 +2,12 @@ package borgo
 
 import (
 	"bufio"
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -52,7 +55,7 @@ func TestSSERequiresFlusher(t *testing.T) {
 
 func TestHubSkipsSlowClients(t *testing.T) {
 	hub := NewSSEHub()
-	slow := make(chan hubMsg, 1)
+	slow := make(chan []byte, 1)
 	hub.mu.Lock()
 	hub.subs[slow] = struct{}{}
 	hub.mu.Unlock()
@@ -63,8 +66,107 @@ func TestHubSkipsSlowClients(t *testing.T) {
 	if len(slow) != 1 {
 		t.Fatalf("want exactly one buffered message, got %d", len(slow))
 	}
-	if msg := <-slow; msg.event != "first" {
-		t.Fatalf("kept message = %q, want first", msg.event)
+	if frame := string(<-slow); !strings.HasPrefix(frame, "event: first\n") {
+		t.Fatalf("kept message = %q, want first", frame)
+	}
+}
+
+// an unencodable payload used to travel to every subscriber and fail there,
+// closing every open stream
+func TestHubDropsUnpublishableEvents(t *testing.T) {
+	hub := NewSSEHub()
+	sub := make(chan []byte, 4)
+	hub.mu.Lock()
+	hub.subs[sub] = struct{}{}
+	hub.mu.Unlock()
+
+	hub.Publish("broken", make(chan int))
+	hub.Publish("multi\nline", 1)
+	hub.Publish("fine", 1)
+
+	if len(sub) != 1 {
+		t.Fatalf("want only the valid event queued, got %d", len(sub))
+	}
+	if frame := string(<-sub); !strings.HasPrefix(frame, "event: fine\n") {
+		t.Fatalf("queued frame = %q", frame)
+	}
+}
+
+func TestHubUnderConcurrentSubscribers(t *testing.T) {
+	hub := NewSSEHub()
+	server := httptest.NewServer(hub)
+	defer server.Close()
+
+	stop := make(chan struct{})
+	var publishers sync.WaitGroup
+	for p := range 4 {
+		publishers.Add(1)
+		go func() {
+			defer publishers.Done()
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				hub.Publish("tick", map[string]int{"p": p, "i": i})
+			}
+		}()
+	}
+
+	var clients sync.WaitGroup
+	for range 16 {
+		clients.Add(1)
+		go func() {
+			defer clients.Done()
+			for range 8 {
+				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+				res, err := http.DefaultClient.Do(req)
+				if err == nil {
+					io.Copy(io.Discard, io.LimitReader(res.Body, 1<<12))
+					res.Body.Close()
+				}
+				cancel()
+			}
+		}()
+	}
+	clients.Wait()
+	close(stop)
+	publishers.Wait()
+
+	// every stream that ended must have unsubscribed: a hub that leaks slots
+	// grows without bound
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		hub.mu.Lock()
+		n := len(hub.subs)
+		hub.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d subscriptions leaked after every client disconnected", n)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func BenchmarkHubPublish(b *testing.B) {
+	hub := NewSSEHub()
+	for range 100 {
+		ch := make(chan []byte, 1)
+		hub.subs[ch] = struct{}{}
+		// drain so the buffer never fills and short-circuits the send
+		go func() {
+			for range ch {
+			}
+		}()
+	}
+	payload := map[string]any{"id": 7, "title": "a task", "done": false}
+	b.ReportAllocs()
+	for b.Loop() {
+		hub.Publish("task-created", payload)
 	}
 }
 

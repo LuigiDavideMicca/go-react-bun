@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -49,45 +50,51 @@ func SSE(w http.ResponseWriter, r *http.Request) (*SSEStream, error) {
 // Send writes one named event with data encoded as JSON. The event name must
 // not contain newlines - they would let one event smuggle extra frames.
 func (s *SSEStream) Send(event string, data any) error {
-	if strings.ContainsAny(event, "\r\n") {
-		return fmt.Errorf("borgo: sse event name must not contain newlines: %q", event)
-	}
-	payload, err := json.Marshal(data)
+	frame, err := sseFrame(event, data)
 	if err != nil {
 		return err
 	}
+	return s.write(frame)
+}
+
+var pingFrame = []byte(": ping\n\n")
+
+// Ping writes a comment line so proxies don't close an idle stream.
+func (s *SSEStream) Ping() error { return s.write(pingFrame) }
+
+func (s *SSEStream) write(frame []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout))
 	defer s.rc.SetWriteDeadline(time.Time{})
-	if _, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", event, payload); err != nil {
+	if _, err := s.w.Write(frame); err != nil {
 		return err
 	}
 	s.f.Flush()
 	return nil
 }
 
-// Ping writes a comment line so proxies don't close an idle stream.
-func (s *SSEStream) Ping() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout))
-	defer s.rc.SetWriteDeadline(time.Time{})
-	if _, err := fmt.Fprint(s.w, ": ping\n\n"); err != nil {
-		return err
+// sseFrame renders one event as wire bytes. json.Marshal is compact, so the
+// payload cannot break out of its data: line.
+func sseFrame(event string, data any) ([]byte, error) {
+	if strings.ContainsAny(event, "\r\n") {
+		return nil, fmt.Errorf("borgo: sse event name must not contain newlines: %q", event)
 	}
-	s.f.Flush()
-	return nil
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	frame := make([]byte, 0, len(event)+len(payload)+16)
+	frame = append(frame, "event: "...)
+	frame = append(frame, event...)
+	frame = append(frame, "\ndata: "...)
+	frame = append(frame, payload...)
+	return append(frame, "\n\n"...), nil
 }
 
 // Done closes when the client disconnects.
 func (s *SSEStream) Done() <-chan struct{} {
 	return s.r.Context().Done()
-}
-
-type hubMsg struct {
-	event string
-	data  any
 }
 
 // SSEHub broadcasts events to every connected client. Register its ServeHTTP
@@ -99,21 +106,28 @@ type hubMsg struct {
 //	func Events(w http.ResponseWriter, r *http.Request) { events.ServeHTTP(w, r) }
 type SSEHub struct {
 	mu   sync.Mutex
-	subs map[chan hubMsg]struct{}
+	subs map[chan []byte]struct{}
 }
 
 func NewSSEHub() *SSEHub {
-	return &SSEHub{subs: map[chan hubMsg]struct{}{}}
+	return &SSEHub{subs: map[chan []byte]struct{}{}}
 }
 
 // Publish sends the event to every connected client. Clients too slow to
-// keep up skip messages instead of blocking the publisher.
+// keep up skip messages instead of blocking the publisher. A payload that
+// will not encode is logged and dropped: one bad Publish must not disconnect
+// every open stream.
 func (h *SSEHub) Publish(event string, data any) {
+	frame, err := sseFrame(event, data)
+	if err != nil {
+		log.Printf("borgo: sse publish: %v", err)
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for ch := range h.subs {
 		select {
-		case ch <- hubMsg{event, data}:
+		case ch <- frame:
 		default:
 		}
 	}
@@ -125,7 +139,7 @@ func (h *SSEHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	ch := make(chan hubMsg, 8)
+	ch := make(chan []byte, 8)
 	h.mu.Lock()
 	h.subs[ch] = struct{}{}
 	h.mu.Unlock()
@@ -145,8 +159,8 @@ func (h *SSEHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if stream.Ping() != nil {
 				return
 			}
-		case m := <-ch:
-			if stream.Send(m.event, m.data) != nil {
+		case frame := <-ch:
+			if stream.write(frame) != nil {
 				return
 			}
 		}
