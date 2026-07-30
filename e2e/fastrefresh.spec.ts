@@ -288,6 +288,30 @@ test("go edits reload exactly once each, only after the api answers", async ({ p
   }
 });
 
+test("a go syntax error mid-edit keeps the previous api serving, a fix recovers", async () => {
+  test.setTimeout(180_000);
+  writeFileSync(pingFile, originals.get(pingFile)!);
+  const pong = async () => {
+    try {
+      const res = await fetch(base + "/api/ping");
+      return res.ok ? (await res.json()).pong : null;
+    } catch {
+      return null;
+    }
+  };
+  await expect.poll(pong, { timeout: 90_000 }).toBe("v1");
+
+  // a half-typed file must not take the api down
+  writeFileSync(pingFile, originals.get(pingFile)! + "\nfunc broken( {\n");
+  await new Promise((r) => setTimeout(r, 8_000));
+  expect(await pong()).toBe("v1");
+
+  writeFileSync(pingFile, originals.get(pingFile)!.replace('Pong: "v1"', 'Pong: "v9"'));
+  await expect.poll(pong, { timeout: 90_000 }).toBe("v9");
+  writeFileSync(pingFile, originals.get(pingFile)!);
+  await expect.poll(pong, { timeout: 90_000 }).toBe("v1");
+});
+
 test("layout edits fall back to a full reload", async ({ page }) => {
   await page.goto(base + "/");
   await page.waitForFunction(() => (window as any).__borgoDevConnected, undefined, { timeout: 30_000 });

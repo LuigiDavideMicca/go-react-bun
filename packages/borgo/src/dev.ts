@@ -194,9 +194,11 @@ export async function dev() {
     }
   });
 
-  process.on("SIGINT", () => {
+  process.on("SIGINT", () => process.exit(0));
+  // also fires on crashes (uncaught exceptions), not just ctrl-c: the api
+  // and front server must never outlive the watcher
+  process.on("exit", () => {
     goProc?.kill();
     frontProc?.kill();
-    process.exit(0);
   });
 }
