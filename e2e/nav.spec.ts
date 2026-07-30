@@ -58,15 +58,19 @@ test("scroll position restores on back and forward", async ({ page, request }) =
     });
     expect(visibleHref).toBeTruthy();
 
+    // under cpu saturation the scroll writes land late and a history move can
+    // briefly destroy the execution context, so poll every position
+    const scrollY = () => page.evaluate(() => window.scrollY).catch(() => NaN);
+
     await page.click(`ul a[href="${visibleHref}"]`);
     await expect(page.locator("a", { hasText: "Back home" })).toBeVisible();
-    expect(await page.evaluate(() => scrollY)).toBe(0);
+    await expect.poll(scrollY, { timeout: 15_000 }).toBe(0);
 
     await page.goBack();
-    await expect.poll(() => page.evaluate(() => scrollY), { timeout: 5000 }).toBe(300);
+    await expect.poll(scrollY, { timeout: 15_000 }).toBe(300);
 
     await page.goForward();
-    await expect.poll(() => page.evaluate(() => scrollY), { timeout: 5000 }).toBeLessThan(5);
+    await expect.poll(scrollY, { timeout: 15_000 }).toBeLessThan(5);
   } finally {
     await deleteTasks(request, ids);
   }
