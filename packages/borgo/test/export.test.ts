@@ -104,6 +104,11 @@ describe("fillPattern", () => {
   test("missing params throw with the pattern named", () => {
     expect(() => fillPattern("/tasks/:id", {})).toThrow("/tasks/:id");
   });
+
+  test("params with path separators throw", () => {
+    expect(() => fillPattern("/posts/:slug", { slug: "a/b" })).toThrow("path separator");
+    expect(() => fillPattern("/posts/:slug", { slug: "a\\b" })).toThrow("path separator");
+  });
 });
 
 describe("outputPath", () => {
@@ -112,5 +117,11 @@ describe("outputPath", () => {
     expect(outputPath("/about")).toBe("about/index.html");
     expect(outputPath("/tasks/7")).toBe("tasks/7/index.html");
     expect(outputPath("/trailing/")).toBe("trailing/index.html");
+  });
+
+  test("url-encoded segments decode to real characters on disk", () => {
+    expect(outputPath("/posts/citt%C3%A0")).toBe("posts/città/index.html");
+    expect(outputPath("/a%20b")).toBe("a b/index.html");
+    expect(outputPath("/100%")).toBe("100%/index.html");
   });
 });

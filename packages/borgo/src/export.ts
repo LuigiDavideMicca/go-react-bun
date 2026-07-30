@@ -52,21 +52,37 @@ export function planExport(routes: Route[], notFound: Route | null = null): Expo
   return plan;
 }
 
+// the result is a url path (fed to fetch), so params are encoded; a param
+// with a path separator would silently change the route shape, reject it
 export function fillPattern(pattern: string, params: Record<string, string | number>): string {
   return pattern.replace(/:(\w+)/g, (_, name) => {
     const value = params[name];
     if (value === undefined) {
       throw new Error(`prerenderPaths for ${pattern}: missing param "${name}"`);
     }
-    return encodeURIComponent(String(value));
+    const raw = String(value);
+    if (/[\\/]/.test(raw)) {
+      throw new Error(`prerenderPaths for ${pattern}: param "${name}" contains a path separator`);
+    }
+    return encodeURIComponent(raw);
   });
 }
 
 // "/" -> index.html, "/about" -> about/index.html: the directory style every
-// static server resolves without configuration
+// static server resolves without configuration. segments decode on disk
+// (posts/citt%C3%A0 -> posts/città): static servers decode the request path
+// before hitting the filesystem, an encoded dir name would 404
 export function outputPath(path: string): string {
   if (path === "/") return "index.html";
-  return `${path.replace(/^\/+/, "").replace(/\/+$/, "")}/index.html`;
+  const decode = (s: string) => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  };
+  const dir = path.replace(/^\/+/, "").replace(/\/+$/, "").split("/").map(decode).join("/");
+  return `${dir}/index.html`;
 }
 
 const freePort = () =>
