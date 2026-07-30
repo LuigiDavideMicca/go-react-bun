@@ -2,16 +2,22 @@ package borgo
 
 import (
 	"compress/gzip"
+	"io"
 	"log"
 	"net/http"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // responses below this many bytes ship identity: the gzip header would eat
 // most of the saving
 const gzipMinBytes = 1024
+
+// a gzip.Writer carries ~800 KB of deflate window and hash tables: allocating
+// one per response dwarfs everything else in the request path
+var gzipWriters sync.Pool
 
 // gzipMiddleware compresses responses when the client accepts gzip. Small
 // responses stay identity, event streams and pre-encoded responses pass
@@ -132,7 +138,12 @@ func (g *gzipResponseWriter) startGzip() {
 	h.Del("Content-Length")
 	h.Set("Content-Encoding", "gzip")
 	g.rw.WriteHeader(g.status)
-	g.gz = gzip.NewWriter(g.rw)
+	if gz, ok := gzipWriters.Get().(*gzip.Writer); ok {
+		gz.Reset(g.rw)
+		g.gz = gz
+	} else {
+		g.gz = gzip.NewWriter(g.rw)
+	}
 	g.gz.Write(g.buf)
 	g.buf = nil
 }
@@ -151,6 +162,12 @@ func (g *gzipResponseWriter) finish() {
 		if err := g.gz.Close(); err != nil {
 			log.Printf("borgo: gzip close: %v", err)
 		}
+		// point the pooled writer away from this response before parking it,
+		// so a finished request is not kept alive by the pool - and a write
+		// after the handler returned cannot land in someone else's stream
+		g.gz.Reset(io.Discard)
+		gzipWriters.Put(g.gz)
+		g.gz = nil
 		return
 	}
 	if g.passthrough {

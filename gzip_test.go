@@ -2,10 +2,13 @@ package borgo
 
 import (
 	"compress/gzip"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -136,6 +139,75 @@ func TestGzipMiddlewarePassesThroughPreEncoded(t *testing.T) {
 	if got := rec.Header().Get("Content-Encoding"); got != "br" {
 		t.Fatalf("Content-Encoding = %q, want br untouched", got)
 	}
+}
+
+// pooled gzip writers must never leak one response's bytes into another
+func TestGzipConcurrentResponsesStayIsolated(t *testing.T) {
+	handler := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		WriteJSON(w, http.StatusOK, map[string]string{"who": strings.Repeat(r.URL.Path, 200)})
+	}))
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			want := strings.Repeat(fmt.Sprintf("/client-%d", i), 200)
+			for range 8 {
+				req := httptest.NewRequest("GET", fmt.Sprintf("/client-%d", i), nil)
+				req.Header.Set("Accept-Encoding", "gzip")
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+
+				zr, err := gzip.NewReader(rec.Body)
+				if err != nil {
+					t.Errorf("client %d: %v", i, err)
+					return
+				}
+				body, err := io.ReadAll(zr)
+				if err != nil {
+					t.Errorf("client %d: %v", i, err)
+					return
+				}
+				var got map[string]string
+				if json.Unmarshal(body, &got) != nil || got["who"] != want {
+					t.Errorf("client %d got a body that is not its own", i)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+type discardWriter struct{ header http.Header }
+
+func (d *discardWriter) Header() http.Header         { return d.header }
+func (d *discardWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (d *discardWriter) WriteHeader(int)             {}
+
+func benchGzip(b *testing.B, body func(http.ResponseWriter)) {
+	b.Helper()
+	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { body(w) }))
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	b.ReportAllocs()
+	for b.Loop() {
+		h.ServeHTTP(&discardWriter{header: http.Header{}}, req)
+	}
+}
+
+func BenchmarkGzipCompressed(b *testing.B) {
+	items := make([]string, 200)
+	for i := range items {
+		items[i] = "a task title that repeats"
+	}
+	benchGzip(b, func(w http.ResponseWriter) { WriteJSON(w, http.StatusOK, items) })
+}
+
+func BenchmarkGzipSmallIdentity(b *testing.B) {
+	benchGzip(b, func(w http.ResponseWriter) {
+		WriteJSON(w, http.StatusOK, map[string]string{"ok": "yes"})
+	})
 }
 
 func TestGzipMiddlewareEmptyResponse(t *testing.T) {
