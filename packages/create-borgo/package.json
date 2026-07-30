@@ -1,6 +1,6 @@
 {
   "name": "create-borgo",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Scaffold a new borgo app: file-based React SSR on Bun with a Go API.",
   "type": "module",
   "bin": {

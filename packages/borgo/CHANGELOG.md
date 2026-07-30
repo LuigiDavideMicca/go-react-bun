@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.11.0](https://github.com/LuigiDavideMicca/borgo/compare/v0.10.1...v0.11.0) (2026-07-30)
+
+
+### Features
+
+* /healthz on both servers and opt-in prometheus metrics on the front ([530810e](https://github.com/LuigiDavideMicca/borgo/commit/530810ea11b2cafa1b0694336721b511a3d30d55))
+* borgo deploy init writes the blessed caddy, nginx, systemd and compose configs ([3f6e6fc](https://github.com/LuigiDavideMicca/borgo/commit/3f6e6fc9ee9044169b3d57bbc9fc947751961c3f))
+* borgo doctor diagnoses the environment with actionable fixes ([01ff323](https://github.com/LuigiDavideMicca/borgo/commit/01ff323117ec16208c3cf905f1edd4a8d719eec3))
+* borgo export prerenders static routes into dist/site, loaders opt in with prerender ([7d7cfa2](https://github.com/LuigiDavideMicca/borgo/commit/7d7cfa2e12114ed4ce95e6b01ad5b5ed3625dfe9))
+* systematic auth, borgo.Auth handlers over stdlib pbkdf2, Authed middleware and csrf-protected actions ([304b144](https://github.com/LuigiDavideMicca/borgo/commit/304b144ba275e738e1418ca4ac58fddbdef0f932))
+* typed channel.publish, borgogen rejects slashed push topics, export writes 404.html ([462bcee](https://github.com/LuigiDavideMicca/borgo/commit/462bcee5d1decc087f58e84baf5e5f091474e4af))
+* typed websocket events, borgo.PushT feeds a generated event map that types subscribe ([3eaad62](https://github.com/LuigiDavideMicca/borgo/commit/3eaad62964d6b638fda2a79297a9f1cde3757c51))
+
+
+### Bug Fixes
+
+* a client disconnect mid-stream crashed the server, cancel through the reader ([2a323c9](https://github.com/LuigiDavideMicca/borgo/commit/2a323c9e4fcac0dfc5d8aa4c5e162347f2500298))
+* answer head requests instead of 405, body stripped after render ([3aece13](https://github.com/LuigiDavideMicca/borgo/commit/3aece13c30a7f3af3a5d25e5782313b1faf77bc5))
+* cap proxy retry buffering at 10mb, large or unsized bodies stream through ([067e971](https://github.com/LuigiDavideMicca/borgo/commit/067e97145e4cfc1dcff43c7d89b47af484894b2f))
+* compare the push key in constant time ([c15905b](https://github.com/LuigiDavideMicca/borgo/commit/c15905b4e6038642fc4529d8af7fa881b238f370))
+* decode static paths and route params safely, check traversal on the decoded form ([6a5c8a1](https://github.com/LuigiDavideMicca/borgo/commit/6a5c8a1fed57c40ca640e998950773ad67e71621))
+* dev kills its children on any exit, a broken go edit keeps the previous api serving ([2a5a4d5](https://github.com/LuigiDavideMicca/borgo/commit/2a5a4d5ad33f7247ba11522af6382333243e63c2))
+* export lists 404.html apart, counts assets logically and survives zero pages ([10319fe](https://github.com/LuigiDavideMicca/borgo/commit/10319fef1e1a4c4627c48ee93203804e68efca88))
+* export summary reports page failures instead of a green check ([07e1b05](https://github.com/LuigiDavideMicca/borgo/commit/07e1b05ece70f16ae90dcbd52edf37bbc7aef2bb))
+* friendly guidance when a stale api process blocks the binary swap ([441718a](https://github.com/LuigiDavideMicca/borgo/commit/441718af517c4cd6b3cbfee8d86510abd35a1d4e))
+* retry refused connections while the api restarts, actions and loaders included ([c1d0c35](https://github.com/LuigiDavideMicca/borgo/commit/c1d0c354ec85bd21549f3d2c80e8ae8fcbcf461d))
+* stale navigations must not render over newer ones, back flushes the pending scroll save ([5b20547](https://github.com/LuigiDavideMicca/borgo/commit/5b205477e6f2cc9bcb5fd99f3ed4be0d623719a8))
+* stamp-guard reloads on hydrated pages, a reconnect must not replay them ([ae29812](https://github.com/LuigiDavideMicca/borgo/commit/ae2981254d26536eeec59caaa794beab0e40fb83))
+
 ## 0.10.1 (2026-07-29)
 
 Version convergence: both packages now share one linked version.
