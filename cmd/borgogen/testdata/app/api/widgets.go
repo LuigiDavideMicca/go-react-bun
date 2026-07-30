@@ -74,6 +74,20 @@ func UpdateWidget(w http.ResponseWriter, r *http.Request) {
 	respondWidget(w, http.StatusOK, Widget{Name: body.Name})
 }
 
+type ErrResp struct {
+	Error string `json:"error"`
+}
+
+//borgo:route GET /api/widgets/{id}
+func GetWidget(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("id") == "" {
+		borgo.JSON(w, http.StatusNotFound, ErrResp{Error: "not found"})
+		return
+	}
+	borgo.WriteJSON(w, http.StatusBadGateway, ErrResp{Error: "upstream"})
+	borgo.JSON(w, http.StatusOK, Widget{})
+}
+
 //borgo:route DELETE /api/widgets/{id}
 func DeleteWidget(w http.ResponseWriter, r *http.Request) {
 	borgo.PushT("widgets", "deleted", 1)

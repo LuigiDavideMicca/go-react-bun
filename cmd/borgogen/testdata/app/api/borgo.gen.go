@@ -6,6 +6,7 @@ import "github.com/LuigiDavideMicca/borgo"
 func init() {
 	borgo.Handle("DELETE /api/widgets/{id}", DeleteWidget)
 	borgo.Handle("GET /api/widgets", ListWidgets)
+	borgo.Handle("GET /api/widgets/{id}", GetWidget)
 	borgo.Handle("POST /api/widgets", CreateWidget)
 	borgo.Handle("PUT /api/widgets/{id}", UpdateWidget)
 }

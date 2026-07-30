@@ -573,15 +573,14 @@ func (g *tsGen) bridgeTypes(pkg *packages.Package, decls map[*types.Func]*ast.Fu
 			switch name, sel := borgoFunc(pkg.TypesInfo, call); name {
 			case "JSON", "Bind", "BindMax":
 				if inst, ok := pkg.TypesInfo.Instances[sel]; ok && inst.TypeArgs.Len() == 1 {
-					ts := g.tsType(inst.TypeArgs.At(0))
-					if name == "JSON" {
-						resp.add(ts)
-					} else {
-						req.add(ts)
+					if name != "JSON" {
+						req.add(g.tsType(inst.TypeArgs.At(0)))
+					} else if len(call.Args) != 3 || !isErrorStatus(pkg.TypesInfo, call.Args[1]) {
+						resp.add(g.tsType(inst.TypeArgs.At(0)))
 					}
 				}
 			case "WriteJSON":
-				if len(call.Args) == 3 {
+				if len(call.Args) == 3 && !isErrorStatus(pkg.TypesInfo, call.Args[1]) {
 					if tv := pkg.TypesInfo.Types[call.Args[2]]; tv.Type != nil {
 						resp.add(g.tsType(types.Default(tv.Type)))
 					}
@@ -600,6 +599,20 @@ func (g *tsGen) bridgeTypes(pkg *packages.Package, decls map[*types.Func]*ast.Fu
 		return "unknown", req.String()
 	}
 	return resp.String(), req.String()
+}
+
+// isErrorStatus reports whether the status argument is a constant >= 300.
+// The ts api client throws for any non-2xx response instead of resolving with
+// its body, so an error envelope written under a constant error status never
+// reaches the typed caller and must stay out of the response union. A
+// non-constant status (helpers taking status as a parameter) stays in.
+func isErrorStatus(info *types.Info, expr ast.Expr) bool {
+	tv := info.Types[expr]
+	if tv.Value == nil || tv.Value.Kind() != constant.Int {
+		return false
+	}
+	v, ok := constant.Int64Val(tv.Value)
+	return ok && v >= 300
 }
 
 func hasCustomMarshal(t types.Type) bool {

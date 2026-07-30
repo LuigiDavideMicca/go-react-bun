@@ -42,6 +42,7 @@ func TestGenerateFixture(t *testing.T) {
 		`"GET /api/widgets": { response: WidgetList };`,
 		`"POST /api/widgets": { response: Widget; request: WidgetCreate };`,
 		`"DELETE /api/widgets/{id}": { response: Deleted };`,
+		`"GET /api/widgets/{id}": { response: Widget };`,
 		`"PUT /api/widgets/{id}": { response: Widget; request: WidgetCreate };`,
 		`"GET /api/manual": { response: string };`,
 		`"GET /api/secret": { response: Deleted };`,
@@ -61,6 +62,9 @@ func TestGenerateFixture(t *testing.T) {
 	}
 	if strings.Contains(types, "Secret") || strings.Contains(types, "hidden") {
 		t.Errorf("unexported or json:\"-\" fields leaked:\n%s", types)
+	}
+	if strings.Contains(types, "ErrResp") {
+		t.Errorf("error-status payloads must stay out of the response union; the ts client throws on non-2xx:\n%s", types)
 	}
 
 	wantGen := []string{
