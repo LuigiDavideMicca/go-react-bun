@@ -415,6 +415,11 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       // response): swap it in wholesale, exactly like a native submit
       // a truncated body would blank the document instead of showing the error
       const html = await res.text().catch(() => "");
+      // a popstate while the body streamed moved the document to another
+      // entry: writing the action's document now would show it under that
+      // entry's url. every url-changing navigation bumps navSeq, so this is
+      // the url-scoped guard for a submit landing after a popstate
+      if (seq !== navSeq) return;
       if (!html) return location.reload();
       document.open();
       document.write(html);
