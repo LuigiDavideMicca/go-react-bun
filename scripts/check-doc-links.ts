@@ -1,19 +1,14 @@
 // verifies that every internal markdown link in the readmes and docs points
 // at a file that exists, and that #anchors match a real heading. no deps.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const repoBlob = "https://github.com/LuigiDavideMicca/borgo/blob/main/";
 const sources = [
   "README.md",
-  "docs/README.md",
-  "docs/pages-and-routing.md",
-  "docs/typed-bridge.md",
-  "docs/client-navigation.md",
-  "docs/realtime.md",
-  "docs/auth-and-sessions.md",
-  "docs/dev-experience.md",
-  "docs/deploy.md",
+  ...readdirSync("docs")
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => `docs/${f}`),
   "packages/borgo/README.md",
   "packages/create-borgo/template/README.md",
 ];

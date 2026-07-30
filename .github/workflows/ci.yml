@@ -108,11 +108,13 @@ jobs:
         working-directory: examples/tasks
         run: |
           bun run start &
+          smoke=$!
           for i in $(seq 1 20); do curl -fs http://localhost:3000/ > /dev/null && break; sleep 1; done
           curl -fs http://localhost:3000/ | grep -q "<h1>Tasks</h1>"
           curl -fs -X POST http://localhost:3000/api/tasks -H "Content-Type: application/json" -d '{"title":"ci smoke"}' | grep -q "ci smoke"
           curl -fs http://localhost:3000/ | grep -q "ci smoke"
           curl -fs http://localhost:3000/tasks/1 | grep -q "ci smoke"
+          kill "$smoke"
 
       - name: install playwright chromium
         run: npx playwright install --with-deps chromium
@@ -134,6 +136,7 @@ jobs:
           cp .borgo/api-types.d.ts "$tmp/shipped-api-types.d.ts"
           go tool borgogen
           diff "$tmp/shipped-api-types.d.ts" .borgo/api-types.d.ts
+          bunx tsc --noEmit
           bun run build
           PORT=3100 API_PORT=3601 bun run start &
           for i in $(seq 1 20); do curl -fs http://localhost:3100/ > /dev/null && break; sleep 1; done
