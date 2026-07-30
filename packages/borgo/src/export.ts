@@ -106,7 +106,7 @@ export async function exportSite(): Promise<number> {
   const t0 = performance.now();
   console.log(`\n  ${banner("export")}\n`);
 
-  await runBorgogen();
+  if (!(await runBorgogen())) return 1;
   await buildAssets(false);
 
   const manifest = pathToFileURL(join(process.cwd(), ".borgo/routes.gen.tsx")).href;

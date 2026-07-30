@@ -30,7 +30,7 @@ switch (command) {
     const t0 = performance.now();
     console.log(`\n  ${banner("build")}\n`);
 
-    await runBorgogen();
+    if (!(await runBorgogen())) process.exit(1);
     const { assets } = await buildAssets();
     const rel = (p: string) => p.replaceAll("\\", "/").replace(/^.*?(public\/assets\/)/, "$1");
     for (const asset of assets.sort((a, b) => (a.kind === b.kind ? b.size - a.size : a.kind === "entry-point" ? -1 : 1))) {

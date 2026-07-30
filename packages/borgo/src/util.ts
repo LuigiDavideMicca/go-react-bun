@@ -16,9 +16,11 @@ export function shouldBufferBody(method: string, contentLength: string | null): 
 }
 
 // regenerate .borgo/api-types.d.ts (and the route mounting) from the go api.
-// the tool is wired through the app's go.mod `tool` directive.
-export async function runBorgogen() {
-  if (!existsSync("api")) return;
+// the tool is wired through the app's go.mod `tool` directive. returns
+// success so build and export can refuse to ship stale generated files;
+// dev ignores it and keeps serving
+export async function runBorgogen(): Promise<boolean> {
+  if (!existsSync("api")) return true;
   const proc = Bun.spawn(["go", "tool", "borgogen"], { stdout: "ignore", stderr: "pipe" });
   if ((await proc.exited) !== 0) {
     const stderr = await new Response(proc.stderr).text();
@@ -26,5 +28,7 @@ export async function runBorgogen() {
     console.error(
       `  ${c.red(g.err)} borgogen failed - api types are stale ${c.dim("(is `tool github.com/LuigiDavideMicca/borgo/cmd/borgogen` in go.mod?)")}`,
     );
+    return false;
   }
+  return true;
 }
