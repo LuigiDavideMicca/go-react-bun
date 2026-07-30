@@ -3,10 +3,14 @@ package borgo
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +115,77 @@ func TestSSEOutlivesWriteTimeout(t *testing.T) {
 	if events != 3 {
 		t.Fatalf("want 3 events through the write timeout, got %d", events)
 	}
+}
+
+func TestRecoverMiddleware(t *testing.T) {
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	t.Run("a panic before any write is a json 500", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		recoverMiddleware(gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic("boom")
+		}))).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/x", nil))
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", rec.Code)
+		}
+		var body map[string]string
+		if json.Unmarshal(rec.Body.Bytes(), &body) != nil || body["error"] == "" {
+			t.Fatalf("body = %q, want a json error", rec.Body)
+		}
+		if strings.Contains(rec.Body.String(), "boom") {
+			t.Error("the panic value must not reach the client")
+		}
+	})
+
+	t.Run("a panic after the response started leaves the body alone", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		recoverMiddleware(gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			WriteJSON(w, http.StatusOK, map[string]string{"half": "written"})
+			panic("late")
+		}))).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/x", nil))
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want the committed 200", rec.Code)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("body corrupted by the recovery: %q (%v)", rec.Body, err)
+		}
+	})
+
+	t.Run("ErrAbortHandler stays a panic", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != http.ErrAbortHandler {
+				t.Fatalf("recovered %v, want ErrAbortHandler to pass through", r)
+			}
+		}()
+		recoverMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic(http.ErrAbortHandler)
+		})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	})
+
+	t.Run("streaming still flushes through the wrapper", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		recoverMiddleware(gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			stream, err := SSE(w, r)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if err := stream.Send("tick", 1); err != nil {
+				t.Error(err)
+			}
+		}))).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/events", nil))
+
+		if !rec.Flushed {
+			t.Error("flush did not reach the recorder")
+		}
+		if !strings.Contains(rec.Body.String(), "event: tick") {
+			t.Errorf("body = %q", rec.Body)
+		}
+	})
 }
 
 // serveOn starts srv on a loopback port and returns its base url

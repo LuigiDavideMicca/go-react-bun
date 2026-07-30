@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -153,6 +154,57 @@ func BindError(w http.ResponseWriter, err error) {
 	WriteJSON(w, status, map[string]string{"error": err.Error()})
 }
 
+// recoverMiddleware answers a panicking handler with a 500 instead of letting
+// net/http drop the connection, which reaches the browser as an opaque network
+// error. A handler that already started writing only gets the log line: its
+// bytes are on the wire and appending to them would corrupt the response.
+func recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rw := &recoverWriter{ResponseWriter: w}
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+			if v == http.ErrAbortHandler {
+				panic(v) // net/http's own signal to drop the response
+			}
+			log.Printf("borgo: panic serving %s %s: %v\n%s", r.Method, r.URL.Path, v, debug.Stack())
+			if !rw.wrote {
+				WriteJSON(rw, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			}
+		}()
+		next.ServeHTTP(rw, r)
+	})
+}
+
+// recoverWriter records whether the response was committed. It forwards Flush
+// and Unwrap so streaming handlers and http.ResponseController still reach the
+// real writer.
+type recoverWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+func (w *recoverWriter) WriteHeader(status int) {
+	w.wrote = true
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *recoverWriter) Write(p []byte) (int, error) {
+	w.wrote = true
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *recoverWriter) Flush() {
+	w.wrote = true
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *recoverWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 var startTime = time.Now()
 
 // healthz answers the api's own liveness probe; the front server's /healthz
@@ -226,7 +278,7 @@ func Serve() {
 
 	// build the server before the banner so a bad BORGO_*_TIMEOUT fails
 	// before "api on :port" is printed
-	srv := newServer(port, gzipMiddleware(mux))
+	srv := newServer(port, recoverMiddleware(gzipMiddleware(mux)))
 	grace := envDuration("BORGO_SHUTDOWN_TIMEOUT", 10*time.Second)
 	srv.RegisterOnShutdown(signalShutdown)
 	warnSessionSecret()

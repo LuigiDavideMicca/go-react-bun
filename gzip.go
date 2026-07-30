@@ -174,7 +174,10 @@ func (g *gzipResponseWriter) finish() {
 		return
 	}
 	if g.status == 0 {
-		g.status = http.StatusOK
+		// the handler wrote nothing - it panicked, or means an empty 200.
+		// Leaving the response uncommitted lets net/http (or the recovery
+		// above) decide, instead of nailing it to 200 here
+		return
 	}
 	g.rw.WriteHeader(g.status)
 	if len(g.buf) > 0 {
