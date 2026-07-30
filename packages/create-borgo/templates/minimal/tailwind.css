@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+/* the template styles below are plain css - keep, trim or replace them */
+body {
+  margin: 0;
+  background: #f7f0e3;
+  color: #3d2f24;
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+}
+
+main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 3.5rem 1.5rem;
+}
+
+a {
+  color: #c06b45;
+}
+
+code {
+  background: rgba(192, 107, 69, 0.12);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+
+.hero {
+  text-align: center;
+}
+.hero h1 {
+  margin: 0.75rem 0 0;
+  font-size: 2.5rem;
+  letter-spacing: 0.02em;
+}
+.hero .tagline {
+  margin: 0.25rem 0 1.5rem;
+  color: rgba(61, 47, 36, 0.7);
+}
+.hero .hint {
+  display: inline-block;
+  background: rgba(111, 138, 99, 0.15);
+  border: 1px solid rgba(111, 138, 99, 0.4);
+  border-radius: 999px;
+  padding: 0.35rem 1rem;
+  font-size: 0.9rem;
+}
+.hero .credit {
+  margin-top: 2.5rem;
+  font-size: 0.85rem;
+  color: rgba(61, 47, 36, 0.55);
+}
+.hero .credit a {
+  color: inherit;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin-top: 2.5rem;
+  text-align: left;
+}
+.cards .card {
+  display: block;
+  background: #fffdf8;
+  border: 1px solid rgba(61, 47, 36, 0.12);
+  border-radius: 10px;
+  padding: 1.1rem 1.25rem;
+  color: inherit;
+  text-decoration: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.cards .card:hover {
+  border-color: #c06b45;
+}
+.cards .card h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  color: #c06b45;
+}
+.cards .card p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(61, 47, 36, 0.7);
+}
+
+.counter {
+  background: #c06b45;
+  color: #f7f0e3;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 1.1rem;
+  font: inherit;
+  cursor: pointer;
+}
+.counter:hover {
+  filter: brightness(1.05);
+}

@@ -19,7 +19,7 @@ The default pipeline compiles the single root `style.scss` to `public/assets/sty
 
 ### Tailwind (opt-in)
 
-Tailwind v4 rides behind a CLI flag — never autodetection. Three steps:
+Tailwind v4 rides behind a CLI flag — never autodetection. New projects can skip the wiring entirely: `bunx create-borgo my-app --tailwind` (or answer the prompt) scaffolds everything below already done. For an existing app, three steps:
 
 ```bash
 bun add tailwindcss @tailwindcss/cli

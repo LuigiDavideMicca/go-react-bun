@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/* the template styles below are plain css - keep, trim or replace them */
+body {
+  margin: 0;
+  background: #f7f0e3;
+  color: #3d2f24;
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+}
+
+.app {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+a {
+  color: #c06b45;
+}
+
+code {
+  background: rgba(192, 107, 69, 0.12);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid rgba(61, 47, 36, 0.12);
+}
+header .brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  color: #3d2f24;
+  text-decoration: none;
+}
+header nav {
+  display: flex;
+  gap: 1rem;
+}
+header nav a {
+  color: rgba(61, 47, 36, 0.7);
+  text-decoration: none;
+}
+header nav a:hover {
+  color: #c06b45;
+}
+header nav .session {
+  color: #6f8a63;
+}
+header nav .session strong {
+  color: #3d2f24;
+}
+header nav .session button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #c06b45;
+  cursor: pointer;
+}
+header nav .session button:hover {
+  text-decoration: underline;
+}
+
+main {
+  padding: 2rem 0 3rem;
+}
+main form {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1.25rem 0;
+}
+main form input {
+  flex: 1;
+  background: #fffdf8;
+  border: 1px solid rgba(61, 47, 36, 0.2);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  color: inherit;
+}
+main form input:focus {
+  outline: 2px solid rgba(192, 107, 69, 0.5);
+  border-color: #c06b45;
+}
+main form button {
+  background: #c06b45;
+  color: #f7f0e3;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 1.25rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+main form button:hover {
+  background: #a85a38;
+}
+main .error {
+  color: #a4442c;
+}
+main ul {
+  padding: 0;
+  list-style: none;
+}
+main ul li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fffdf8;
+  border: 1px solid rgba(61, 47, 36, 0.12);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.5rem;
+}
+main ul li button {
+  background: none;
+  border: none;
+  color: rgba(61, 47, 36, 0.45);
+  font: inherit;
+  cursor: pointer;
+}
+main ul li button:hover {
+  color: #a4442c;
+}

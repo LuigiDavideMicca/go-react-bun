@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -49,20 +50,25 @@ type TemplateName = (typeof TEMPLATES)[number]["name"];
 
 let name: string | undefined;
 let template: string | undefined;
+let tailwind: boolean | undefined;
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === "--template" || arg === "-t") template = args[++i];
   else if (arg.startsWith("--template=")) template = arg.slice("--template=".length);
+  else if (arg === "--tailwind") tailwind = true;
+  else if (arg === "--no-tailwind") tailwind = false;
   else if (arg === "--help" || arg === "-h") {
     console.log(`
-  usage: bunx create-borgo <name> [--template base|minimal|full]
+  usage: bunx create-borgo <name> [--template base|minimal|full] [--tailwind|--no-tailwind]
 
   templates
 ${TEMPLATES.map((t) => `    ${t.name.padEnd(8)} ${t.hint}`).join("\n")}
 
-  without --template, an interactive terminal asks; anywhere else (CI,
-  piped stdin) the default is "base".
+  --tailwind wires the scaffold for tailwind v4 (deps, style.css, the
+  --tailwind flag in every script). without flags, an interactive terminal
+  asks both questions; anywhere else (CI, piped stdin) the defaults are
+  "base" and no tailwind.
 `);
     process.exit(0);
   } else if (!arg.startsWith("-") && !name) name = arg;
@@ -80,26 +86,35 @@ if (!/^[a-z0-9][a-z0-9._-]*$/.test(name)) {
 }
 
 const isTemplate = (t: string): t is TemplateName => TEMPLATES.some((k) => k.name === t);
+const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+
+// one shared iterator: sequential questions must not each grab stdin anew
+const stdinLines = console[Symbol.asyncIterator]();
+const ask = async (prompt: string): Promise<string> => {
+  process.stdout.write(prompt);
+  const { value } = await stdinLines.next();
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+};
+
+if ((template === undefined || tailwind === undefined) && interactive) {
+  console.log(`\n  ${terracotta(home)} ${bold("create-borgo")} ${dim(`v${version}`)}\n`);
+}
 
 if (template === undefined) {
-  if (process.stdin.isTTY === true && process.stdout.isTTY === true) {
-    console.log(`\n  ${terracotta(home)} ${bold("create-borgo")} ${dim(`v${version}`)}\n`);
+  if (interactive) {
     TEMPLATES.forEach((t, i) => {
       console.log(`  ${bold(String(i + 1))} ${t.name.padEnd(8)} ${dim(t.hint)}`);
     });
-    process.stdout.write(`\n  template ${dim("(1-3, enter = base)")}: `);
-    for await (const line of console) {
-      const answer = line.trim().toLowerCase();
+    let prompt = `\n  template ${dim("(1-3, enter = base)")}: `;
+    while (template === undefined) {
+      const answer = await ask(prompt);
       if (answer === "") template = "base";
       else if (/^[1-9]$/.test(answer)) template = TEMPLATES[Number(answer) - 1]?.name;
       else if (isTemplate(answer)) template = answer;
-      if (template === undefined) {
-        process.stdout.write(`  pick 1-${TEMPLATES.length} ${dim("(enter = base)")}: `);
-        continue;
-      }
-      break;
+      prompt = `  pick 1-${TEMPLATES.length} ${dim("(enter = base)")}: `;
     }
-    template ??= "base";
   } else {
     template = "base";
   }
@@ -110,6 +125,15 @@ if (!isTemplate(template)) {
     `unknown template "${template}" - available: ${TEMPLATES.map((t) => t.name).join(", ")}`,
   );
   process.exit(1);
+}
+
+if (tailwind === undefined) {
+  if (interactive) {
+    const answer = await ask(`  tailwind? ${dim("(y/N)")}: `);
+    tailwind = answer === "y" || answer === "yes";
+  } else {
+    tailwind = false;
+  }
 }
 
 const target = join(process.cwd(), name);
@@ -145,26 +169,50 @@ const stamp = (dir: string) => {
 };
 stamp(target);
 
+// tailwind: swap the stylesheet, wire the deps and pass the flag to every
+// borgo command; without it the pregenerated tailwind.css just goes away
+if (tailwind) {
+  rmSync(join(target, "style.scss"));
+  renameSync(join(target, "tailwind.css"), join(target, "style.css"));
+  const pkgPath = join(target, "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+    scripts?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  for (const script of ["dev", "build", "start"]) {
+    if (pkg.scripts?.[script]) pkg.scripts[script] += " --tailwind";
+  }
+  pkg.devDependencies = {
+    ...pkg.devDependencies,
+    tailwindcss: "^4.3.0",
+    "@tailwindcss/cli": "^4.3.0",
+  };
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+} else {
+  rmSync(join(target, "tailwind.css"));
+}
+
+const style = tailwind ? "style.css " : "style.scss";
 const layouts: Record<TemplateName, string> = {
   minimal: `    pages/      ${dim("react pages, file name = route")}
     api/        ${dim("go api routes, mounted via //borgo:route directives")}
     main.go     ${dim("go entrypoint: import api, borgo.Serve()")}
-    index.html  ${dim("html shell")} ${dot} style.scss ${dim("global styles")}`,
+    index.html  ${dim("html shell")} ${dot} ${style} ${dim("global styles")}`,
   base: `    pages/      ${dim("react pages: loader, form action, hydrate=false, sse")}
     islands/    ${dim("components that hydrate alone inside zero-js pages")}
     api/        ${dim("go api routes, mounted via //borgo:route directives")}
     main.go     ${dim("go entrypoint: import api, borgo.Serve()")}
-    index.html  ${dim("html shell")} ${dot} style.scss ${dim("global styles")}`,
+    index.html  ${dim("html shell")} ${dot} ${style} ${dim("global styles")}`,
   full: `    pages/      ${dim("notes crud, login/register, protected account, live ws")}
     api/        ${dim("go: notes + auth (in-memory stores, swap for a real db)")}
     main.go     ${dim("go entrypoint: import api, borgo.Serve()")}
-    index.html  ${dim("html shell")} ${dot} style.scss ${dim("global styles")}`,
+    index.html  ${dim("html shell")} ${dot} ${style} ${dim("global styles")}`,
 };
 
 console.log(`
   ${terracotta(home)} ${bold("create-borgo")} ${dim(`v${version}`)}
 
-  ${sage(ok)} created ${bold(name)}/ ${dim(`(template: ${template})`)}
+  ${sage(ok)} created ${bold(name)}/ ${dim(`(template: ${template}${tailwind ? " + tailwind" : ""})`)}
 ${layouts[template]}
 
   next steps
