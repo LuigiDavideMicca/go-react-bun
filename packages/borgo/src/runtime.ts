@@ -256,6 +256,21 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     scrollTo(x, y);
   }
 
+  // a back/forward (or reload) that missed bfcache arrives as a full load
+  // with native restoration off - the previous visit set scrollRestoration to
+  // manual on this entry - so the saved position must be replayed here. only
+  // a recorded position counts: a fresh entry, or a hash jump the browser
+  // just made, stays where the browser put it
+  const [navEntry] = performance.getEntriesByType?.("navigation") ?? [];
+  const navType = (navEntry as PerformanceNavigationTiming | undefined)?.type;
+  if (navType === "back_forward" || navType === "reload") {
+    let saved: string | null = null;
+    try {
+      saved = sessionStorage.getItem(`borgo:scroll:${entryKey}`);
+    } catch {}
+    if (saved) restoreScroll(entryKey);
+  }
+
   const afterRender = (fn: () => void) =>
     requestAnimationFrame(() => requestAnimationFrame(fn));
 
@@ -587,6 +602,12 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       },
       { passive: true },
     );
+    // leaving natively (external link, raw document swap, tab close) can beat
+    // the debounce: flush the last position while the page can still write it
+    addEventListener("pagehide", () => {
+      clearTimeout(scrollTimer);
+      saveScroll();
+    });
 
     // hover or focus prefetches the chunk and the loader props. hovering runs
     // a loader on the server, so a pointer crossing a long list must not fire
