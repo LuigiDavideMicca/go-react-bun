@@ -2,10 +2,13 @@ package borgo
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestHealthz(t *testing.T) {
@@ -65,5 +68,44 @@ func TestHandleValidation(t *testing.T) {
 			}()
 			Handle(c.pattern, c.handler)
 		})
+	}
+}
+
+func TestHandleIsConcurrencySafe(t *testing.T) {
+	const n = 64
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			Handle(fmt.Sprintf("GET /api/concurrent/%d", i), func(http.ResponseWriter, *http.Request) {})
+		}()
+	}
+	wg.Wait()
+
+	routesMu.Lock()
+	defer routesMu.Unlock()
+	for i := range n {
+		if _, ok := routes[fmt.Sprintf("GET /api/concurrent/%d", i)]; !ok {
+			t.Fatalf("route %d lost in the race", i)
+		}
+	}
+}
+
+// a recovered panic must leave the registry locked-free for the next caller
+func TestHandleRecoversAndStaysUsable(t *testing.T) {
+	func() {
+		defer func() { recover() }()
+		Handle("GET /api/{bad", func(http.ResponseWriter, *http.Request) {})
+	}()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		Handle("GET /api/after-panic", func(http.ResponseWriter, *http.Request) {})
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("registry deadlocked after a rejected pattern")
 	}
 }
