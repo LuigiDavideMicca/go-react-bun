@@ -29,6 +29,10 @@ declare module "borgo-framework" {
     "POST /api/widgets": { response: Widget; request: WidgetCreate };
     "DELETE /api/widgets/{id}": { response: Deleted };
   }
+  interface WsEvents {
+    "widgets/created": Widget;
+    "widgets/deleted": number | string;
+  }
 }
 
 export {};

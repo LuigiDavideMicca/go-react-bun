@@ -12,6 +12,14 @@ import (
 // a hung front server must not block the api handler that called Push
 var pushClient = &http.Client{Timeout: 5 * time.Second}
 
+// PushT is Push with the payload type visible to static analysis. Call it
+// with literal topic and event strings and borgogen records the payload type
+// in the generated event map, typing the browser's subscribe callback for
+// that topic (mirroring how borgo.JSON[T] types a route's response).
+func PushT[T any](topic, event string, data T) error {
+	return Push(topic, event, data)
+}
+
 // Push publishes an event to every browser subscribed to a websocket topic
 // on the front server (see the subscribe helper in the borgo npm package).
 // The front server is assumed on localhost; set FRONT_URL when it is not,

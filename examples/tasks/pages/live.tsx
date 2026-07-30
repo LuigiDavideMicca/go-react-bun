@@ -10,8 +10,10 @@ export default function Live() {
   const channel = useRef<Channel | null>(null);
 
   useEffect(() => {
+    // the events are typed: "task-created" comes from borgo.PushT in go via
+    // borgogen, "message" from ws-events.d.ts - checking event narrows data
     const ch = subscribe("live", (event, data) => {
-      if (event === "__count") setPresent(data as number);
+      if (event === "__count") setPresent(data);
       else if (event === "message") setLog((l) => [...l, `chat · ${data}`]);
       else if (event === "task-created") setLog((l) => [...l, `go · task "${data}" created`]);
     });

@@ -59,11 +59,15 @@ func CreateWidget(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	respondWidget(w, http.StatusCreated, Widget{Name: body.Name})
+	widget := Widget{Name: body.Name}
+	borgo.PushT("widgets", "created", widget)
+	respondWidget(w, http.StatusCreated, widget)
 }
 
 //borgo:route DELETE /api/widgets/{id}
 func DeleteWidget(w http.ResponseWriter, r *http.Request) {
+	borgo.PushT("widgets", "deleted", 1)
+	borgo.PushT("widgets", "deleted", "gone")
 	borgo.WriteJSON(w, http.StatusOK, Deleted{OK: true})
 }
 

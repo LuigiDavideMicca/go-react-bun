@@ -62,6 +62,21 @@ jobs:
           if bunx tsc --noEmit; then echo "wrong body was accepted" && exit 1; fi
           rm pages/__wrong-body.tsx
 
+      - name: typed ws events reject a wrong payload
+        working-directory: examples/tasks
+        run: |
+          printf '%s\n' \
+            'import { subscribe } from "borgo-framework";' \
+            'export function wrong() {' \
+            '  subscribe("live", (event, data) => {' \
+            '    if (event === "task-created") data.toFixed(2);' \
+            '  });' \
+            '}' \
+            'export default function Wrong() { return null; }' \
+            > pages/__wrong-ws.tsx
+          if bunx tsc --noEmit; then echo "wrong ws payload was accepted" && exit 1; fi
+          rm pages/__wrong-ws.tsx
+
       - name: build example app
         working-directory: examples/tasks
         run: bun run build

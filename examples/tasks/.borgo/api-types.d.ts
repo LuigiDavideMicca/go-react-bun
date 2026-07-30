@@ -39,6 +39,9 @@ declare module "borgo-framework" {
     "DELETE /api/tasks/{id}": { response: Deleted };
     "GET /api/tasks/{id}": { response: TaskItem };
   }
+  interface WsEvents {
+    "live/task-created": string;
+  }
 }
 
 export {};

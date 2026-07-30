@@ -47,6 +47,9 @@ func TestGenerateFixture(t *testing.T) {
 		"price: string",
 		"notes: string | null",
 		"attrs: Record<string, number>",
+		"interface WsEvents {",
+		`"widgets/created": Widget;`,
+		`"widgets/deleted": number | string;`,
 	}
 	for _, want := range wantTypes {
 		if !strings.Contains(types, want) {
@@ -101,6 +104,7 @@ func TestGenerateErrors(t *testing.T) {
 		{"duplicate pattern", "dup", "already registered"},
 		{"malformed type directive", "badtype", "malformed directive"},
 		{"directive on non-handler", "badsig", "not a func(http.ResponseWriter"},
+		{"dynamic push topic", "badpush", "constant topic and event"},
 		{"missing api dir", "none", "no api/ directory"},
 	}
 	for _, c := range cases {

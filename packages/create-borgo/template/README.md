@@ -34,7 +34,7 @@ If you are developing against a local borgo checkout, uncomment the `replace` di
 ## Layout
 
 - `pages/` — React pages; file name is the route (`pages/hello/[name].tsx` → `/hello/:name`). Export a `loader` to fetch props on the server before rendering, `head` for the page title and metas, `action` to handle form posts, `hydrate` (`false` or `"visible"`) to ship less JavaScript. `_layout.tsx` wraps pages, `_404.tsx` / `_500.tsx` customize error pages.
-- `api/` — Go API routes; annotate a handler with `//borgo:route GET /api/path` (or register manually in `init()` with `borgo.Handle`). Respond with `borgo.JSON` and the route's TypeScript type is generated into `.borgo/api-types.d.ts`, so the `api` client in loaders is fully typed. `borgo.NewSSEHub()` gives you live server-sent events, proxied to the browser without buffering.
+- `api/` — Go API routes; annotate a handler with `//borgo:route GET /api/path` (or register manually in `init()` with `borgo.Handle`). Respond with `borgo.JSON` and the route's TypeScript type is generated into `.borgo/api-types.d.ts`, so the `api` client in loaders is fully typed. `borgo.NewSSEHub()` gives you live server-sent events, proxied to the browser without buffering. For two-way live updates, browsers join WebSocket topics with `subscribe` from `borgo-framework` and Go publishes into them with `borgo.PushT(topic, event, data)` — literal topic and event make the payload type flow into the `subscribe` callback.
 - `main.go` — imports `api` and calls `borgo.Serve()`.
 - `index.html` — HTML shell. `style.scss` — global styles.
 

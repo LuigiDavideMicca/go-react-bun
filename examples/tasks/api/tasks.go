@@ -64,7 +64,7 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events.Publish("task-created", task)
-	go borgo.Push("live", "task-created", task.Title)
+	go borgo.PushT("live", "task-created", task.Title)
 	respondTask(w, http.StatusCreated, task)
 }
 

@@ -35,6 +35,28 @@ func TestPush(t *testing.T) {
 	}
 }
 
+func TestPushTDelegates(t *testing.T) {
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	t.Setenv("FRONT_URL", server.URL)
+
+	type payload struct {
+		Title string `json:"title"`
+	}
+	if err := PushT("live", "created", payload{Title: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	data, ok := got["data"].(map[string]any)
+	if got["topic"] != "live" || got["event"] != "created" || !ok || data["title"] != "t" {
+		t.Errorf("payload wrong: %+v", got)
+	}
+}
+
 func TestPushClientHasTimeout(t *testing.T) {
 	if pushClient.Timeout <= 0 {
 		t.Fatal("pushClient must carry a timeout, or a hung front server blocks handlers forever")

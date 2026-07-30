@@ -28,7 +28,44 @@ export type Channel = {
   close: () => void;
 };
 
-export function subscribe(topic: string, onEvent: (event: string, data: unknown) => void): Channel {
+// "topic/event" -> payload type. borgogen fills this in from borgo.PushT
+// calls through the generated .borgo/api-types.d.ts; browser-published
+// events are declared the same way in any app .d.ts file.
+export interface WsEvents {}
+
+type EventsFor<T extends string> = {
+  [K in keyof WsEvents & string as K extends `${T}/${infer E}` ? E : never]: WsEvents[K];
+};
+
+// a topic with declared events gets a closed, discriminated (event, data)
+// pair - checking event narrows data, an undeclared event name fails tsc.
+// topics without declarations keep the untyped (string, unknown) shape.
+type EventPairs<M> = {
+  [E in Extract<keyof M, string>]: [event: E, data: M[E]];
+}[Extract<keyof M, string>];
+
+export type TopicEvents<T extends string> = [keyof EventsFor<T>] extends [never]
+  ? [event: string, data: unknown]
+  : EventPairs<EventsFor<T>> | [event: "__count", data: number];
+
+export type TopicEventName<T extends string> = [keyof EventsFor<T>] extends [never]
+  ? string
+  : Extract<keyof EventsFor<T>, string> | "__count";
+
+// the second overload keeps single-parameter callbacks compiling: tsc does
+// not accept them against a rest signature made of a tuple union
+export function subscribe<T extends string>(
+  topic: T,
+  onEvent: (...args: TopicEvents<T>) => void,
+): Channel;
+export function subscribe<T extends string>(
+  topic: T,
+  onEvent: (event: TopicEventName<T>) => void,
+): Channel;
+export function subscribe(
+  topic: string,
+  onEvent: (...args: any[]) => void,
+): Channel {
   let ws: WebSocket | null = null;
   let closed = false;
   const queue: string[] = [];
