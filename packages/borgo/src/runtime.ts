@@ -344,6 +344,12 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   // non-page urls (e.g. /api) stay native.
   let nativePass: HTMLFormElement | null = null;
 
+  // a double-clicked submit button must not fire the action twice: while a
+  // form's request is in flight, further submits of that same form are
+  // swallowed. other forms stay independent, and the native-resubmit path
+  // is exempt (nativePass is checked first)
+  const inFlight = new WeakSet<HTMLFormElement>();
+
   function nativeResubmit(form: HTMLFormElement, submitter: HTMLElement | null) {
     nativePass = form;
     form.requestSubmit(submitter ?? undefined);
@@ -355,6 +361,20 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   }
 
   async function submitForm(
+    form: HTMLFormElement,
+    submitter: HTMLElement | null,
+    to: URL,
+    matched: { route: ClientRoute; params: Record<string, string> },
+  ) {
+    inFlight.add(form);
+    try {
+      await runSubmit(form, submitter, to, matched);
+    } finally {
+      inFlight.delete(form);
+    }
+  }
+
+  async function runSubmit(
     form: HTMLFormElement,
     submitter: HTMLElement | null,
     to: URL,
@@ -471,6 +491,12 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
         return;
       }
       if (event.defaultPrevented) return;
+      if (inFlight.has(form)) {
+        // this form already has a request in flight (double-click, enter
+        // mashed twice): the first submit wins, this one is dropped
+        event.preventDefault();
+        return;
+      }
       const submitter = (event as SubmitEvent).submitter;
       const method = (
         submitter?.getAttribute("formmethod") ||
