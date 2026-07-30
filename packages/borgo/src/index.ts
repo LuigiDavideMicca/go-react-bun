@@ -80,12 +80,14 @@ export function subscribe(
 ): Channel {
   let ws: WebSocket | null = null;
   let closed = false;
+  let attempts = 0;
   const queue: string[] = [];
 
   const connect = () => {
     const scheme = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${scheme}://${location.host}/ws?topics=${encodeURIComponent(topic)}`);
     ws.onopen = () => {
+      attempts = 0;
       for (const pending of queue.splice(0)) ws!.send(pending);
     };
     ws.onmessage = (event) => {
@@ -95,7 +97,9 @@ export function subscribe(
       } catch {}
     };
     ws.onclose = () => {
-      if (!closed) setTimeout(connect, 1000);
+      // an unreachable server would otherwise be dialled once a second for as
+      // long as the tab stays open; backoff resets on the next successful open
+      if (!closed) setTimeout(connect, Math.min(30_000, 1_000 * 2 ** attempts++));
     };
   };
   connect();

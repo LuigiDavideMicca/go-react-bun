@@ -182,7 +182,30 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   // props prefetched on hover are kept briefly and consumed by the next
   // navigation; the route chunk import is idempotent and needs no cache
   const propsTtl = 10_000;
-  const propsCache = new Map<string, { promise: Promise<Response>; time: number }>();
+  const propsMax = 16;
+  type PropsEntry = { promise: Promise<Response>; time: number };
+  const propsCache = new Map<string, PropsEntry>();
+
+  // a prefetch nobody navigates to keeps its response body - and the socket
+  // reading it - alive until the tab closes, so abandoned entries are drained
+  const drainProps = (entry: PropsEntry) =>
+    void entry.promise.then((res) => res.body?.cancel().catch(() => {})).catch(() => {});
+
+  // insertion order is age order: evict from the front while the head is
+  // expired or the map is over budget
+  function trimProps() {
+    const now = performance.now();
+    for (const [key, entry] of propsCache) {
+      if (propsCache.size <= propsMax && now - entry.time < propsTtl) break;
+      propsCache.delete(key);
+      drainProps(entry);
+    }
+  }
+
+  function clearProps() {
+    for (const entry of propsCache.values()) drainProps(entry);
+    propsCache.clear();
+  }
 
   function fetchProps(to: URL) {
     const sep = to.search ? "&" : "?";
@@ -199,9 +222,14 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     const cacheKey = to.pathname + to.search;
     const hit = propsCache.get(cacheKey);
     if (hit && performance.now() - hit.time < propsTtl) return;
+    if (hit) {
+      propsCache.delete(cacheKey);
+      drainProps(hit);
+    }
     const promise = fetchProps(to);
     promise.catch(() => {});
     propsCache.set(cacheKey, { promise, time: performance.now() });
+    trimProps();
   }
 
   // scroll restoration: every history entry gets a key, positions are saved
@@ -249,8 +277,9 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       const cacheKey = to.pathname + to.search;
       const cached = propsCache.get(cacheKey);
       propsCache.delete(cacheKey);
-      const propsPromise =
-        cached && performance.now() - cached.time < propsTtl ? cached.promise : fetchProps(to);
+      const fresh = cached && performance.now() - cached.time < propsTtl;
+      if (cached && !fresh) drainProps(cached);
+      const propsPromise = fresh ? cached!.promise : fetchProps(to);
       const [loaded, res] = await Promise.all([matched.route.load(), propsPromise]);
       if (seq !== navSeq) return;
       if (!res.ok) throw new Error(`props fetch failed: ${res.status}`);
@@ -341,7 +370,7 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
 
     // the mutation is about to change what any prefetched loader would
     // return - drop the cache now, not on the success path only
-    propsCache.clear();
+    clearProps();
     let res: Response;
     try {
       res = await fetch(to.pathname + to.search, {
@@ -469,7 +498,6 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   }
 
   // links scrolled into view get their route chunk prefetched
-  const seenLinks = new WeakSet<Element>();
   const linkObserver = new IntersectionObserver((entries) => {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
@@ -479,12 +507,12 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     }
   });
 
+  // an observer holds its targets strongly: without the disconnect, every
+  // anchor of every page visited stays alive for the session. re-observing
+  // the survivors is cheap - a chunk already imported is a cache hit
   function observeLinks() {
-    for (const anchor of document.querySelectorAll("a[href]")) {
-      if (seenLinks.has(anchor)) continue;
-      seenLinks.add(anchor);
-      linkObserver.observe(anchor);
-    }
+    linkObserver.disconnect();
+    for (const anchor of document.querySelectorAll("a[href]")) linkObserver.observe(anchor);
   }
 
   function attachNavigation() {
@@ -590,11 +618,14 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       }
     }
 
+    let attempts = 0;
     const connect = () => {
-      const ws = new WebSocket(`ws://${location.host}/__borgo/dev`);
+      const scheme = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${scheme}://${location.host}/__borgo/dev`);
       // observable readiness: edits made before the channel is open are lost,
       // so tests (and curious users) can wait on this flag
       ws.onopen = () => {
+        attempts = 0;
         (window as unknown as Record<string, unknown>).__borgoDevConnected = true;
       };
       ws.onmessage = (event) => {
@@ -617,7 +648,9 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
           }
         } else if (msg.type === "js") applyUpdate(msg);
       };
-      ws.onclose = () => setTimeout(connect, 300);
+      // a stopped dev server must not be probed three times a second until
+      // the tab is closed; a normal restart still reconnects inside a second
+      ws.onclose = () => setTimeout(connect, Math.min(3_000, 300 * ++attempts));
     };
     connect();
   }
