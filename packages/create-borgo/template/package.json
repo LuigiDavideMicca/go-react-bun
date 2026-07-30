@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "borgo dev",
     "build": "borgo build",
-    "start": "borgo start"
+    "start": "borgo start",
+    "doctor": "borgo doctor"
   },
   "dependencies": {
     "borgo-framework": "^0.10.1",

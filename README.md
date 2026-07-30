@@ -14,9 +14,9 @@
 
 borgo is a mini Vercel-style full-stack framework: file-based React pages server-rendered by Bun, API routes written in Go. You get the DX — `bunx create-borgo my-app`, drop a file in `pages/`, drop a file in `api/`, one dev command — without the platform. Deployment is one Go binary and one Bun server on any box you control.
 
-Pages get nested layouts, per-page `<head>` management, streaming SSR through Suspense, client-side navigation with hover/viewport prefetching and scroll restoration, per-route code splitting, opt-out and deferred hydration plus islands, form actions with post/redirect/get, live updates over server-sent events and first-class WebSocket topics, signed-cookie sessions, fast refresh in dev, and custom 404/500 pages — all through file conventions. Loaders and actions talk to the Go API through a client typed end to end by `borgogen`, which reads the Go handlers with `go/types` and generates the TypeScript route map, request bodies included.
+Pages get nested layouts, per-page `<head>` management, streaming SSR through Suspense, client-side navigation with hover/viewport prefetching and scroll restoration, per-route code splitting, opt-out and deferred hydration plus islands, form actions with post/redirect/get, live updates over server-sent events and first-class typed WebSocket topics, signed-cookie sessions, fast refresh in dev, custom 404/500 pages, and static export for the pages that need no server — all through file conventions. Loaders and actions talk to the Go API through a client typed end to end by `borgogen`, which reads the Go handlers with `go/types` and generates the TypeScript route map, request bodies and WebSocket payloads included. Around the core: `/healthz` on both servers with opt-in Prometheus metrics, `borgo deploy init` for the blessed reverse-proxy/systemd/compose configs, and `borgo doctor` when something is off.
 
-The entire framework core is a couple thousand lines of readable TypeScript and Go; the Go runtime has zero dependencies. It exists because most of what makes Next-style frameworks pleasant is conventions, not machinery — and conventions are cheap.
+The entire framework is a few thousand lines of readable TypeScript and Go; the Go runtime has zero dependencies. It exists because most of what makes Next-style frameworks pleasant is conventions, not machinery — and conventions are cheap.
 
 ## Quickstart
 
@@ -199,10 +199,34 @@ channel.close();
 The built-in `__count` event reports the topic's subscriber count (presence for free), and the connection reconnects itself. On the Go side, `borgo.Push(topic, event, data)` publishes into the same topics — it POSTs to the front server's internal endpoint, accepted from loopback (set `FRONT_URL` and a shared `BORGO_PUSH_KEY` when the two halves are on different hosts):
 
 ```go
-borgo.Push("live", "task-created", task.Title)
+borgo.PushT("live", "task-created", task.Title)
 ```
 
+**Typed events.** `borgo.PushT` is `Push` with the payload visible to static analysis: called with literal topic and event strings, borgogen records the payload type in a generated `"topic/event"` map, exactly like `borgo.JSON[T]` types a route. The `subscribe` callback for that topic then narrows — checking `event` types `data`, and an event name nobody declared fails `tsc`. Browser-published events join the same map through declaration merging in any `.d.ts` of the app (see `ws-events.d.ts` in the tasks example):
+
+```ts
+declare module "borgo-framework" {
+  interface WsEvents {
+    "live/message": string; // browsers publish this one
+  }
+}
+```
+
+Topics with no declared events keep the untyped `(event: string, data: unknown)` callback, and `borgo.Push` stays available for dynamic topic or event names — those simply stay out of the map.
+
 Go itself stays stdlib-only — the WebSocket termination lives where Bun already provides it natively. Choose SSE for one-way server→browser feeds; choose WebSocket topics for anything browsers also write to. The `/live` page in `examples/tasks` demos both directions: two-tab chat plus Go pushes.
+
+### Static export
+
+`borgo export` prerenders every statically exportable page into `dist/site/` — plain HTML next to the built assets (precompressed siblings included), servable by nginx, a CDN, anything. A page without a loader exports as-is; a page with a loader opts in with `export const prerender = true`, and its loader runs once, at export time, against a temporary api process. Dynamic routes list their param sets:
+
+```tsx
+export const prerender = true;
+export const prerenderPaths = async ({ api }: PrerenderContext) =>
+  (await api("GET /api/tasks")).tasks.map((task) => ({ id: task.ID }));
+```
+
+`hydrate = false` pages export with zero JavaScript; hydrated pages carry their chunks and hydrate against the exported props (client-side navigation falls back to plain page loads — there is no server to ask for props). Everything else is skipped, with the reason printed. An exported site is pages only: actions, SSE and WebSocket topics need the running servers. The [deploy guide](docs/deploy.md#static-export) has the nginx one-liner.
 
 ### Fast refresh in dev
 
@@ -274,6 +298,14 @@ func init() { borgo.Handle("GET /api/admin/stats", authed(adminStats)) }
 
 Both special pages go through the normal layout chain. On the Go side, `borgo.Handle` panics with an actionable message on malformed or duplicate patterns instead of failing silently.
 
+### Health checks and metrics
+
+The front server answers `/healthz` with `{status, uptime, api}` — `api` reports whether the Go server answered its own `/healthz` (mounted automatically by `borgo.Serve`) within a short timeout. Point the load balancer or uptime monitor at the front one. Set `METRICS=1` and `/metrics` serves Prometheus text: request counts and a duration histogram by route pattern and status, plus process uptime — a handful of series, hand-rolled, zero dependencies. Both endpoints stay out of the request log, of compression, and of their own numbers.
+
+### When something is off
+
+`borgo doctor` diagnoses the environment: bun on `PATH` (including the npm-installed-shim trap), go and its version against your `go.mod`, both ports free — naming the process that holds one — a stale api process locking the dev binary swap, generated api types fresh against `api/*.go`, `node_modules` present, and the app's dependencies sane. Every failing check prints its one-line fix, and the exit code is 1 so it can gate scripts.
+
 ## Architecture
 
 Two processes, one front door:
@@ -291,19 +323,19 @@ examples/tasks          demo app: tasks crud with gorm + sqlite, sse, websockets
 docs/deploy.md          docker, compose, reverse proxy, systemd
 ```
 
-Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo build` (client assets in `public/assets/`, Go binary in `dist/`), `borgo start` (run from build output, supervising both processes; `--front-only` for split deployments with `API_URL`). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
+Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo build` (client assets in `public/assets/`, Go binary in `dist/`), `borgo start` (run from build output, supervising both processes; `--front-only` for split deployments with `API_URL`), `borgo export` (static site in `dist/site/`), `borgo deploy init <caddy|nginx|systemd|compose>` (deploy configs), `borgo doctor` (environment diagnosis). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
 
 ### Deploying
 
-Scaffolded apps ship a multi-stage `Dockerfile` (Go builds static, the runtime is `oven/bun:slim`) and a `docker-compose.yml` with a `/data` volume for SQLite — `docker compose up -d` is a deployment. The [deploy guide](docs/deploy.md) covers the single-container and two-service layouts, Caddy and nginx reverse-proxy samples (WebSockets and SSE included), a systemd unit for bare metal, and the full environment reference.
+Scaffolded apps ship a multi-stage `Dockerfile` (Go builds static, the runtime is `oven/bun:slim`) and a `docker-compose.yml` with a `/data` volume for SQLite — `docker compose up -d` is a deployment. The [deploy guide](docs/deploy.md) covers the single-container and two-service layouts, Caddy and nginx reverse-proxy samples (WebSockets and SSE included), a systemd unit for bare metal, static export hosting, and the full environment reference — and `borgo deploy init` writes those configs into your project, templated with the app's name and ports.
 
 ## Tests
 
 Three layers, all run by CI on every push:
 
-- **Go** (`go test ./...`) — table-driven tests for the route registry, sessions (sign/verify/tamper/expiry), cache headers, SSE stream framing and hub broadcast/slow-client behavior, `borgo.Push`, and borgogen against a committed fixture app: route discovery (directives + `Handle` calls), helper following, `WriteJSON`, `Bind`, type overrides, snapshot freshness, and the error paths (duplicate patterns, malformed directives).
-- **TypeScript** (`bun test packages/borgo/test`) — the router (patterns, matching, params), the api client (URL building, headers, `ApiError`, typed bodies plumbing), hydrate/refresh source parsing, and manifest generation against a temp fixture (islands flags, client-route exclusion, precedence).
-- **End-to-end** (`npx playwright test`) — against a production build of `examples/tasks`: client navigation, hover/viewport prefetching, scroll restoration, islands, hydration modes, form actions, SSE, two-tab WebSockets with Go push, streaming SSR, error pages — plus a dev-server project asserting fast refresh preserves component state (including five consecutive rapid edits), hook add/remove remounts without a reload, custom hook edits hot-apply, Go edits reload exactly once and only after the api answers, CSS hot-swaps, and layouts fall back to a reload.
+- **Go** (`go test ./...`) — table-driven tests for the route registry, sessions (sign/verify/tamper/expiry), cache headers, the `/healthz` handler, SSE stream framing and hub broadcast/slow-client behavior, `borgo.Push` and `borgo.PushT`, and borgogen against a committed fixture app: route discovery (directives + `Handle` calls), helper following, `WriteJSON`, `Bind`, type overrides, `PushT` event extraction, snapshot freshness, and the error paths (duplicate patterns, malformed directives, dynamic push topics).
+- **TypeScript** (`bun test packages/borgo/test`) — the router (patterns, matching, params), the api client (URL building, headers, `ApiError`, typed bodies plumbing), hydrate/refresh source parsing, manifest generation against a temp fixture (islands flags, client-route exclusion, precedence), every `borgo doctor` check against a fake environment, the export planner (loader/prerender/dynamic partitioning, path filling), the deploy config templates (ports, names, refuse-overwrite), and the Prometheus exposition format.
+- **End-to-end** (`npx playwright test`) — against a production build of `examples/tasks`: client navigation, hover/viewport prefetching, scroll restoration, islands, hydration modes, form actions, SSE, two-tab WebSockets with Go push, streaming SSR, error pages, `/healthz` on both servers, `/metrics` series, a `borgo doctor` smoke — plus a dev-server project asserting fast refresh preserves component state (including five consecutive rapid edits), hook add/remove remounts without a reload, custom hook edits hot-apply, Go edits reload exactly once and only after the api answers, CSS hot-swaps, and layouts fall back to a reload — and an export project that runs `borgo export` and serves `dist/site` from a plain static file server, asserting content, hydration against exported props, and the zero-JS page.
 
 ## Versioning and releases
 
@@ -323,31 +355,34 @@ Honest comparison with the frameworks a borgo adopter would otherwise pick. ✓ 
 | Per-route code splitting | ✓ | ✓ | ✓ | ✓ |
 | Hydration control | ✓ page-level opt-out, deferred, islands | — (RSC instead) | ✓ islands (experimental) | — (fine-grained reactivity instead) |
 | Form actions | ✓ | ✓ | ✓ | ✓ |
-| SSE + WebSockets first-class | ✓ | bring your own | ✓ Nitro | bring your own |
+| SSE + WebSockets first-class | ✓ typed event payloads | bring your own | ✓ Nitro | bring your own |
+| Static export | ✓ `borgo export` | ✓ | ✓ | ✓ |
+| Health endpoint + metrics | ✓ built-in, opt-in Prometheus | DIY | DIY | DIY |
 | Sessions/auth | ✓ signed cookie + recipes | libraries | modules | libraries |
 | Fast refresh | ✓ full transform | ✓ full transform | ✓ | ✓ |
 | React Server Components | — | ✓ | n/a | n/a |
 | ISR / edge / serverless targets | — | ✓ | ✓ | ✓ |
 | Image/font optimization | — | ✓ | ✓ | — |
 | Plugin ecosystem | — | ✓ | ✓ | ✓ |
-| Deploy story | one box: Docker/compose/systemd, guide included | Vercel or DIY | many presets | many presets |
-| Framework size | ~2.5k lines incl. codegen, readable in an evening | large | large | medium |
+| Deploy story | one box: Docker/compose/systemd, generated configs | Vercel or DIY | many presets | many presets |
+| Framework size | ~4k lines incl. codegen and cli tooling, readable in a sitting | large | large | medium |
 
 ## What this is not
 
 Everything here is a deliberate choice, with the reason attached:
 
 - **No React Server Components.** Loaders returning serialized props are the model: they cover data-on-the-server with a runtime small enough to read. RSC needs deep bundler/runtime integration that would be most of the framework's weight for one feature.
-- **No edge, serverless or ISR targets.** borgo is self-hosted by conviction — one box, two processes, a reverse proxy. `borgo.Cache` headers plus proxy caching cover what ISR covers on a single-site scale.
+- **No edge, serverless or ISR targets.** borgo is self-hosted by conviction — one box, two processes, a reverse proxy. `borgo.Cache` headers plus proxy caching cover what ISR covers on a single-site scale, and `borgo export` covers the fully static case.
 - **No image/font optimization pipeline.** The build is one `Bun.build` call and stays that way; put a CDN or `vips` in front if you need it.
 - **No plugin system.** The framework is small enough that the extension mechanism is reading the source and changing it.
 - **Loader data is not streamed on client navigations** — one JSON payload, fetched in parallel with the route chunk (and usually prefetched on hover). Streaming applies to initial SSR, where it matters most.
 - **Sessions are mechanics, not policy.** Signed cookie in, tamper-proof out; OAuth, user stores and CSRF strategy stay in your hands.
 - **The typed bridge is static analysis, no runtime reflection.** Helpers inside `api/` are followed and `//borgo:type` covers custom marshalers; a response written through `json.NewEncoder` or a helper in another package types as `unknown` — the escape hatch is visible, not silent.
-- **WebSocket topics are a relay, not RPC.** The front server forwards `{event, data}` between subscribers and Go; per-message business logic belongs in Go routes.
+- **WebSocket topics are a relay, not RPC.** The front server forwards `{event, data}` between subscribers and Go; per-message business logic belongs in Go routes. `borgo.PushT` types the payloads end to end — the relay itself stays dumb.
 
 ## Troubleshooting
 
+- **Start with `borgo doctor`** — it checks bun, go, both ports (naming the process holding a taken one), stale api processes, generated types freshness and the app's dependencies, each failure with its one-line fix.
 - **`error: bun is not installed in %PATH%`** — the `borgo` bin shim locates `bun` through `PATH`. Start the app through Bun itself (`bun run dev`): Bun resolves its own shims even when `bun` is not on `PATH`. The error appears when something else spawns the shim, e.g. `npm run dev` or calling `node_modules/.bin/borgo` directly. To make the shim callable from anywhere, install Bun with the [official installer](https://bun.sh) so `bun` lands on `PATH`.
 - **Two Buns on one machine** — an npm-installed Bun (`npm i -g bun`) puts a wrapper ahead of the official install on `PATH`. `borgo dev` spawns its workers by absolute path, so either install works for the dev loop, but prefer the official installer and check `where bun` (`which bun`) points where you expect.
 - **Odd characters like `âŒ‚` in the terminal** — a legacy Windows console codepage renders UTF-8 as mojibake; borgo detects this and falls back to plain ASCII marks. `chcp 65001`, or Windows Terminal, brings the branded glyphs back.
@@ -358,8 +393,9 @@ Everything here is a deliberate choice, with the reason attached:
 - ~~**Phase 3 — typed bridge and a production build**: TypeScript types generated from Go handlers, per-route code splitting, server-only code elimination, partial hydration, route directives, server-sent events~~ done
 - ~~**Phase 4 — deploy story**: multi-stage Dockerfile, compose with a SQLite volume, reverse proxy and systemd guide~~ done
 - ~~**Phase 5 — production round**: complete typed bridge (helpers, `WriteJSON`, type overrides, typed request bodies), islands, prefetching and scroll restoration, fast refresh, first-class WebSockets, sessions and cache helpers, release automation~~ done
+- ~~**Tier 1 — operability**: `borgo doctor`, typed WebSocket events (`borgo.PushT`), static export (`borgo export`), `/healthz` + Prometheus metrics, `borgo deploy init`~~ done
 
-The roadmap is complete. What ships next is driven by [issues](https://github.com/LuigiDavideMicca/borgo/issues), not phases.
+The phased roadmap is complete. What ships next is driven by [issues](https://github.com/LuigiDavideMicca/borgo/issues), not phases.
 
 ---
 

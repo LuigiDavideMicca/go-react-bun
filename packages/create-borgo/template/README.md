@@ -26,6 +26,7 @@ If you are developing against a local borgo checkout, uncomment the `replace` di
 - `bun run dev` — both servers with watch, fast refresh and css hot swap
 - `bun run build` — production client assets in `public/assets/` and the Go API binary in `dist/`
 - `bun run start` — run from the build output (supervises both processes)
+- `bun run doctor` — diagnose the environment (bun, go, ports, stale processes, generated types) with a fix per failing check
 
 ## Deploy
 

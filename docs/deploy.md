@@ -122,6 +122,10 @@ WantedBy=multi-user.target
 
 `borgo start` exits when the Go process dies, and `Restart=on-failure` brings both back.
 
+## Health and metrics
+
+Point the load balancer or uptime monitor at the front server's `/healthz` — it returns `{status, uptime, api}`, probing the Go server's own `/healthz` (mounted by `borgo.Serve`) with a short timeout. Set `METRICS=1` and the front server also serves `/metrics` in Prometheus text format: request counts and a duration histogram by route pattern and status, plus process uptime.
+
 ## Environment reference
 
 | Variable | Default | Meaning |
@@ -133,4 +137,5 @@ WantedBy=multi-user.target
 | `BORGO_PUSH_KEY` | unset | shared secret for `borgo.Push` across hosts (loopback needs none) |
 | `SESSION_SECRET` | unset | HMAC key for signed-cookie sessions (required to use them) |
 | `SESSION_SECURE` | unset | `1` adds `Secure` to the session cookie |
+| `METRICS` | unset | `1` exposes `/metrics` (Prometheus text) on the front server |
 | `NO_COLOR` | unset | disable ANSI colors in logs |

@@ -13,12 +13,15 @@ bunx create-borgo my-app
 - `borgo dev` — runs the Go API server and the SSR front server with fast refresh and css hot swap
 - `borgo build` — production client assets in `public/assets/` and the Go binary in `dist/`
 - `borgo start` — runs both servers from the build output (`--front-only` for split deployments, with `API_URL`)
+- `borgo export` — prerenders the statically exportable pages into `dist/site/`
+- `borgo deploy init <caddy|nginx|systemd|compose>` — writes the deploy guide's config for the project
+- `borgo doctor` — diagnoses the environment, one actionable fix per failing check
 
 Run the CLI through Bun (`bun run dev` in an app). If you hit `error: bun is not installed in %PATH%`, the bin shim was spawned without Bun on `PATH` (e.g. by `npm run`) — see the [troubleshooting section](https://github.com/LuigiDavideMicca/borgo#troubleshooting).
 
 ## Exports
 
-- `borgo` — browser-safe: `redirect`, `Island`/`registerIslands`, the websocket `subscribe` helper, `ApiError`, plus `LoaderContext`, `ActionContext`, `Head`, `PageModule`, `Route` types and the router functions
+- `borgo` — browser-safe: `redirect`, `Island`/`registerIslands`, the websocket `subscribe` helper (typed against the borgogen-generated event map), `ApiError`, plus `LoaderContext`, `ActionContext`, `Head`, `PageModule`, `Route` types and the router functions
 - `borgo/server` — `serve`, the SSR front server (server-only)
 - `borgo/router` — router internals shared by server and client
 - `borgo/runtime` — the hydration/navigation runtime and islands mounter, imported by the generated client entries
