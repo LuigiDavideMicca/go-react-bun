@@ -85,15 +85,22 @@ export function outputPath(path: string): string {
   return `${dir}/index.html`;
 }
 
-const freePort = () =>
-  new Promise<number>((resolve, reject) => {
+const listenFree = () =>
+  new Promise<import("node:net").Server>((resolve, reject) => {
     const server = createServer();
     server.once("error", reject);
-    server.listen({ port: 0, host: "127.0.0.1" }, () => {
-      const { port } = server.address() as { port: number };
-      server.close(() => resolve(port));
-    });
+    server.listen({ port: 0, host: "127.0.0.1" }, () => resolve(server));
   });
+
+// every listener stays open until all ports are picked: closing one before
+// asking for the next lets the os hand out the same port twice
+export async function freePorts(count: number): Promise<number[]> {
+  const servers: Array<import("node:net").Server> = [];
+  for (let i = 0; i < count; i++) servers.push(await listenFree());
+  const ports = servers.map((s) => (s.address() as { port: number }).port);
+  await Promise.all(servers.map((s) => new Promise((done) => s.close(done))));
+  return ports;
+}
 
 // a file plus its .gz/.br siblings is one asset; an orphan .gz/.br with no
 // base file next to it counts as an asset in its own right
@@ -140,10 +147,12 @@ export async function exportSite(): Promise<number> {
     return 1;
   }
 
-  const apiPort = await freePort();
-  const frontPort = await freePort();
+  const [apiPort, frontPort] = await freePorts(2);
   process.env.API_PORT = String(apiPort);
   process.env.PORT = String(frontPort);
+  // a shell API_URL (split deployment) would send loaders to the real api
+  // mid-export; the export always talks to its own ephemeral one
+  delete process.env.API_URL;
   process.env.BORGO_RELOAD = "1"; // quiet startup lines from the servers
 
   // loaders and prerenderPaths run for real, so they get a real api: the

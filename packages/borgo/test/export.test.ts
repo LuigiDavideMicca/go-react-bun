@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { countAssets, exportSummary, fillPattern, outputPath, planExport } from "../src/export";
+import { countAssets, exportSummary, fillPattern, freePorts, outputPath, planExport } from "../src/export";
 import type { Route } from "../src/router";
 
 const route = (pattern: string, module: Record<string, unknown>, islands = false): Route =>
@@ -108,6 +108,15 @@ describe("fillPattern", () => {
   test("params with path separators throw", () => {
     expect(() => fillPattern("/posts/:slug", { slug: "a/b" })).toThrow("path separator");
     expect(() => fillPattern("/posts/:slug", { slug: "a\\b" })).toThrow("path separator");
+  });
+});
+
+describe("freePorts", () => {
+  test("returns distinct usable ports", async () => {
+    const ports = await freePorts(2);
+    expect(ports).toHaveLength(2);
+    expect(ports[0]).not.toBe(ports[1]);
+    for (const port of ports) expect(port).toBeGreaterThan(0);
   });
 });
 
