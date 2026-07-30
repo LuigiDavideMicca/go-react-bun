@@ -676,6 +676,15 @@ export async function serve({ dev = false } = {}) {
     async fetch(req) {
       const t0 = performance.now();
       const url = new URL(req.url);
+      // heads render for real (status and headers must be honest), only the
+      // body is dropped - and cancelled, or the ssr/gzip pipeline keeps
+      // rendering into a stream nobody reads
+      const dropBody = (res: Response) => {
+        if (req.method !== "HEAD" || !res.body) return res;
+        const headless = new Response(null, { status: res.status, headers: res.headers });
+        void res.body.cancel().catch(() => {});
+        return headless;
+      };
 
       // app websockets: /ws?topics=a,b subscribes the browser to topics.
       // browsers attach cookies to ws handshakes from any origin, so a
@@ -739,12 +748,14 @@ export async function serve({ dev = false } = {}) {
         }
         return new Response("not found", { status: 404 });
       }
-      if (url.pathname === "/healthz") return secure(await healthz());
+      if (url.pathname === "/healthz") return secure(dropBody(await healthz()));
       if (metrics && url.pathname === "/metrics") {
         return secure(
-          new Response(metrics.render(), {
-            headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
-          }),
+          dropBody(
+            new Response(metrics.render(), {
+              headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
+            }),
+          ),
         );
       }
 
@@ -752,14 +763,6 @@ export async function serve({ dev = false } = {}) {
       let response: Response;
       try {
         response = await handle(req, url, label);
-        // pages render for HEAD too (status and headers must be real), only
-        // the body is dropped - and cancelled, or the ssr/gzip pipeline
-        // keeps rendering into a stream nobody reads
-        if (req.method === "HEAD" && response.body) {
-          const rendered = response;
-          response = new Response(null, { status: rendered.status, headers: rendered.headers });
-          void rendered.body?.cancel().catch(() => {});
-        }
       } catch (error) {
         console.error(error);
         if (dev) {
@@ -777,6 +780,7 @@ export async function serve({ dev = false } = {}) {
           response = new Response("internal server error", { status: 500 });
         }
       }
+      response = dropBody(response);
       if (metrics && !url.pathname.startsWith("/assets/") && url.pathname !== "/favicon.ico") {
         metrics.observe(label.route, response.status, (performance.now() - t0) / 1000);
       }
