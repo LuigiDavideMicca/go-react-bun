@@ -4,10 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import {
+  assetCacheControl,
+  buildAssetIndex,
   documentStream,
   gzipStream,
   isCompressiblePath,
   isHashedAsset,
+  isNotModified,
   jsonResponse,
   pickEncoding,
   precompressAssets,
@@ -80,6 +83,95 @@ describe("precompressAssets", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("buildAssetIndex", () => {
+  const withAssets = async (fn: (dir: string) => Promise<void>) => {
+    const dir = mkdtempSync(join(tmpdir(), "borgo-assets-"));
+    try {
+      await fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test("indexes files by url path with their precompressed siblings", async () => {
+    await withAssets(async (dir) => {
+      await Bun.write(join(dir, "assets/style.css"), "body{color:red}");
+      await Bun.write(join(dir, "assets/style.css.gz"), "gz");
+      await Bun.write(join(dir, "assets/style.css.br"), "br");
+      await Bun.write(join(dir, "assets/client-6f5e37fs.js"), "console.log(1)");
+      await Bun.write(join(dir, "logo.png"), "png");
+
+      const index = buildAssetIndex(dir);
+      const css = index.get("/assets/style.css")!;
+      expect(css.identity.path.endsWith("/assets/style.css")).toBe(true);
+      expect(css.variants.map((v) => v.encoding)).toEqual(["br", "gzip"]);
+      expect(css.compressible).toBe(true);
+      expect(css.cacheControl).toBe("");
+      expect(css.type).toContain("text/css");
+      expect(new Date(css.lastModified).getTime()).toBeGreaterThan(0);
+
+      // every representation gets its own etag, or a cache could hand a
+      // brotli body to a client that asked for identity
+      const tags = new Set([css.identity.etag, ...css.variants.map((v) => v.etag)]);
+      expect(tags.size).toBe(3);
+
+      expect(index.get("/assets/client-6f5e37fs.js")!.cacheControl).toBe(
+        "public, max-age=31536000, immutable",
+      );
+      const png = index.get("/logo.png")!;
+      expect(png.compressible).toBe(false);
+      expect(png.variants).toEqual([]);
+    });
+  });
+
+  test("a missing directory is not fatal", () => {
+    expect(buildAssetIndex(join(tmpdir(), "borgo-does-not-exist-" + Date.now())).size).toBe(0);
+  });
+
+  test("cache-control: hashed forever, service worker never", () => {
+    expect(assetCacheControl("public/assets/client-6f5e37fs.js")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    expect(assetCacheControl("public/sw.js")).toBe("no-cache");
+    expect(assetCacheControl("public/assets/style.css")).toBe("");
+  });
+});
+
+describe("isNotModified", () => {
+  const at = Date.parse("Wed, 21 Oct 2026 07:28:00 GMT");
+  const req = (headers: Record<string, string>) => new Request("http://x/a.css", { headers });
+
+  test("a matching etag revalidates", () => {
+    expect(isNotModified(req({ "if-none-match": '"abc"' }), '"abc"', at)).toBe(true);
+    expect(isNotModified(req({ "if-none-match": 'W/"abc"' }), '"abc"', at)).toBe(true);
+    expect(isNotModified(req({ "if-none-match": '"x", "abc"' }), '"abc"', at)).toBe(true);
+    expect(isNotModified(req({ "if-none-match": "*" }), '"abc"', at)).toBe(true);
+  });
+
+  test("a different etag is a miss, and wins over if-modified-since", () => {
+    expect(isNotModified(req({ "if-none-match": '"other"' }), '"abc"', at)).toBe(false);
+    const both = req({
+      "if-none-match": '"other"',
+      "if-modified-since": "Wed, 21 Oct 2026 07:28:00 GMT",
+    });
+    expect(isNotModified(both, '"abc"', at)).toBe(false);
+  });
+
+  test("if-modified-since compares at second resolution", () => {
+    expect(
+      isNotModified(req({ "if-modified-since": "Wed, 21 Oct 2026 07:28:00 GMT" }), '"a"', at + 400),
+    ).toBe(true);
+    expect(
+      isNotModified(req({ "if-modified-since": "Wed, 21 Oct 2026 07:27:59 GMT" }), '"a"', at),
+    ).toBe(false);
+    expect(isNotModified(req({ "if-modified-since": "not a date" }), '"a"', at)).toBe(false);
+  });
+
+  test("an unconditional request is never a 304", () => {
+    expect(isNotModified(req({}), '"abc"', at)).toBe(false);
   });
 });
 

@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, statSync, type Dirent } from "node:fs";
 import { join } from "node:path";
 import { brotliCompressSync, constants, createGzip, gzipSync } from "node:zlib";
 
@@ -55,6 +55,102 @@ export async function precompressAssets(dir: string) {
     });
     if (br.length < raw.length) await Bun.write(path + ".br", br);
   }
+}
+
+export type AssetVariant = { path: string; encoding?: "br" | "gzip"; etag: string };
+
+export type AssetInfo = {
+  identity: AssetVariant;
+  // precompressed siblings in server preference order
+  variants: AssetVariant[];
+  cacheControl: string;
+  compressible: boolean;
+  mtimeMs: number;
+  lastModified: string;
+  type: string;
+};
+
+// one walk of the served directory at boot, so a request never stats the disk
+// to learn whether a file - or its .br/.gz sibling - is there, and every asset
+// gets an etag it can be revalidated against. only used in production: dev
+// rebuilds assets in place under stable names, where a cached etag would pin
+// the browser to yesterday's bundle. anything written after boot is simply not
+// in here and falls back to a live lookup.
+export function buildAssetIndex(dir: string): Map<string, AssetInfo> {
+  const files = new Map<string, { size: number; mtimeMs: number }>();
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true, recursive: true });
+  } catch {
+    return new Map();
+  }
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const path = join(entry.parentPath, entry.name).replaceAll("\\", "/");
+    try {
+      const stat = statSync(path);
+      files.set(path, { size: stat.size, mtimeMs: stat.mtimeMs });
+    } catch {}
+  }
+
+  const base = dir.replaceAll("\\", "/").replace(/\/+$/, "");
+  const tag = (path: string, suffix: string) => {
+    const file = files.get(path)!;
+    return `"${file.size.toString(36)}-${Math.floor(file.mtimeMs).toString(36)}${suffix}"`;
+  };
+
+  const index = new Map<string, AssetInfo>();
+  for (const [path, file] of files) {
+    const url = path.slice(base.length);
+    const compressible = isCompressiblePath(path);
+    const variants: AssetVariant[] = [];
+    if (compressible) {
+      for (const [encoding, ext] of [
+        ["br", ".br"],
+        ["gzip", ".gz"],
+      ] as const) {
+        if (files.has(path + ext)) {
+          variants.push({ path: path + ext, encoding, etag: tag(path + ext, `-${encoding}`) });
+        }
+      }
+    }
+    index.set(url, {
+      identity: { path, etag: tag(path, "") },
+      variants,
+      cacheControl: assetCacheControl(path),
+      compressible,
+      mtimeMs: file.mtimeMs,
+      lastModified: new Date(file.mtimeMs).toUTCString(),
+      type: Bun.file(path).type,
+    });
+  }
+  return index;
+}
+
+// hashed build outputs cache forever; a service worker must never be
+// heuristically cached, or updates to it (and to everything it controls) lag
+// behind deploys
+export function assetCacheControl(path: string): string {
+  if (path === "public/sw.js" || path.endsWith("/public/sw.js")) return "no-cache";
+  return isHashedAsset(path) ? "public, max-age=31536000, immutable" : "";
+}
+
+// rfc 9110: if-none-match decides on its own when present, if-modified-since
+// only answers when there is no etag to compare
+export function isNotModified(req: Request, etag: string, mtimeMs: number): boolean {
+  const ifNoneMatch = req.headers.get("if-none-match");
+  if (ifNoneMatch !== null) {
+    if (ifNoneMatch.trim() === "*") return true;
+    for (const candidate of ifNoneMatch.split(",")) {
+      if (candidate.trim().replace(/^W\//, "") === etag) return true;
+    }
+    return false;
+  }
+  const ifModifiedSince = req.headers.get("if-modified-since");
+  if (!ifModifiedSince) return false;
+  const since = Date.parse(ifModifiedSince);
+  // http dates have a one second resolution: compare truncated
+  return !Number.isNaN(since) && Math.floor(mtimeMs / 1000) * 1000 <= since;
 }
 
 const encoder = new TextEncoder();

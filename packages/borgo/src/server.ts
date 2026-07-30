@@ -7,12 +7,15 @@ import { makeApiClient } from "./api";
 import { buildAssets, compileCss } from "./build";
 import { banner, c, fmtMs, g, statusColor } from "./colors";
 import {
+  assetCacheControl,
+  buildAssetIndex,
   documentStream,
   gzipStream,
   isCompressiblePath,
-  isHashedAsset,
+  isNotModified,
   jsonResponse,
   pickEncoding,
+  type AssetInfo,
 } from "./compress";
 import { CSRF_COOKIE, CSRF_FIELD, cookieValue, registerCsrf, registerIslands, withCsrf } from "./index";
 import { createMetrics } from "./metrics";
@@ -293,12 +296,35 @@ export async function serve({ dev = false } = {}) {
   // static files: hashed build outputs cache forever, compressible types are
   // served from the .gz/.br siblings that `borgo build` emitted. dev has no
   // siblings (precompression is skipped) and serves identity.
+  const assetIndex: Map<string, AssetInfo> = dev ? new Map() : buildAssetIndex("public");
+
+  // the indexed path: no stat, and an etag the browser can revalidate against
+  function serveIndexed(req: Request, info: AssetInfo): Response {
+    let variant = info.identity;
+    if (info.variants.length) {
+      const encoding = pickEncoding(req.headers.get("accept-encoding"), ["br", "gzip"]);
+      if (encoding) variant = info.variants.find((v) => v.encoding === encoding) ?? variant;
+    }
+    const headers = new Headers();
+    if (info.cacheControl) headers.set("Cache-Control", info.cacheControl);
+    if (info.compressible) headers.set("Vary", "Accept-Encoding");
+    headers.set("ETag", variant.etag);
+    headers.set("Last-Modified", info.lastModified);
+    if (isNotModified(req, variant.etag, info.mtimeMs)) {
+      return new Response(null, { status: 304, headers });
+    }
+    if (variant.encoding) {
+      headers.set("Content-Encoding", variant.encoding);
+      headers.set("Content-Type", info.type);
+    }
+    return new Response(Bun.file(variant.path), { headers });
+  }
+
+  // dev, and anything written into public/ after boot
   async function serveAsset(req: Request, path: string, asset: ReturnType<typeof Bun.file>) {
     const headers: Record<string, string> = {};
-    if (isHashedAsset(path)) headers["Cache-Control"] = "public, max-age=31536000, immutable";
-    // a service worker must never be heuristically cached, or updates to it
-    // (and everything it controls) lag behind deploys
-    if (path === "public/sw.js") headers["Cache-Control"] = "no-cache";
+    const cacheControl = assetCacheControl(path);
+    if (cacheControl) headers["Cache-Control"] = cacheControl;
     if (!isCompressiblePath(path)) return new Response(asset, { headers });
     headers["Vary"] = "Accept-Encoding";
     if (!dev) {
@@ -370,6 +396,8 @@ export async function serve({ dev = false } = {}) {
         !assetPath.includes("\\") &&
         !assetPath.includes("\0")
       ) {
+        const indexed = assetIndex.get(assetPath);
+        if (indexed) return serveIndexed(req, indexed);
         const path = "public" + assetPath;
         const asset = Bun.file(path);
         if (await asset.exists()) return serveAsset(req, path, asset);
