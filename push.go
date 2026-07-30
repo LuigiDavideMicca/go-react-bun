@@ -13,7 +13,16 @@ import (
 )
 
 // a hung front server must not block the api handler that called Push
-var pushClient = &http.Client{Timeout: 5 * time.Second}
+var pushClient = &http.Client{Timeout: 5 * time.Second, Transport: pushTransport()}
+
+// every push goes to the same host, and DefaultTransport parks only two idle
+// connections per host: concurrent pushes would open a socket per call and
+// burn through the ephemeral port range
+func pushTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConnsPerHost = 64
+	return t
+}
 
 // PushT is Push with the payload type visible to static analysis. Call it
 // with literal topic and event strings and borgogen records the payload type

@@ -2,8 +2,11 @@ package borgo
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -60,6 +63,49 @@ func TestPushTDelegates(t *testing.T) {
 func TestPushClientHasTimeout(t *testing.T) {
 	if pushClient.Timeout <= 0 {
 		t.Fatal("pushClient must carry a timeout, or a hung front server blocks handlers forever")
+	}
+}
+
+// pushes go to one host: without a raised idle-connection cap, concurrent
+// pushes open a socket per call and eat the ephemeral port range
+func TestPushReusesConnections(t *testing.T) {
+	const workers, each = 16, 50
+	var requests, opened atomic.Int64
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			opened.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+	t.Setenv("FRONT_URL", server.URL)
+
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range each {
+				if err := Push("live", "created", map[string]int{"id": 1}); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := requests.Load(); got != workers*each {
+		t.Fatalf("front server saw %d pushes, want %d", got, workers*each)
+	}
+	// generous: reuse should keep this near the worker count, a fresh
+	// connection per push would be workers*each
+	if got := opened.Load(); got > workers*each/4 {
+		t.Fatalf("%d connections opened for %d pushes: they are not being reused", got, workers*each)
 	}
 }
 
