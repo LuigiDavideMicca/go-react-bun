@@ -3,6 +3,7 @@ package borgo
 import (
 	"compress/gzip"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -32,8 +33,14 @@ func acceptsGzip(acceptEncoding string) bool {
 		if name != "gzip" && name != "*" {
 			continue
 		}
-		if hasQ && strings.TrimSpace(quality) == "q=0" {
-			continue
+		if hasQ {
+			// any spelling of a zero quality (q=0, q=0.0, q=0.00) is a refusal
+			value, ok := strings.CutPrefix(strings.TrimSpace(quality), "q=")
+			if ok {
+				if q, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil && q <= 0 {
+					continue
+				}
+			}
 		}
 		return true
 	}
