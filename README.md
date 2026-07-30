@@ -1,6 +1,8 @@
-<p align="center"><img src="assets/logo.svg" width="160" alt="borgo"/></p>
-
-# borgo
+<h1 align="center">
+  <img src="assets/logo.svg" width="200" alt=""/>
+  <br/>
+  borgo
+</h1>
 
 <p>
   <a href="https://www.npmjs.com/package/borgo-framework"><img src="https://img.shields.io/npm/v/borgo-framework?label=borgo-framework&amp;color=c2552b" alt="npm borgo-framework"/></a>
