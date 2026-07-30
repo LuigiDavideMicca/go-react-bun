@@ -151,9 +151,11 @@ export function checkGo(d: DoctorEnv): Check {
 }
 
 export function parseNetstatPid(out: string, port: number): string | null {
+  // the state column is localized ("LISTENING", "IN ASCOLTO", "ABHÖREN"...):
+  // recognize a listening row by shape instead, a tcp local address on the
+  // port with the wildcard foreign address :0
   for (const line of out.split("\n")) {
-    if (!/LISTENING/i.test(line)) continue;
-    const m = line.match(/^\s*TCP\s+\S+:(\d+)\s/);
+    const m = line.match(/^\s*TCP\s+\S+:(\d+)\s+\S+:0\s/);
     if (!m || Number(m[1]) !== port) continue;
     const pid = line.trim().split(/\s+/).pop();
     if (pid && /^\d+$/.test(pid)) return pid;
@@ -196,6 +198,10 @@ export function checkApiBinary(d: DoctorEnv): Check {
   const image = "api" + (d.platform === "win32" ? ".exe" : "");
   const bin = `.borgo/${image}`;
   if (!d.exists(bin)) return { name, ok: true, detail: "no dev binary yet" };
+  // only windows locks a running executable against replacement; elsewhere
+  // dev's rename swap works regardless (and open(r+) on a running elf would
+  // report a false ETXTBSY "busy")
+  if (d.platform !== "win32") return { name, ok: true, detail: `${bin} swappable` };
   if (d.openForWrite(bin) === "busy") {
     const kill = d.platform === "win32" ? `taskkill /F /IM ${image}` : "pkill -x api";
     return {

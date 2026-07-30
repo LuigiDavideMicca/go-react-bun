@@ -126,6 +126,16 @@ describe("ports", () => {
     expect(parseNetstatPid(netstat, 9999)).toBeNull();
   });
 
+  test("parseNetstatPid on a localized windows (italian)", () => {
+    const localized = [
+      "Connessioni attive",
+      "  TCP    0.0.0.0:3000           0.0.0.0:0              IN ASCOLTO      4321",
+      "  TCP    127.0.0.1:9999         127.0.0.1:50000        STABILITA       1111",
+    ].join("\r\n");
+    expect(parseNetstatPid(localized, 3000)).toBe("4321");
+    expect(parseNetstatPid(localized, 9999)).toBeNull();
+  });
+
   test("free port passes", async () => {
     const r = await checkPort(fakeEnv(), 3000, "front", "PORT");
     expect(r.ok).toBe(true);
@@ -192,6 +202,13 @@ describe("checkApiBinary", () => {
 
   test("swappable binary passes", () => {
     const r = checkApiBinary(fakeEnv({ exists: (p) => p === ".borgo/api" }));
+    expect(r.ok).toBe(true);
+  });
+
+  test("a running binary off windows still passes (ETXTBSY is not a lock)", () => {
+    const r = checkApiBinary(
+      fakeEnv({ exists: (p) => p === ".borgo/api", openForWrite: () => "busy" }),
+    );
     expect(r.ok).toBe(true);
   });
 });
