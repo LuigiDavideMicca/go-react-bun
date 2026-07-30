@@ -2,7 +2,7 @@
 // always comes from the app's own node_modules
 import type { createElement as CreateElement } from "react";
 import type { hydrateRoot as HydrateRoot, Root } from "react-dom/client";
-import { CSRF_COOKIE, cookieValue, withCsrf } from "./index";
+import { CSRF_COOKIE, CSRF_FIELD, cookieValue, withCsrf } from "./index";
 import { matchRoute, resolveHead, type Head, type LayoutModule, type PageModule } from "./router";
 
 // the double-submit cookie was set by the response that carried this page,
@@ -382,6 +382,15 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   ) {
     const seq = ++navSeq;
     const data = new FormData(form, submitter ?? undefined);
+    // the hidden field holds the token as of the last render; the cookie may
+    // have rotated since (a login in another tab). the server compares field
+    // to cookie, so echo the live cookie - that is the double-submit contract.
+    // a form without the field is left alone: adding it would mask a missing
+    // <CsrfField /> that classic no-js posts still need
+    if (data.has(CSRF_FIELD)) {
+      const live = csrfToken();
+      if (live) data.set(CSRF_FIELD, live);
+    }
     const enctype = (
       submitter?.getAttribute("formenctype") ||
       form.getAttribute("enctype") ||
