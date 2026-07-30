@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -159,6 +160,86 @@ func TestLogoutHandler(t *testing.T) {
 	cookies := w.Result().Cookies()
 	if len(cookies) != 1 || cookies[0].MaxAge != -1 {
 		t.Fatalf("logout must clear the cookie: %+v", cookies)
+	}
+}
+
+func TestLoginShedsLoadWhenSaturated(t *testing.T) {
+	auth, _ := testAuth(t)
+	prev := hashWait
+	hashWait = 20 * time.Millisecond
+	defer func() { hashWait = prev }()
+
+	for range cap(hashSlots) {
+		hashSlots <- struct{}{}
+	}
+	defer func() {
+		for range cap(hashSlots) {
+			<-hashSlots
+		}
+	}()
+
+	w := postJSON(auth.LoginHandler, `{"username":"luigi","password":"hunter22"}`)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503 when every hashing slot is busy, got %d", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Error("a 503 must carry Retry-After")
+	}
+}
+
+func TestLoginUnderConcurrency(t *testing.T) {
+	auth, _ := testAuth(t)
+
+	var wg sync.WaitGroup
+	codes := make([]int, 12)
+	for i := range codes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := `{"username":"luigi","password":"hunter22"}`
+			if i%3 == 0 {
+				body = `{"username":"ghost","password":"hunter22"}`
+			}
+			codes[i] = postJSON(auth.LoginHandler, body).Code
+		}()
+	}
+	wg.Wait()
+
+	for i, code := range codes {
+		want := http.StatusOK
+		if i%3 == 0 {
+			want = http.StatusUnauthorized
+		}
+		if code != want {
+			t.Errorf("login %d: got %d, want %d", i, code, want)
+		}
+	}
+	if len(hashSlots) != 0 {
+		t.Fatalf("%d hashing slots leaked", len(hashSlots))
+	}
+}
+
+// a rotated cookie on login is what keeps a planted session from surviving
+// the privilege change
+func TestLoginReplacesAnExistingSession(t *testing.T) {
+	auth, _ := testAuth(t)
+
+	planted := setAndExtract(t, testUser{Name: "attacker"}, time.Hour)
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"username":"luigi","password":"hunter22"}`))
+	r.AddCookie(planted)
+	w := httptest.NewRecorder()
+	auth.LoginHandler(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", w.Code)
+	}
+	fresh := w.Result().Cookies()
+	if len(fresh) != 1 || fresh[0].Value == planted.Value {
+		t.Fatalf("login must issue a new session cookie, got %+v", fresh)
+	}
+	principal, ok := GetSession[testUser](sessionRequest(fresh[0]))
+	if !ok || principal.Name != "luigi" {
+		t.Fatalf("session still holds %+v", principal)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -145,6 +146,36 @@ func (a *Auth[U]) dummyHash() string {
 	return a.dummy
 }
 
+// One password hash costs ~140 ms of cpu at OWASP iteration counts, so
+// unauthenticated login traffic is a cpu exhaustion vector: a handful of
+// parallel attempts is enough to starve every other route. Half the cores
+// keeps the rest of the api answering while logins queue.
+var hashSlots = make(chan struct{}, max(1, runtime.GOMAXPROCS(0)/2))
+
+// hashWait is how long a request queues for a slot before being shed; a var
+// so tests need not wait it out.
+var hashWait = 5 * time.Second
+
+// withHashSlot runs hash while holding a slot. It reports false - having
+// already answered the request - when the queue is too long, and when the
+// client hung up before its turn came.
+func withHashSlot(w http.ResponseWriter, r *http.Request, hash func()) bool {
+	timer := time.NewTimer(hashWait)
+	defer timer.Stop()
+	select {
+	case hashSlots <- struct{}{}:
+		defer func() { <-hashSlots }()
+		hash()
+		return true
+	case <-r.Context().Done():
+		return false
+	case <-timer.C:
+		w.Header().Set("Retry-After", "1")
+		WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "too many sign-in attempts in flight, retry"})
+		return false
+	}
+}
+
 func readCredentials(w http.ResponseWriter, r *http.Request) (Credentials, bool) {
 	creds, err := Bind[Credentials](r)
 	if err != nil {
@@ -159,7 +190,8 @@ func readCredentials(w http.ResponseWriter, r *http.Request) (Credentials, bool)
 }
 
 // LoginHandler verifies the posted {username, password} against Lookup and
-// starts a session with the principal, responding with it as JSON.
+// starts a session with the principal, responding with it as JSON. Under more
+// parallel attempts than the box can hash it answers 503 with Retry-After.
 func (a *Auth[U]) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	creds, ok := readCredentials(w, r)
 	if !ok {
@@ -167,11 +199,15 @@ func (a *Auth[U]) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	user, hash, err := a.Lookup(r.Context(), creds.Username)
 	if err != nil {
-		a.hasher().Verify(creds.Password, a.dummyHash())
-		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+		// verify a hash that cannot match rather than returning early, so a
+		// missing user costs the same as a wrong password
+		hash = a.dummyHash()
+	}
+	var verified bool
+	if !withHashSlot(w, r, func() { verified = a.hasher().Verify(creds.Password, hash) }) {
 		return
 	}
-	if !a.hasher().Verify(creds.Password, hash) {
+	if err != nil || !verified {
 		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
@@ -190,7 +226,9 @@ func (a *Auth[U]) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // RegisterHandler hashes the posted password, creates the user through
-// Register and starts a session, responding 201 with the principal.
+// Register and starts a session, responding 201 with the principal. A taken
+// username is a 409, which tells the caller the name exists: pair it with a
+// generic message in the ui if that matters to you.
 func (a *Auth[U]) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	if a.Register == nil {
 		http.NotFound(w, r)
@@ -200,7 +238,11 @@ func (a *Auth[U]) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	hash, err := a.hasher().Hash(creds.Password)
+	var hash string
+	var err error
+	if !withHashSlot(w, r, func() { hash, err = a.hasher().Hash(creds.Password) }) {
+		return
+	}
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "hashing failed"})
 		return
