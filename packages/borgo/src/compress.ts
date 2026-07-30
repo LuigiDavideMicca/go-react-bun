@@ -61,25 +61,44 @@ export async function precompressAssets(dir: string) {
 // reaches the client immediately and streamed ssr stays progressive
 export function gzipStream(source: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const gzip = createGzip({ flush: constants.Z_SYNC_FLUSH });
+  // an explicit reader: the pump holds the source's lock, so a client
+  // disconnect must cancel through the reader, never through the source -
+  // cancelling a locked stream throws, and from bun's cancel callback that
+  // used to take the whole server process down
+  const reader = source.getReader();
+  let cancelled = false;
   return new ReadableStream<Uint8Array>({
     start(controller) {
-      gzip.on("data", (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
-      gzip.on("end", () => controller.close());
-      gzip.on("error", (error) => controller.error(error));
+      const closed = new Promise<void>((resolve) => gzip.once("close", resolve));
+      gzip.on("data", (chunk: Buffer) => {
+        if (!cancelled) controller.enqueue(new Uint8Array(chunk));
+      });
+      gzip.on("end", () => {
+        if (!cancelled) controller.close();
+      });
+      gzip.on("error", (error) => {
+        if (!cancelled) controller.error(error);
+      });
       void (async () => {
         try {
-          for await (const chunk of source as unknown as AsyncIterable<Uint8Array>) {
-            if (!gzip.write(chunk)) await new Promise((resolve) => gzip.once("drain", resolve));
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done || gzip.destroyed) break;
+            if (!gzip.write(value)) {
+              await Promise.race([new Promise((resolve) => gzip.once("drain", resolve)), closed]);
+              if (gzip.destroyed) break;
+            }
           }
-          gzip.end();
+          if (!gzip.destroyed) gzip.end();
         } catch (error) {
           gzip.destroy(error instanceof Error ? error : new Error(String(error)));
         }
       })();
     },
     cancel(reason) {
+      cancelled = true;
       gzip.destroy();
-      void source.cancel(reason);
+      void reader.cancel(reason).catch(() => {});
     },
   });
 }

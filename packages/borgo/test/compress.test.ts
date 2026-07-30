@@ -102,6 +102,24 @@ describe("gzipStream", () => {
     expect(compressed.length).toBeLessThan(parts.join("").length);
   });
 
+  test("a client disconnect mid-stream cancels cleanly and reaches the source", async () => {
+    let sourceCancelled = false;
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("shell ".repeat(200)));
+      },
+      cancel() {
+        sourceCancelled = true;
+      },
+    });
+    const reader = gzipStream(source).getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    // used to throw "ReadableStream is locked" and kill the process
+    await reader.cancel("client went away");
+    expect(sourceCancelled).toBe(true);
+  });
+
   test("flushes per chunk so streamed ssr stays progressive", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
