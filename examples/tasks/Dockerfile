@@ -14,10 +14,11 @@ WORKDIR /repo/examples/tasks
 RUN bun run build
 
 RUN mkdir /out \
- && cp -r package.json index.html public pages islands .borgo dist /out/ \
- && cp -rL node_modules /out/node_modules \
+ && cp -r package.json index.html public pages .borgo dist /out/ \
+ && for d in islands components lib; do [ -d "$d" ] && cp -r "$d" /out/; done; \
+    cp -rL node_modules /out/node_modules \
  && rm -rf /out/node_modules/typescript /out/node_modules/@types /out/node_modules/.bin \
-           /out/node_modules/borgo/node_modules/typescript /out/node_modules/borgo/node_modules/@types
+           /out/node_modules/borgo-framework/node_modules/typescript /out/node_modules/borgo-framework/node_modules/@types
 
 FROM oven/bun:1.3-slim
 WORKDIR /app
@@ -28,4 +29,4 @@ COPY --from=build --chown=bun:bun /out /app
 EXPOSE 3000
 # node_modules is a dereferenced copy of the workspace, so the cli is
 # invoked directly instead of through the .bin shim
-CMD ["bun", "node_modules/borgo/src/cli.ts", "start"]
+CMD ["bun", "node_modules/borgo-framework/src/cli.ts", "start"]
