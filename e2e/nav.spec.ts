@@ -43,8 +43,12 @@ test("scroll position restores on back and forward", async ({ page, request }) =
   const ids = await seedTasks(request, "nav seed", 25);
   try {
     await page.goto("/");
-    // 300 stays reachable however many tasks other workers add or remove;
-    // a taller target can clamp and record a smaller position than expected
+    // the home page live-updates its task list over sse, so other workers can
+    // shrink it mid-test; if the page is short at the moment of the restore,
+    // the browser clamps scrollTo(300) and the exact match fails. pin the
+    // height so it cannot depend on the shared database - the style tag
+    // survives client-side navigations (same document)
+    await page.addStyleTag({ content: "main { min-height: 3000px; }" });
     await page.evaluate(() => scrollTo(0, 300));
     await page.waitForTimeout(300);
 
