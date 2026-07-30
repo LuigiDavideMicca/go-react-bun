@@ -189,6 +189,11 @@ func TestLoginShedsLoadWhenSaturated(t *testing.T) {
 
 func TestLoginUnderConcurrency(t *testing.T) {
 	auth, _ := testAuth(t)
+	// hashing is an order of magnitude slower under the race detector: this
+	// asserts that queued logins all get served, not how fast
+	prev := hashWait
+	hashWait = time.Minute
+	defer func() { hashWait = prev }()
 
 	var wg sync.WaitGroup
 	codes := make([]int, 12)
