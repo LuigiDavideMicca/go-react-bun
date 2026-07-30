@@ -603,6 +603,8 @@ export async function serve({ dev = false } = {}) {
   };
 
   type SocketData = { kind: "dev" } | { kind: "app"; topics: string[] };
+  const MAX_WS_TOPICS = 32;
+  const MAX_WS_TOPIC_LENGTH = 128;
   const wsTopic = (topic: string) => "borgo:ws:" + topic;
   const publishCount = (topic: string) => {
     server.publish(
@@ -635,6 +637,9 @@ export async function serve({ dev = false } = {}) {
     // long-lived proxied streams (sse) must not be killed by the default 10s
     idleTimeout: 0,
     websocket: {
+      // every message a client sends is relayed to every subscriber: bun's
+      // 16mb default would make one socket a broadcast amplifier
+      maxPayloadLength: 1024 * 1024,
       open(ws) {
         if (ws.data?.kind === "app") {
           for (const topic of ws.data.topics) ws.subscribe(wsTopic(topic));
@@ -702,6 +707,12 @@ export async function serve({ dev = false } = {}) {
           .split(",")
           .map((t) => t.trim())
           .filter(Boolean);
+        // each topic is a subscription table entry held for the life of the
+        // socket: unbounded counts or names are cheap resident memory for
+        // anyone who can open a socket
+        if (topics.length > MAX_WS_TOPICS || topics.some((t) => t.length > MAX_WS_TOPIC_LENGTH)) {
+          return new Response("too many topics", { status: 400 });
+        }
         if (server.upgrade(req, { data: { kind: "app", topics } })) return undefined as never;
         return new Response("upgrade required", { status: 426 });
       }
