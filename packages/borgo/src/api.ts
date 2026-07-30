@@ -49,6 +49,32 @@ export class ApiError extends Error {
   }
 }
 
+// an api that fails can answer with megabytes (a go panic dump, an html error
+// page from a proxy) and ApiError.body tends to be logged whole: read only the
+// useful head off the stream, then drop the rest instead of buffering it
+async function errorBody(res: Response, max = 2048): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < max) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      parts.push(value);
+      size += value.length;
+    }
+  } catch {}
+  reader.cancel().catch(() => {});
+  const joined = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    joined.set(part, at);
+    at += part.length;
+  }
+  return new TextDecoder().decode(joined).slice(0, max);
+}
+
 // onSetCookie receives every Set-Cookie header an api response carries, so
 // the front server can forward go's cookies (login, logout) to the browser
 export function makeApiClient(
@@ -67,6 +93,9 @@ export function makeApiClient(
 
     const url = new URL(base + path);
     for (const [key, value] of Object.entries(opts.query ?? {})) {
+      // an optional filter that came out undefined must be absent, not the
+      // literal string "undefined" the api would then try to parse
+      if (value === undefined || value === null) continue;
       url.searchParams.set(key, String(value));
     }
 
@@ -93,8 +122,14 @@ export function makeApiClient(
     }
     const setCookies = res.headers.getSetCookie?.() ?? [];
     if (setCookies.length) onSetCookie?.(setCookies);
-    if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""), route);
-    if (res.status === 204) return undefined;
-    return res.json();
+    if (!res.ok) throw new ApiError(res.status, await errorBody(res), route);
+    // a handler that answered with headers only: json() would throw on ""
+    if (res.status === 204 || res.headers.get("content-length") === "0") return undefined;
+    try {
+      return await res.json();
+    } catch {
+      // without the route the caller only sees "Unexpected end of JSON input"
+      throw new ApiError(res.status, "response body is not json", route);
+    }
   }) as ApiClient;
 }

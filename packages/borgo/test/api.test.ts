@@ -76,6 +76,37 @@ describe("makeApiClient", () => {
     }
   });
 
+  test("caps a huge error body instead of holding it all", async () => {
+    stubFetch(() => new Response("x".repeat(200_000), { status: 500 }));
+    const api = makeApiClient("http://api:1");
+    const error = (await api("GET /api/tasks").catch((e) => e)) as ApiError;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.body.length).toBe(2048);
+  });
+
+  test("omits undefined and null query values", async () => {
+    stubFetch(() => Response.json({}));
+    const api = makeApiClient("http://api:1");
+    await api("GET /api/tasks", {
+      query: { page: 2, cursor: undefined, tag: null } as never,
+    });
+    expect(calls[0].url).toBe("http://api:1/api/tasks?page=2");
+  });
+
+  test("an empty 200 body resolves to undefined", async () => {
+    stubFetch(() => new Response("", { status: 200, headers: { "content-length": "0" } }));
+    const api = makeApiClient("http://api:1");
+    expect(await api("GET /api/tasks")).toBeUndefined();
+  });
+
+  test("a non-json 200 body fails with the route in the error", async () => {
+    stubFetch(() => new Response("<html>proxy</html>", { status: 200 }));
+    const api = makeApiClient("http://api:1");
+    const error = (await api("GET /api/tasks").catch((e) => e)) as ApiError;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.message).toContain("GET /api/tasks");
+  });
+
   test("204 resolves to undefined", async () => {
     stubFetch(() => new Response(null, { status: 204 }));
     const api = makeApiClient("http://api:1");
