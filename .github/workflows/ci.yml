@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -22,13 +26,18 @@ jobs:
       - name: install workspace
         run: bun install --frozen-lockfile
 
-      - name: docs links resolve
+      - name: docs links resolve and snippets typecheck
         run: bun scripts/check-doc-links.ts
 
       - name: build go core
         run: |
           go build ./...
           go vet ./...
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l . | grep -v testdata || true)"
+          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
 
       - name: go tests
         run: go test ./...
@@ -143,3 +152,13 @@ jobs:
           curl -fs http://localhost:3100/ | grep -q "Get started by editing"
           curl -fs http://localhost:3100/hello/ci | grep -q "hello, ci"
           curl -fs http://localhost:3100/api/hello | grep -q "hello from go"
+
+  # the deploy story must keep building; a separate job so the image build
+  # runs in parallel with the test pipeline
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build example image
+        run: docker build -f examples/tasks/Dockerfile -t borgo-tasks .

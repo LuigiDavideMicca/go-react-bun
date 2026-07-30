@@ -34,6 +34,20 @@ jobs:
 
       - run: npm install -g npm@latest
 
+      # both packages carry the same linked version; a tag/package mismatch
+      # would publish the wrong bits, so it fails loudly before npm is touched
+      - name: package versions match the tag
+        run: |
+          tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}"
+          version="${tag#v}"
+          for pkg in packages/borgo packages/create-borgo; do
+            actual="$(node -p "require('./$pkg/package.json').version")"
+            if [ "$actual" != "$version" ]; then
+              echo "::error::$pkg is at $actual but the tag is $tag"
+              exit 1
+            fi
+          done
+
       - name: publish borgo
         run: npm publish --provenance --access public
         working-directory: packages/borgo

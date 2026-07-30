@@ -40,7 +40,7 @@ describe("api client set-cookie forwarding", () => {
     headers.append("Set-Cookie", "borgo_session=abc; Path=/");
     headers.append("Set-Cookie", "other=1");
     globalThis.fetch = (async () =>
-      new Response("{}", { headers })) as typeof fetch;
+      new Response("{}", { headers })) as unknown as typeof fetch;
 
     const seen: string[] = [];
     const api = makeApiClient("http://api:1", {}, (cookies) => seen.push(...cookies));
@@ -49,7 +49,7 @@ describe("api client set-cookie forwarding", () => {
 
     seen.length = 0;
     globalThis.fetch = (async () =>
-      new Response("no", { status: 401, headers })) as typeof fetch;
+      new Response("no", { status: 401, headers })) as unknown as typeof fetch;
     await expect(api("GET /api/tasks")).rejects.toThrow("responded 401");
     expect(seen.length).toBe(2);
   });

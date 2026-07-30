@@ -40,9 +40,9 @@ func TestSSEStream(t *testing.T) {
 
 type noFlushWriter struct{ header http.Header }
 
-func (w *noFlushWriter) Header() http.Header       { return w.header }
+func (w *noFlushWriter) Header() http.Header         { return w.header }
 func (w *noFlushWriter) Write(b []byte) (int, error) { return len(b), nil }
-func (w *noFlushWriter) WriteHeader(int)           {}
+func (w *noFlushWriter) WriteHeader(int)             {}
 
 func TestSSERequiresFlusher(t *testing.T) {
 	if _, err := SSE(&noFlushWriter{header: http.Header{}}, httptest.NewRequest(http.MethodGet, "/", nil)); err == nil {

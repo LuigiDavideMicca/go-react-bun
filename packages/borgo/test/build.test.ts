@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { generateManifest, parseHydrate, refreshTransform } from "../src/build";
 
 describe("parseHydrate", () => {
-  const cases: Array<[string, string, string]> = [
+  const cases: Array<[string, string, ReturnType<typeof parseHydrate>]> = [
     ["no export", "export default function P() {}", "true"],
     ["false", "export const hydrate = false;", "false"],
     ["true", "export const hydrate = true;", "true"],
