@@ -117,6 +117,7 @@ switch (command) {
 
   default: {
     console.log(`\n  ${banner()}\n\n  usage: borgo <dev|build|start|export|deploy|doctor>\n`);
-    process.exit(command ? 1 : 0);
+    // the banner answers --help and --version, which must not exit 1
+    process.exit(!command || /^(-h|--help|-v|--version)$/.test(command) ? 0 : 1);
   }
 }

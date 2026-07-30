@@ -30,13 +30,18 @@ export function overlayHtml(error: unknown): string {
     <script>
       (() => {
         const connect = () => {
-          const ws = new WebSocket("ws://" + location.host + "/__borgo/dev");
-          ws.onmessage = (e) => {
-            const m = JSON.parse(e.data);
-            if (m.type === "reload") return location.reload();
-            if (m.type === "js" && (!m.stamp || m.stamp > performance.timeOrigin)) location.reload();
-          };
-          ws.onclose = () => setTimeout(connect, 300);
+          try {
+            const proto = location.protocol === "https:" ? "wss://" : "ws://";
+            const ws = new WebSocket(proto + location.host + "/__borgo/dev");
+            ws.onmessage = (e) => {
+              const m = JSON.parse(e.data);
+              if (m.type === "reload") return location.reload();
+              if (m.type === "js" && (!m.stamp || m.stamp > performance.timeOrigin)) location.reload();
+            };
+            ws.onclose = () => setTimeout(connect, 300);
+          } catch {
+            setTimeout(connect, 300);
+          }
         };
         connect();
       })();

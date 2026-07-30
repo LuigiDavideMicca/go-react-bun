@@ -144,7 +144,12 @@ export function deployInit(target: string | undefined, force = false, dir = ".")
   }
 
   const ctx = projectContext(dir);
-  writeFileSync(path, render(ctx));
+  try {
+    writeFileSync(path, render(ctx));
+  } catch (error) {
+    console.log(`  ${c.red(g.err)} cannot write ${file}: ${error instanceof Error ? error.message : error}\n`);
+    return 1;
+  }
   console.log(`  ${c.sage(g.ok)} ${file} ${c.dim(`${g.dot} ${target} config for ${ctx.name} on port ${ctx.port}`)}`);
   console.log(`  ${c.terracotta(g.arrow)} ${next(ctx)}\n`);
   return 0;
