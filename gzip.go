@@ -2,7 +2,9 @@ package borgo
 
 import (
 	"compress/gzip"
+	"log"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -20,6 +22,9 @@ func gzipMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// the representation depends on Accept-Encoding whether or not this
+		// response ends up compressed
+		w.Header().Set("Vary", "Accept-Encoding")
 		gw := &gzipResponseWriter{rw: w}
 		defer gw.finish()
 		next.ServeHTTP(gw, r)
@@ -28,21 +33,26 @@ func gzipMiddleware(next http.Handler) http.Handler {
 
 func acceptsGzip(acceptEncoding string) bool {
 	for _, part := range strings.Split(acceptEncoding, ",") {
-		token, quality, hasQ := strings.Cut(strings.TrimSpace(part), ";")
-		name := strings.TrimSpace(token)
+		params := strings.Split(part, ";")
+		name := strings.TrimSpace(params[0])
 		if name != "gzip" && name != "*" {
 			continue
 		}
-		if hasQ {
+		refused := false
+		for _, param := range params[1:] {
 			// any spelling of a zero quality (q=0, q=0.0, q=0.00) is a refusal
-			value, ok := strings.CutPrefix(strings.TrimSpace(quality), "q=")
-			if ok {
-				if q, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil && q <= 0 {
-					continue
-				}
+			value, ok := strings.CutPrefix(strings.TrimSpace(param), "q=")
+			if !ok {
+				continue
 			}
+			if q, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil && q <= 0 {
+				refused = true
+			}
+			break
 		}
-		return true
+		if !refused {
+			return true
+		}
 	}
 	return false
 }
@@ -64,6 +74,13 @@ func (g *gzipResponseWriter) Unwrap() http.ResponseWriter { return g.rw }
 
 func (g *gzipResponseWriter) WriteHeader(status int) {
 	if g.status != 0 {
+		// log like net/http would: forwarding to the underlying writer could
+		// commit the wrong status while the response is still buffered
+		if _, file, line, ok := runtime.Caller(1); ok {
+			log.Printf("borgo: superfluous WriteHeader(%d) call from %s:%d", status, file, line)
+		} else {
+			log.Printf("borgo: superfluous WriteHeader(%d) call", status)
+		}
 		return
 	}
 	g.status = status
@@ -114,7 +131,6 @@ func (g *gzipResponseWriter) startGzip() {
 	}
 	h.Del("Content-Length")
 	h.Set("Content-Encoding", "gzip")
-	h.Add("Vary", "Accept-Encoding")
 	g.rw.WriteHeader(g.status)
 	g.gz = gzip.NewWriter(g.rw)
 	g.gz.Write(g.buf)
@@ -132,7 +148,9 @@ func (g *gzipResponseWriter) startPassthrough() {
 
 func (g *gzipResponseWriter) finish() {
 	if g.gz != nil {
-		g.gz.Close()
+		if err := g.gz.Close(); err != nil {
+			log.Printf("borgo: gzip close: %v", err)
+		}
 		return
 	}
 	if g.passthrough {

@@ -150,7 +150,7 @@ import { CsrfField } from "borgo-framework";
 
 - On a POST to a page action, if the request carries a session cookie, the front server requires the form field to match the cookie (compared in constant time). A cross-site form post cannot read the cookie to echo it, so a forged request is answered `403 invalid csrf token` before the action runs.
 
-The rules, precisely: enforcement is **on by default in production**, applies only to page actions (api routes under `/api/*` are yours to protect — they don't accept cross-site form posts as JSON anyway), and only when the request carries a session cookie — anonymous forms keep working without the field. Client-side navigation, PRG redirects and no-JS classic posts all pass through unchanged: the token is server-rendered into the form, and the hydrated page reads the same value from the cookie.
+The rules, precisely: enforcement is **on by default in production**, applies only to page actions (api routes under `/api/*` are yours to protect — `borgo.Bind` answers non-JSON content types with `415`, so a cross-site form post, `text/plain` included, never reaches a handler as JSON), and only when the request carries a session cookie — anonymous forms keep working without the field. Client-side navigation, PRG redirects and no-JS classic posts all pass through unchanged: the token is server-rendered into the form, and the hydrated page reads the same value from the cookie.
 
 Escape hatches, clearly: `BORGO_CSRF=0` disables the check entirely (e.g. you terminate CSRF elsewhere); `BORGO_CSRF=1` forces it in dev, where it is otherwise off so quick experiments don't need the field.
 

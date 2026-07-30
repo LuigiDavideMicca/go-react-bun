@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,6 +107,9 @@ func TestGenerateErrors(t *testing.T) {
 		{"duplicate pattern", "dup", "already registered"},
 		{"malformed type directive", "badtype", "malformed directive"},
 		{"directive on non-handler", "badsig", "not a func(http.ResponseWriter"},
+		{"pattern without method", "nospace", `want "METHOD /path"`},
+		{"directive on method", "method", "package-level"},
+		{"directive on generic function", "genericfn", "type parameters"},
 		{"dynamic push topic", "badpush", "constant topic and event"},
 		{"slash in push topic", "slashpush", `must not contain "/"`},
 		{"missing api dir", "none", "no api/ directory"},
@@ -117,6 +121,59 @@ func TestGenerateErrors(t *testing.T) {
 				t.Fatalf("want error containing %q, got %v", c.want, err)
 			}
 		})
+	}
+}
+
+func TestInvalidDirectiveWritesNoMounting(t *testing.T) {
+	root := filepath.Join("testdata", "nospace")
+	if err := run(root); err == nil {
+		t.Fatal("want an error")
+	}
+	if _, err := os.Stat(filepath.Join(root, "api", "borgo.gen.go")); !os.IsNotExist(err) {
+		t.Errorf("borgo.gen.go must not be written for an invalid directive")
+	}
+}
+
+func TestGenericInstantiationsStayDistinct(t *testing.T) {
+	root := filepath.Join("testdata", "generics")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	for _, want := range []string{
+		"export interface PageWidget {",
+		"export interface PagePost {",
+		"items: Array<Widget>",
+		"items: Array<Post>",
+		`"GET /api/widgets": { response: PageWidget };`,
+		`"GET /api/posts": { response: PagePost };`,
+	} {
+		if !strings.Contains(types, want) {
+			t.Errorf("api-types.d.ts missing %q\n%s", want, types)
+		}
+	}
+}
+
+func TestLooseRouteCommentWarns(t *testing.T) {
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	runErr := run(filepath.Join("testdata", "loose"))
+	w.Close()
+	os.Stderr = old
+	out, _ := io.ReadAll(r)
+
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if !strings.Contains(string(out), "not attached to a handler") {
+		t.Errorf("want a loose-directive warning on stderr, got:\n%s", out)
+	}
+	if !strings.Contains(string(out), "loose.go:9") {
+		t.Errorf("want file:line in the warning, got:\n%s", out)
 	}
 }
 

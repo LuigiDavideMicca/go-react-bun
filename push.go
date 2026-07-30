@@ -2,10 +2,13 @@ package borgo
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -39,7 +42,8 @@ func Push(topic, event string, data any) error {
 		base = "http://localhost:" + port
 	}
 
-	req, err := http.NewRequest(http.MethodPost, base+"/__borgo/publish", bytes.NewReader(payload))
+	url := strings.TrimRight(base, "/") + "/__borgo/publish"
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -53,6 +57,8 @@ func Push(topic, event string, data any) error {
 		return err
 	}
 	defer resp.Body.Close()
+	// drain so the keep-alive connection is reusable
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 	if resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("borgo.Push: front server responded %d", resp.StatusCode)
 	}

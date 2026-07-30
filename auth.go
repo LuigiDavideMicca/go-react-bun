@@ -108,6 +108,9 @@ type Auth[U any] struct {
 	// Hasher verifies (and, on register, creates) password hashes.
 	// Default: DefaultHasher.
 	Hasher PasswordHasher
+
+	dummyOnce sync.Once
+	dummy     string
 }
 
 func (a *Auth[U]) hasher() PasswordHasher {
@@ -131,16 +134,24 @@ func (a *Auth[U]) maxAge() time.Duration {
 	return 7 * 24 * time.Hour
 }
 
-// dummy hash for failed lookups, so a missing user costs the same time as a
-// wrong password and usernames cannot be enumerated by timing
-var dummyHash = sync.OnceValue(func() string {
-	h, _ := DefaultHasher.Hash("borgo-timing-equalizer")
-	return h
-})
+// dummyHash is verified on failed lookups, so a missing user costs the same
+// time as a wrong password and usernames cannot be enumerated by timing. It
+// comes from the configured hasher: a hash in another format would fail its
+// format check instantly, reopening the timing side channel.
+func (a *Auth[U]) dummyHash() string {
+	a.dummyOnce.Do(func() {
+		a.dummy, _ = a.hasher().Hash("borgo-timing-equalizer")
+	})
+	return a.dummy
+}
 
 func readCredentials(w http.ResponseWriter, r *http.Request) (Credentials, bool) {
 	creds, err := Bind[Credentials](r)
-	if err != nil || creds.Username == "" || creds.Password == "" {
+	if err != nil {
+		BindError(w, err)
+		return Credentials{}, false
+	}
+	if creds.Username == "" || creds.Password == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "username and password required"})
 		return Credentials{}, false
 	}
@@ -156,7 +167,7 @@ func (a *Auth[U]) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	user, hash, err := a.Lookup(r.Context(), creds.Username)
 	if err != nil {
-		a.hasher().Verify(creds.Password, dummyHash())
+		a.hasher().Verify(creds.Password, a.dummyHash())
 		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}

@@ -4,21 +4,32 @@
 package borgo
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"mime"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
 var (
 	routes    = map[string]http.HandlerFunc{}
 	patternRe = regexp.MustCompile(`^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /\S*$`)
+	// the mux is the authority on pattern syntax and conflicts (e.g.
+	// "GET /x/{id}" vs "GET /x/{slug}"): registering eagerly moves the
+	// panic from Serve to the offending Handle call
+	patternCheck = http.NewServeMux()
 )
 
 // Handle registers a handler under a net/http method pattern,
@@ -27,20 +38,46 @@ func Handle(pattern string, h http.HandlerFunc) {
 	if !patternRe.MatchString(pattern) {
 		panic(`borgo.Handle: pattern must be "METHOD /path", e.g. "GET /api/tasks" or "GET /api/tasks/{id}"; got "` + pattern + `"`)
 	}
-	if _, dup := routes[pattern]; dup {
-		panic(`borgo.Handle: pattern "` + pattern + `" registered twice; each route file must use a unique method + path`)
-	}
 	if h == nil {
 		panic(`borgo.Handle: nil handler for pattern "` + pattern + `"`)
 	}
+	if _, dup := routes[pattern]; dup {
+		panic(`borgo.Handle: pattern "` + pattern + `" registered twice; each route file must use a unique method + path`)
+	}
+	_, file, line, _ := runtime.Caller(1)
+	validatePattern(pattern, file, line)
 	routes[pattern] = h
+}
+
+func validatePattern(pattern, file string, line int) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg := fmt.Sprintf("borgo.Handle: invalid pattern %q: %v", pattern, r)
+			if file != "" {
+				msg += fmt.Sprintf(" (registered at %s:%d)", file, line)
+			}
+			panic(msg)
+		}
+	}()
+	patternCheck.Handle(pattern, http.NotFoundHandler())
 }
 
 // WriteJSON writes v as a JSON response with the given status code.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	data, err := json.Marshal(v)
+	if err != nil {
+		// encode before committing the status: an unencodable value must be
+		// a logged 500, not a 200 with a truncated body
+		log.Printf("borgo: WriteJSON: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		io.WriteString(w, `{"error":"response encoding failed"}`+"\n")
+		return
+	}
+	data = append(data, '\n')
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	w.Write(data)
 }
 
 // JSON writes v as a JSON response with the given status code. Unlike
@@ -63,25 +100,47 @@ func Bind[T any](r *http.Request) (T, error) {
 	return BindMax[T](r, bindLimit)
 }
 
+var errContentType = errors.New("Content-Type must be application/json")
+
 // BindMax is Bind with an explicit body size limit in bytes; limit <= 0
 // disables the cap.
 func BindMax[T any](r *http.Request, limit int64) (T, error) {
 	var v T
+	// a browser form cannot send application/json - nor omit the header
+	// entirely - so rejecting other declared types blocks cross-site form
+	// posts while a bare curl or test request still binds
+	if raw := r.Header.Get("Content-Type"); raw != "" {
+		if ct, _, _ := mime.ParseMediaType(raw); ct != "application/json" {
+			return v, errContentType
+		}
+	}
 	body := r.Body
 	if limit > 0 {
+		// the nil writer means the server cannot mark the connection
+		// close-after-reply on overflow: Bind's signature has no
+		// ResponseWriter, so the excess bytes may be read and discarded
 		body = http.MaxBytesReader(nil, r.Body, limit)
 	}
-	err := json.NewDecoder(body).Decode(&v)
-	return v, err
+	dec := json.NewDecoder(body)
+	if err := dec.Decode(&v); err != nil {
+		return v, err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return v, errors.New("unexpected data after JSON body")
+	}
+	return v, nil
 }
 
 // BindError answers a Bind error: 413 when the body exceeded the limit,
-// 400 for anything else, as JSON.
+// 415 for a non-JSON content type, 400 for anything else, as JSON.
 func BindError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
+	switch {
+	case errors.As(err, &tooLarge):
 		status = http.StatusRequestEntityTooLarge
+	case errors.Is(err, errContentType):
+		status = http.StatusUnsupportedMediaType
 	}
 	WriteJSON(w, status, map[string]string{"error": err.Error()})
 }
@@ -154,8 +213,42 @@ func Serve() {
 		port = "3501"
 	}
 
+	// build the server before the banner so a bad BORGO_*_TIMEOUT fails
+	// before "api on :port" is printed
+	srv := newServer(port, gzipMiddleware(mux))
+	warnSessionSecret()
 	printStartup(patterns, port)
-	log.Fatal(newServer(port, gzipMiddleware(mux)).ListenAndServe())
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	select {
+	case err := <-errCh:
+		log.Fatal(err)
+	case <-ctx.Done():
+		stop()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		// SSE streams never drain on their own: after the grace period,
+		// Close cuts them so shutdown always completes
+		if srv.Shutdown(shutdownCtx) != nil {
+			srv.Close()
+		}
+	}
+}
+
+// warnSessionSecret surfaces a missing or weak SESSION_SECRET at startup:
+// without this, session routes panic per request while /healthz stays green.
+// Not fatal - apps without sessions are legitimate.
+func warnSessionSecret() {
+	secret := os.Getenv("SESSION_SECRET")
+	switch {
+	case secret == "":
+		log.Print("borgo: SESSION_SECRET not set: session and auth routes will fail until it is")
+	case len(secret) < 32:
+		log.Printf("borgo: SESSION_SECRET is %d bytes; use at least 32 random bytes", len(secret))
+	}
 }
 
 func colorEnabled() bool {

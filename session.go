@@ -5,12 +5,28 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
 )
 
-const sessionCookie = "borgo_session"
+const (
+	sessionCookie = "borgo_session"
+	// browsers silently drop cookies over 4 KB, which would surface as a
+	// login loop of 200 responses
+	sessionCookieMaxLen = 4096
+)
+
+func newSessionCookie() *http.Cookie {
+	return &http.Cookie{
+		Name:     sessionCookie,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   os.Getenv("SESSION_SECURE") == "1",
+	}
+}
 
 type sessionEnvelope struct {
 	Exp  int64           `json:"exp"`
@@ -44,15 +60,13 @@ func SetSession(w http.ResponseWriter, v any, maxAge time.Duration) error {
 		return err
 	}
 	payload := base64.RawURLEncoding.EncodeToString(envelope)
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    payload + "." + sessionSign(payload),
-		Path:     "/",
-		MaxAge:   int(maxAge.Seconds()),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   os.Getenv("SESSION_SECURE") == "1",
-	})
+	cookie := newSessionCookie()
+	cookie.Value = payload + "." + sessionSign(payload)
+	cookie.MaxAge = int(maxAge.Seconds())
+	if n := len(cookie.String()); n > sessionCookieMaxLen {
+		return fmt.Errorf("borgo: session cookie is %d bytes, over the %d-byte browser limit; store a smaller principal (see Auth.Principal)", n, sessionCookieMaxLen)
+	}
+	http.SetCookie(w, cookie)
 	return nil
 }
 
@@ -86,14 +100,9 @@ func GetSession[T any](r *http.Request) (T, bool) {
 
 // ClearSession deletes the session cookie.
 func ClearSession(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	cookie := newSessionCookie()
+	cookie.MaxAge = -1
+	http.SetCookie(w, cookie)
 }
 
 func splitLast(s string, sep byte) (string, string, bool) {

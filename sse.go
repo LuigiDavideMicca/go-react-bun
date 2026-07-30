@@ -5,15 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
+
+// sseWriteTimeout bounds each frame write, so one blackholed client cannot
+// pin its goroutine (and hub slot) forever
+const sseWriteTimeout = 10 * time.Second
 
 // SSEStream is one open server-sent-events response.
 type SSEStream struct {
 	w  http.ResponseWriter
 	f  http.Flusher
 	r  *http.Request
+	rc *http.ResponseController
 	mu sync.Mutex
 }
 
@@ -27,7 +33,8 @@ func SSE(w http.ResponseWriter, r *http.Request) (*SSEStream, error) {
 	}
 	// a stream outlives any server-wide read/write timeout: clear the
 	// deadlines on this connection so a configured timeout kills slow
-	// requests without killing event streams
+	// requests without killing event streams; each write re-arms its own
+	// short deadline instead
 	rc := http.NewResponseController(w)
 	rc.SetReadDeadline(time.Time{})
 	rc.SetWriteDeadline(time.Time{})
@@ -36,17 +43,23 @@ func SSE(w http.ResponseWriter, r *http.Request) (*SSEStream, error) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	f.Flush()
-	return &SSEStream{w: w, f: f, r: r}, nil
+	return &SSEStream{w: w, f: f, r: r, rc: rc}, nil
 }
 
-// Send writes one named event with data encoded as JSON.
+// Send writes one named event with data encoded as JSON. The event name must
+// not contain newlines - they would let one event smuggle extra frames.
 func (s *SSEStream) Send(event string, data any) error {
+	if strings.ContainsAny(event, "\r\n") {
+		return fmt.Errorf("borgo: sse event name must not contain newlines: %q", event)
+	}
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout))
+	defer s.rc.SetWriteDeadline(time.Time{})
 	if _, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", event, payload); err != nil {
 		return err
 	}
@@ -58,6 +71,8 @@ func (s *SSEStream) Send(event string, data any) error {
 func (s *SSEStream) Ping() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout))
+	defer s.rc.SetWriteDeadline(time.Time{})
 	if _, err := fmt.Fprint(s.w, ": ping\n\n"); err != nil {
 		return err
 	}

@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -37,8 +38,10 @@ const (
 )
 
 var (
-	directiveRe = regexp.MustCompile(`^//borgo:route\s+(.+)$`)
-	typeRe      = regexp.MustCompile(`^//borgo:type\s+(\S+)\s+(.+)$`)
+	directiveRe    = regexp.MustCompile(`^//borgo:route\s+(.+)$`)
+	typeRe         = regexp.MustCompile(`^//borgo:type\s+(\S+)\s+(.+)$`)
+	patternRe      = regexp.MustCompile(`^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /\S*$`)
+	looseDirective = regexp.MustCompile(`^//\s*borgo:route\b`)
 )
 
 type route struct {
@@ -102,19 +105,21 @@ func run(root string) (err error) {
 	routes := collectRoutes(pkg)
 	decls := funcDecls(pkg)
 	directives := collectDirectives(pkg, decls, routes)
+	warnLooseRouteComments(pkg, decls)
 	routes = append(routes, directives...)
 	writeMounting(root, pkg.Name, directives, decls)
 
 	sort.Slice(routes, func(i, j int) bool {
-		a, b := strings.SplitN(routes[i].pattern, " ", 2), strings.SplitN(routes[j].pattern, " ", 2)
-		if a[1] != b[1] {
-			return a[1] < b[1]
+		am, ap := splitPattern(routes[i].pattern)
+		bm, bp := splitPattern(routes[j].pattern)
+		if ap != bp {
+			return ap < bp
 		}
-		return a[0] < b[0]
+		return am < bm
 	})
 
 	gen := &tsGen{
-		names:     map[*types.TypeName]string{},
+		names:     map[string]string{},
 		taken:     map[string]bool{},
 		apiPkg:    pkg.Types,
 		overrides: collectTypeOverrides(pkg),
@@ -185,11 +190,21 @@ var handlerSig = "func(http.ResponseWriter, *http.Request)"
 
 func isHandlerSig(fn *types.Func) bool {
 	sig, ok := fn.Type().(*types.Signature)
-	if !ok || sig.Params().Len() != 2 || sig.Results().Len() != 0 {
+	if !ok || sig.Recv() != nil || sig.TypeParams().Len() != 0 ||
+		sig.Params().Len() != 2 || sig.Results().Len() != 0 {
 		return false
 	}
 	return sig.Params().At(0).Type().String() == "net/http.ResponseWriter" &&
 		sig.Params().At(1).Type().String() == "*net/http.Request"
+}
+
+// splitPattern splits "METHOD /path" tolerantly: manual borgo.Handle patterns
+// may be method-less serve-mux patterns like "/path".
+func splitPattern(p string) (method, path string) {
+	if i := strings.IndexByte(p, ' '); i >= 0 {
+		return p[:i], p[i+1:]
+	}
+	return "", p
 }
 
 // collectDirectives finds every //borgo:route directive and validates it
@@ -216,6 +231,17 @@ func collectDirectives(pkg *packages.Package, decls map[*types.Func]*ast.FuncDec
 			}
 			pattern := strings.TrimSpace(m[1])
 			pos := pkg.Fset.Position(comment.Pos())
+			if !patternRe.MatchString(pattern) {
+				fail("%s: //borgo:route %q: want \"METHOD /path\" with METHOD one of GET POST PUT PATCH DELETE HEAD OPTIONS", pos, pattern)
+			}
+			if sig, ok := fn.Type().(*types.Signature); ok {
+				if sig.Recv() != nil {
+					fail("%s: //borgo:route on method %s; handlers must be package-level functions", pos, fn.Name())
+				}
+				if sig.TypeParams().Len() != 0 {
+					fail("%s: //borgo:route on generic function %s; handlers cannot have type parameters", pos, fn.Name())
+				}
+			}
 			if !isHandlerSig(fn) {
 				fail("%s: //borgo:route on %s, which is not a %s", pos, fn.Name(), handlerSig)
 			}
@@ -227,6 +253,34 @@ func collectDirectives(pkg *packages.Package, decls map[*types.Func]*ast.FuncDec
 		}
 	}
 	return out
+}
+
+// warnLooseRouteComments flags comments that look like a //borgo:route
+// directive but are not the doc comment of any function (space after //,
+// blank line before the func): they would otherwise be ignored silently.
+func warnLooseRouteComments(pkg *packages.Package, decls map[*types.Func]*ast.FuncDecl) {
+	attached := map[*ast.Comment]bool{}
+	for _, decl := range decls {
+		if decl.Doc == nil {
+			continue
+		}
+		for _, comment := range decl.Doc.List {
+			if directiveRe.MatchString(comment.Text) {
+				attached[comment] = true
+			}
+		}
+	}
+	for _, file := range pkg.Syntax {
+		for _, group := range file.Comments {
+			for _, comment := range group.List {
+				if attached[comment] || !looseDirective.MatchString(comment.Text) {
+					continue
+				}
+				pos := pkg.Fset.Position(comment.Pos())
+				fmt.Fprintf(os.Stderr, "borgogen: warning: %s: comment looks like //borgo:route but is not attached to a handler; it was ignored\n", pos)
+			}
+		}
+	}
 }
 
 // writeMounting generates api/borgo.gen.go registering every directive
@@ -396,7 +450,9 @@ func funcDecls(pkg *packages.Package) map[*types.Func]*ast.FuncDecl {
 }
 
 type tsGen struct {
-	names     map[*types.TypeName]string
+	// keyed on the instantiated type string, so Page[A] and Page[B] emit
+	// distinct interfaces instead of collapsing on the generic origin
+	names     map[string]string
 	taken     map[string]bool
 	defs      []string
 	apiPkg    *types.Package
@@ -412,7 +468,9 @@ func collectTypeOverrides(pkg *packages.Package) map[string]string {
 			for _, comment := range group.List {
 				m := typeRe.FindStringSubmatch(comment.Text)
 				if m == nil {
-					if strings.HasPrefix(comment.Text, "//borgo:type") {
+					// prose like "//borgo:types are ..." is not a directive
+					rest, isDirective := strings.CutPrefix(comment.Text, "//borgo:type")
+					if isDirective && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
 						pos := pkg.Fset.Position(comment.Pos())
 						fail("%s: malformed directive, want //borgo:type <go type> <ts type>", pos)
 					}
@@ -533,7 +591,7 @@ func (g *tsGen) tsType(t types.Type) string {
 			return "unknown"
 		}
 		if s, ok := t.Underlying().(*types.Struct); ok {
-			return g.interfaceFor(obj, s)
+			return g.interfaceFor(t, s)
 		}
 		return g.tsType(t.Underlying())
 	case *types.Alias:
@@ -582,20 +640,54 @@ func (g *tsGen) override(obj *types.TypeName) (string, bool) {
 	return "", false
 }
 
-func (g *tsGen) interfaceFor(obj *types.TypeName, s *types.Struct) string {
-	if name, ok := g.names[obj]; ok {
+// typeArgSuffix mangles instantiated type arguments into a readable,
+// deterministic name part: Page[Widget] -> "Widget", Page[[]post.Item] ->
+// "PostItem".
+func (g *tsGen) typeArgSuffix(args *types.TypeList) string {
+	if args == nil || args.Len() == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i := 0; i < args.Len(); i++ {
+		s := types.TypeString(args.At(i), func(p *types.Package) string {
+			if p == g.apiPkg {
+				return ""
+			}
+			return p.Name()
+		})
+		up := true
+		for _, r := range s {
+			if r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+				if up {
+					r = unicode.ToUpper(r)
+					up = false
+				}
+				b.WriteRune(r)
+			} else {
+				up = true
+			}
+		}
+	}
+	return b.String()
+}
+
+func (g *tsGen) interfaceFor(t *types.Named, s *types.Struct) string {
+	key := types.TypeString(t, nil)
+	if name, ok := g.names[key]; ok {
 		return name
 	}
-	name := obj.Name()
+	obj := t.Obj()
+	name := obj.Name() + g.typeArgSuffix(t.TypeArgs())
 	if g.taken[name] && obj.Pkg() != nil {
 		pkgName := obj.Pkg().Name()
 		name = strings.ToUpper(pkgName[:1]) + pkgName[1:] + name
 	}
+	base := name
 	for i := 2; g.taken[name]; i++ {
-		name = fmt.Sprintf("%s%d", obj.Name(), i)
+		name = fmt.Sprintf("%s%d", base, i)
 	}
 	g.taken[name] = true
-	g.names[obj] = name
+	g.names[key] = name
 
 	fields := g.fields(s)
 	g.defs = append(g.defs, "export interface "+name+" {\n  "+strings.Join(fields, ";\n  ")+";\n}\n")
