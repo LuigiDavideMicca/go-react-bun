@@ -6,7 +6,14 @@ import { pathToFileURL } from "node:url";
 import { makeApiClient } from "./api";
 import { buildAssets, compileCss } from "./build";
 import { banner, c, fmtMs, g, statusColor } from "./colors";
-import { gzipStream, isCompressiblePath, isHashedAsset, jsonResponse, pickEncoding } from "./compress";
+import {
+  documentStream,
+  gzipStream,
+  isCompressiblePath,
+  isHashedAsset,
+  jsonResponse,
+  pickEncoding,
+} from "./compress";
 import { CSRF_COOKIE, CSRF_FIELD, cookieValue, registerCsrf, registerIslands, withCsrf } from "./index";
 import { createMetrics } from "./metrics";
 import { overlayHtml } from "./overlay";
@@ -29,8 +36,6 @@ const keysEqual = (given: string, expected: string) => {
 const appRequire = createRequire(join(process.cwd(), "package.json"));
 const React = appRequire("react") as typeof import("react");
 const { renderToReadableStream } = appRequire("react-dom/server") as typeof import("react-dom/server");
-
-const encoder = new TextEncoder();
 
 function composeElement(route: Route, props: Record<string, unknown>) {
   if (typeof route.module.default !== "function") {
@@ -232,8 +237,14 @@ export async function serve({ dev = false } = {}) {
     const csrfToken = cookieToken || crypto.randomUUID().replaceAll("-", "");
     if (!cookieToken) apiCookies.push(`${CSRF_COOKIE}=${csrfToken}; ${csrfCookieAttrs}`);
 
+    // react emits inline scripts of its own to reveal streamed suspense
+    // boundaries: they need the same nonce as the props script, so it is
+    // minted before the render and not when the document tail is built
+    const nonce = security?.needsNonce ? crypto.randomUUID().replaceAll("-", "") : "";
+
     const head = resolveHead(route.module, props);
     const stream = await renderToReadableStream(withCsrf(composeElement(route, props), csrfToken), {
+      nonce: nonce || undefined,
       onError(error) {
         console.error(error);
       },
@@ -247,36 +258,19 @@ export async function serve({ dev = false } = {}) {
     }
 
     let end: string;
-    // only the props script is inline, so only a hydrated page mints a nonce
-    let nonce = "";
     if (route.module.hydrate === false) {
       // the page opted out of hydration: ship no props and no client script.
       // pages with islands get the islands entry, which hydrates only those.
       end = route.islands ? zeroJsEnd.islands : zeroJsEnd.plain;
     } else {
-      if (security?.needsNonce) nonce = crypto.randomUUID().replaceAll("-", "");
       const propsJson = JSON.stringify(props).replaceAll("<", "\\u003c");
       const tag = nonce ? `<script nonce="${nonce}">` : "<script>";
       end = `${shellEndProps[0]}${tag}window.__PROPS__=${propsJson}${stateTail}${shellEndProps[1]}`;
     }
 
-    const body = new ReadableStream({
-      async start(controller) {
-        try {
-          controller.enqueue(encoder.encode(start));
-          // react-dom's bun build misbehaves under a manual reader pump;
-          // async iteration is the reliable way to drain it
-          for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
-            controller.enqueue(chunk);
-          }
-          controller.enqueue(encoder.encode(end));
-          controller.close();
-        } catch (error) {
-          console.error("stream pump failed:", error);
-          controller.error(error);
-        }
-      },
-    });
+    // react-dom's bun build misbehaves under a manual reader pump; async
+    // iteration is the reliable way to drain it
+    const body = documentStream(start, stream as unknown as AsyncIterable<Uint8Array>, end);
 
     const headers = new Headers({
       "Content-Type": "text/html; charset=utf-8",

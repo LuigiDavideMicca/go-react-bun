@@ -57,6 +57,44 @@ export async function precompressAssets(dir: string) {
   }
 }
 
+const encoder = new TextEncoder();
+
+// the ssr document: shell head, react's own stream, shell tail. pull-based on
+// purpose - react is asked for the next chunk only when the consumer has room,
+// so a slow client throttles the render instead of letting a whole document
+// pile up in memory, and a client that goes away ends the render through the
+// iterator's return() instead of paying for a page nobody will read
+export function documentStream(
+  head: string,
+  chunks: AsyncIterable<Uint8Array>,
+  tail: string,
+): ReadableStream<Uint8Array> {
+  const iterator = chunks[Symbol.asyncIterator]();
+  let tailSent = false;
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(head));
+    },
+    async pull(controller) {
+      try {
+        const next = await iterator.next();
+        if (!next.done) return controller.enqueue(next.value);
+        if (!tailSent) {
+          tailSent = true;
+          return controller.enqueue(encoder.encode(tail));
+        }
+        controller.close();
+      } catch (error) {
+        console.error("stream pump failed:", error);
+        controller.error(error);
+      }
+    },
+    cancel() {
+      void iterator.return?.().catch(() => {});
+    },
+  });
+}
+
 // runtime: gzip a stream with a sync flush per chunk, so every react flush
 // reaches the client immediately and streamed ssr stays progressive
 export function gzipStream(source: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {

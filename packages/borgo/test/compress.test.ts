@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import {
+  documentStream,
   gzipStream,
   isCompressiblePath,
   isHashedAsset,
@@ -79,6 +80,103 @@ describe("precompressAssets", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("documentStream", () => {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+
+  const render = (parts: string[], onReturn?: () => void) => {
+    let index = 0;
+    return {
+      [Symbol.asyncIterator]() {
+        return {
+          async next() {
+            if (index >= parts.length) return { done: true as const, value: undefined };
+            return { done: false as const, value: encoder.encode(parts[index++]) };
+          },
+          async return() {
+            onReturn?.();
+            return { done: true as const, value: undefined };
+          },
+        };
+      },
+    } as AsyncIterable<Uint8Array>;
+  };
+
+  const drain = async (stream: ReadableStream<Uint8Array>) => {
+    let out = "";
+    for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
+      out += decoder.decode(chunk);
+    }
+    return out;
+  };
+
+  test("wraps the render between the shell head and tail", async () => {
+    const out = await drain(documentStream("<head>", render(["a", "b"]), "</body>"));
+    expect(out).toBe("<head>ab</body>");
+  });
+
+  test("an empty render still emits the shell", async () => {
+    expect(await drain(documentStream("<head>", render([]), "</body>"))).toBe("<head></body>");
+  });
+
+  test("a client disconnect ends the render instead of finishing the page", async () => {
+    let returned = false;
+    let asked = 0;
+    const endless: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        async next() {
+          asked++;
+          return { done: false as const, value: encoder.encode("chunk") };
+        },
+        async return() {
+          returned = true;
+          return { done: true as const, value: undefined };
+        },
+      }),
+    };
+    const reader = documentStream("<head>", endless, "</body>").getReader();
+    expect(decoder.decode((await reader.read()).value)).toBe("<head>");
+    await reader.read();
+    await reader.cancel("client went away");
+    expect(returned).toBe(true);
+    const seen = asked;
+    await Bun.sleep(20);
+    // nothing keeps rendering behind the closed connection
+    expect(asked).toBe(seen);
+  });
+
+  test("backpressure: a consumer that stops reading stops the render", async () => {
+    let asked = 0;
+    const endless: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        async next() {
+          asked++;
+          return { done: false as const, value: encoder.encode("x".repeat(64)) };
+        },
+      }),
+    };
+    const reader = documentStream("", endless, "").getReader();
+    await reader.read();
+    await Bun.sleep(20);
+    // the queue holds one chunk ahead, it does not race to the end of the page
+    expect(asked).toBeLessThan(5);
+    await reader.cancel();
+  });
+
+  test("a render that throws errors the response stream", async () => {
+    const boom: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        async next(): Promise<IteratorResult<Uint8Array>> {
+          throw new Error("render exploded");
+        },
+      }),
+    };
+    const reader = documentStream("<head>", boom, "</body>").getReader();
+    await reader.read();
+    await expect(reader.read()).rejects.toThrow("render exploded");
   });
 });
 
