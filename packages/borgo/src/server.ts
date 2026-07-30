@@ -30,6 +30,8 @@ const appRequire = createRequire(join(process.cwd(), "package.json"));
 const React = appRequire("react") as typeof import("react");
 const { renderToReadableStream } = appRequire("react-dom/server") as typeof import("react-dom/server");
 
+const encoder = new TextEncoder();
+
 const escapeHtml = (s: string) =>
   s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
@@ -86,6 +88,44 @@ export async function serve({ dev = false } = {}) {
   const shell = await Bun.file("index.html").text();
   const [shellStart, shellEnd = ""] = shell.split("<!--app-->");
   const shellTitle = shell.match(/<title>(.*?)<\/title>/s)?.[1] ?? "";
+  // injecting <head> content is a per-request rewrite of the whole shell head:
+  // do the scanning once here so a render only concatenates three strings
+  const splitAtHead = (html: string): [string, string] => {
+    const at = html.indexOf("</head>");
+    return at === -1 ? [html, ""] : [html.slice(0, at), html.slice(at)];
+  };
+  const shellHead = splitAtHead(shellStart);
+  const shellHeadNoTitle = splitAtHead(shellStart.replace(/<title>.*?<\/title>/s, ""));
+
+  // same story for the document tail: the props slot is resolved once, and a
+  // zero-js tail has no per-request part at all outside dev
+  const PROPS_SLOT = "<!--props-->";
+  const splitAtProps = (html: string): [string, string] => {
+    const at = html.indexOf(PROPS_SLOT);
+    return at === -1 ? [html, ""] : [html.slice(0, at), html.slice(at + PROPS_SLOT.length)];
+  };
+  const shellEndProps = splitAtProps(shellEnd);
+  // in dev a tiny inline client keeps a zero-js page live: css swaps in
+  // place, anything else is a full reload
+  const devInlineClient = dev
+    ? "<script>(()=>{const c=()=>{const w=new WebSocket(`ws://${location.host}/__borgo/dev`);" +
+      'w.onmessage=(e)=>{const m=JSON.parse(e.data);if(m.type==="css"){for(const l of document.querySelectorAll(\'link[rel="stylesheet"]\'))l.href=l.href.split("?")[0]+"?t="+Date.now();}' +
+      'else if(!m.stamp||(m.stamp>performance.timeOrigin&&Number(sessionStorage.getItem("borgo:devstamp")||0)<m.stamp)){if(m.stamp)sessionStorage.setItem("borgo:devstamp",String(m.stamp));location.reload();}};' +
+      "w.onclose=()=>setTimeout(c,300);};c();})()</script>"
+    : "";
+  // tolerate any attribute order/extras on the client script tag; a shell
+  // where it cannot be found would otherwise hydrate the wrong page over a
+  // zero-js document
+  const clientScriptRe = /[ \t]*<script\b[^>]*src="\/assets\/client\.js"[^>]*><\/script>\r?\n?/;
+  const zeroJsTail = (islands: boolean) =>
+    shellEnd
+      .replace(PROPS_SLOT, devInlineClient)
+      .replace(
+        clientScriptRe,
+        islands ? '<script type="module" src="/assets/islands-client.js"></script>' : "",
+      );
+  const zeroJsEnd = { plain: zeroJsTail(false), islands: zeroJsTail(true) };
+  const stateTail = `;window.__BORGO_TITLE__=${JSON.stringify(shellTitle).replaceAll("<", "\\u003c")}${dev ? ";window.__BORGO_DEV__=1" : ""}</script>`;
 
   const port = Number(process.env.PORT || 3000);
   const api = process.env.API_URL || `http://localhost:${process.env.API_PORT || 3501}`;
@@ -210,42 +250,20 @@ export async function serve({ dev = false } = {}) {
     let start = shellStart;
     const injected = headHtml(head);
     if (injected) {
-      if (head.title) start = start.replace(/<title>.*?<\/title>/s, "");
-      start = start.replace("</head>", `${injected}</head>`);
+      const [before, after] = head.title ? shellHeadNoTitle : shellHead;
+      start = before + injected + after;
     }
 
     let end: string;
     if (route.module.hydrate === false) {
       // the page opted out of hydration: ship no props and no client script.
       // pages with islands get the islands entry, which hydrates only those.
-      // in dev a tiny inline client keeps the page live: css swaps in place,
-      // anything else is a full reload.
-      const islandsTag = route.islands
-        ? '<script type="module" src="/assets/islands-client.js"></script>'
-        : "";
-      const devTag = dev
-        ? "<script>(()=>{const c=()=>{const w=new WebSocket(`ws://${location.host}/__borgo/dev`);" +
-          'w.onmessage=(e)=>{const m=JSON.parse(e.data);if(m.type==="css"){for(const l of document.querySelectorAll(\'link[rel="stylesheet"]\'))l.href=l.href.split("?")[0]+"?t="+Date.now();}' +
-          'else if(!m.stamp||(m.stamp>performance.timeOrigin&&Number(sessionStorage.getItem("borgo:devstamp")||0)<m.stamp)){if(m.stamp)sessionStorage.setItem("borgo:devstamp",String(m.stamp));location.reload();}};' +
-          "w.onclose=()=>setTimeout(c,300);};c();})()</script>"
-        : "";
-      end = shellEnd
-        .replace("<!--props-->", devTag)
-        // tolerate any attribute order/extras on the client script tag; a
-        // shell where it cannot be found would otherwise hydrate the wrong
-        // page over this zero-js document
-        .replace(
-          /[ \t]*<script\b[^>]*src="\/assets\/client\.js"[^>]*><\/script>\r?\n?/,
-          islandsTag,
-        );
+      end = route.islands ? zeroJsEnd.islands : zeroJsEnd.plain;
     } else {
       const propsJson = JSON.stringify(props).replaceAll("<", "\\u003c");
-      const devFlag = dev ? ";window.__BORGO_DEV__=1" : "";
-      const state = `<script>window.__PROPS__=${propsJson};window.__BORGO_TITLE__=${JSON.stringify(shellTitle)}${devFlag}</script>`;
-      end = shellEnd.replace("<!--props-->", state);
+      end = `${shellEndProps[0]}<script>window.__PROPS__=${propsJson}${stateTail}${shellEndProps[1]}`;
     }
 
-    const encoder = new TextEncoder();
     const body = new ReadableStream({
       async start(controller) {
         try {
@@ -309,10 +327,13 @@ export async function serve({ dev = false } = {}) {
   const sendJson = (req: Request, value: unknown, init?: ResponseInit) =>
     dev ? Response.json(value, init) : jsonResponse(req, value, init);
 
-  async function handle(req: Request): Promise<Response> {
-    const url = new URL(req.url);
+  // metrics wants the matched pattern as its label: handing it back from the
+  // one match a request already does keeps the route table scanned once
+  type Label = { route: string };
 
+  async function handle(req: Request, url: URL, label: Label): Promise<Response> {
     if (url.pathname.startsWith("/api/")) {
+      label.route = "/api/*";
       // the go api restarts on every .go edit in dev: a refused connection
       // never reached it, so retrying briefly is safe even for mutations.
       // small bodies are buffered once so the request can be re-sent; large
@@ -366,6 +387,7 @@ export async function serve({ dev = false } = {}) {
 
     if (req.method === "POST") {
       const target = matchRoute(url.pathname, routes);
+      if (target) label.route = target.route.pattern;
       const action = target?.route.module.action;
       // the client runtime submits enhanced forms with this header and gets
       // json back (props + actionData, or a redirect) instead of a document,
@@ -459,6 +481,7 @@ export async function serve({ dev = false } = {}) {
     }
 
     const matched = matchRoute(url.pathname, routes);
+    if (matched) label.route = matched.route.pattern;
     const wantsProps = url.searchParams.get("__borgo") === "props";
 
     if (!matched) {
@@ -504,11 +527,7 @@ export async function serve({ dev = false } = {}) {
     });
   }
 
-  const routeLabel = (pathname: string) =>
-    pathname.startsWith("/api/") ? "/api/*" : (matchRoute(pathname, routes)?.route.pattern ?? "*");
-
-  function logRequest(req: Request, status: number, ms: number) {
-    const path = new URL(req.url).pathname;
+  function logRequest(req: Request, path: string, status: number, ms: number) {
     if (path.startsWith("/assets/") || path === "/favicon.ico") return;
     const method = c.dim(req.method.padEnd(4));
     console.log(`  ${method} ${path.padEnd(24)} ${statusColor(status)(String(status))} ${c.dim(fmtMs(ms))}`);
@@ -667,9 +686,10 @@ export async function serve({ dev = false } = {}) {
         });
       }
 
+      const label: Label = { route: "*" };
       let response: Response;
       try {
-        response = await handle(req);
+        response = await handle(req, url, label);
         // pages render for HEAD too (status and headers must be real), only
         // the body is dropped - and cancelled, or the ssr/gzip pipeline
         // keeps rendering into a stream nobody reads
@@ -696,9 +716,9 @@ export async function serve({ dev = false } = {}) {
         }
       }
       if (metrics && !url.pathname.startsWith("/assets/") && url.pathname !== "/favicon.ico") {
-        metrics.observe(routeLabel(url.pathname), response.status, (performance.now() - t0) / 1000);
+        metrics.observe(label.route, response.status, (performance.now() - t0) / 1000);
       }
-      if (dev) logRequest(req, response.status, performance.now() - t0);
+      if (dev) logRequest(req, url.pathname, response.status, performance.now() - t0);
       return response;
     },
   }));
