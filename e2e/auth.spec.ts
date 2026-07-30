@@ -51,6 +51,35 @@ async function login(page: Page, username: string) {
   await expect(page).toHaveURL(/\/account$/);
 }
 
+test("the nav shows the session state and logs out from it", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("header nav .session")).toHaveText("login");
+
+  const username = `nav${Date.now()}`;
+  await login(page, username);
+  await page.goto("/");
+  const session = page.locator("header nav .session");
+  await expect(session).toContainText(`ciao ${username}`);
+
+  await session.locator("button").click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator("header nav .session")).toHaveText("login");
+});
+
+test("clearing the whole list is 401 for visitors, api and ui alike", async ({ page }) => {
+  // the layout asks /api/me only after hydration, so awaiting it means the
+  // click below lands on a live react tree
+  const hydrated = page.waitForResponse("**/api/me");
+  await page.goto("/");
+  await hydrated;
+
+  const anon = await page.request.delete("/api/tasks");
+  expect(anon.status()).toBe(401);
+
+  await page.click(".clear-all");
+  await expect(page.getByTestId("clear-error")).toHaveText("log in to clear all tasks");
+});
+
 test("a forged post without the csrf token is rejected", async ({ page }) => {
   await login(page, `csrf${Date.now()}`);
 

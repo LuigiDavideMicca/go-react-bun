@@ -35,6 +35,10 @@ type Deleted struct {
 	Deleted bool `json:"deleted"`
 }
 
+type Cleared struct {
+	Cleared int64 `json:"cleared"`
+}
+
 // a helper: borgogen follows it, so callers still get the TaskItem type
 func respondTask(w http.ResponseWriter, status int, task Task) {
 	borgo.JSON(w, status, TaskItem{Task: task})
@@ -81,6 +85,22 @@ func GetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondTask(w, http.StatusOK, task)
+}
+
+// clearing the whole list is destructive, so it sits behind borgo.Authed:
+// logged-out callers get a json 401 and the handler never runs
+func ClearTasks(w http.ResponseWriter, r *http.Request) {
+	result := db.DB.Where("1 = 1").Delete(&Task{})
+	if result.Error != nil {
+		http.Error(w, result.Error.Error(), http.StatusInternalServerError)
+		return
+	}
+	events.Publish("task-deleted", "all")
+	borgo.WriteJSON(w, http.StatusOK, Cleared{Cleared: result.RowsAffected})
+}
+
+func init() {
+	borgo.Handle("DELETE /api/tasks", borgo.Authed(ClearTasks))
 }
 
 //borgo:route DELETE /api/tasks/{id}

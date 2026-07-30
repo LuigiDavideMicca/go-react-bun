@@ -49,6 +49,27 @@ header {
         color: $terracotta;
       }
     }
+
+    .session {
+      color: $sage;
+
+      strong {
+        color: $ink;
+      }
+
+      button {
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+        color: $terracotta;
+        cursor: pointer;
+
+        &:hover {
+          text-decoration: underline;
+        }
+      }
+    }
   }
 }
 
@@ -93,6 +114,21 @@ main {
 
   .error {
     color: #a4442c;
+  }
+
+  .clear-all {
+    background: none;
+    border: 1px solid rgba($ink, 0.2);
+    border-radius: 8px;
+    padding: 0.35rem 0.9rem;
+    font: inherit;
+    color: rgba($ink, 0.6);
+    cursor: pointer;
+
+    &:hover {
+      color: #a4442c;
+      border-color: #a4442c;
+    }
   }
 
   ul {

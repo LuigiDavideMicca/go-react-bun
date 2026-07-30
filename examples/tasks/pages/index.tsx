@@ -54,6 +54,18 @@ export default function Home({
     await refresh();
   };
 
+  // the whole-list clear sits behind borgo.Authed: logged out it answers 401
+  const [clearError, setClearError] = useState<string | null>(null);
+  const clearAll = async () => {
+    const res = await fetch("/api/tasks", { method: "DELETE" });
+    if (res.status === 401) {
+      setClearError("log in to clear all tasks");
+      return;
+    }
+    setClearError(null);
+    await refresh();
+  };
+
   return (
     <main>
       <h1>Tasks</h1>
@@ -73,6 +85,14 @@ export default function Home({
           </li>
         ))}
       </ul>
+      <button type="button" className="clear-all" onClick={clearAll}>
+        Clear all
+      </button>
+      {clearError && (
+        <p className="error" data-testid="clear-error">
+          {clearError}
+        </p>
+      )}
     </main>
   );
 }

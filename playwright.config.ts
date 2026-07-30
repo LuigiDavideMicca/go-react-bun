@@ -11,13 +11,21 @@ export default defineConfig({
   projects: [
     {
       name: "app",
-      testIgnore: /fastrefresh|export/,
+      testIgnore: /fastrefresh|export|clear-all/,
+      use: { baseURL: "http://localhost:3400" },
+    },
+    // clear-all wipes the shared task list, so it waits for the parallel
+    // app specs instead of racing their fixtures
+    {
+      name: "clear-all",
+      testMatch: /clear-all/,
+      dependencies: ["app"],
       use: { baseURL: "http://localhost:3400" },
     },
     {
       name: "dev",
       testMatch: /fastrefresh/,
-      dependencies: ["app"],
+      dependencies: ["clear-all"],
       use: { baseURL: "http://localhost:3410" },
     },
     // export rebuilds the example's production assets and adds scratch pages,

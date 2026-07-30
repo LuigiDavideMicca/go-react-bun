@@ -1,6 +1,22 @@
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import type { Me } from "../.borgo/api-types";
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  // client-side session lookup: hydrating pages show "ciao <user> · logout",
+  // zero-js pages keep the static login link and ship no extra script
+  const [me, setMe] = useState<Me | null>(null);
+  useEffect(() => {
+    fetch("/api/me").then(async (res) => {
+      if (res.ok) setMe(await res.json());
+    });
+  }, []);
+
+  const logout = async () => {
+    await fetch("/api/logout", { method: "POST" });
+    location.assign("/");
+  };
+
   return (
     <div className="app">
       <header>
@@ -16,6 +32,18 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <a href="/islands">Islands</a>
           <a href="/live">Live</a>
           <a href="/account">Account</a>
+          {me ? (
+            <span className="session">
+              ciao <strong>{me.username}</strong> ·{" "}
+              <button type="button" onClick={logout}>
+                logout
+              </button>
+            </span>
+          ) : (
+            <a href="/login" className="session">
+              login
+            </a>
+          )}
         </nav>
       </header>
       {children}

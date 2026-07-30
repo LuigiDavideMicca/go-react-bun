@@ -8,6 +8,10 @@ export interface Ping {
   pong: string;
 }
 
+export interface Cleared {
+  cleared: number;
+}
+
 export interface Task {
   ID: number;
   CreatedAt: string;
@@ -42,6 +46,7 @@ declare module "borgo-framework" {
     "GET /api/me": { response: Me };
     "GET /api/ping": { response: Ping };
     "POST /api/register": { response: unknown };
+    "DELETE /api/tasks": { response: Cleared };
     "GET /api/tasks": { response: TaskList };
     "POST /api/tasks": { response: TaskItem; request: TaskCreate };
     "DELETE /api/tasks/{id}": { response: Deleted };
