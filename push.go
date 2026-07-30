@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 )
+
+// a hung front server must not block the api handler that called Push
+var pushClient = &http.Client{Timeout: 5 * time.Second}
 
 // Push publishes an event to every browser subscribed to a websocket topic
 // on the front server (see the subscribe helper in the borgo npm package).
@@ -36,7 +40,7 @@ func Push(topic, event string, data any) error {
 		req.Header.Set("X-Borgo-Key", key)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := pushClient.Do(req)
 	if err != nil {
 		return err
 	}

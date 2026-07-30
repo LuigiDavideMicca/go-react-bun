@@ -35,6 +35,12 @@ func TestPush(t *testing.T) {
 	}
 }
 
+func TestPushClientHasTimeout(t *testing.T) {
+	if pushClient.Timeout <= 0 {
+		t.Fatal("pushClient must carry a timeout, or a hung front server blocks handlers forever")
+	}
+}
+
 func TestPushRejected(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
