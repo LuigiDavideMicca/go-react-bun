@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -238,6 +239,10 @@ func writeMounting(root, pkgName string, directives []route, decls map[*types.Fu
 
 func writeIfChanged(path, content string) {
 	if current, err := os.ReadFile(path); err == nil && string(current) == content {
+		// still mark the output as regenerated: mtime freshness (borgo doctor)
+		// must clear after a run even when the content is already right
+		now := time.Now()
+		os.Chtimes(path, now, now)
 		return
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

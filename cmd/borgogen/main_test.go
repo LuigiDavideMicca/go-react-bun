@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func read(t *testing.T, path string) string {
@@ -68,6 +69,30 @@ func TestGenerateFixture(t *testing.T) {
 	}
 	if strings.Contains(gen, "manual") {
 		t.Errorf("manually registered route must not be re-mounted:\n%s", gen)
+	}
+}
+
+func TestWriteIfChangedBumpsMtimeWhenIdentical(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.ts")
+	if err := os.WriteFile(path, []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	writeIfChanged(path, "same")
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fi.ModTime().After(old.Add(30 * time.Minute)) {
+		t.Errorf("mtime not bumped: still %v", fi.ModTime())
+	}
+	if read(t, path) != "same" {
+		t.Errorf("content must be untouched")
 	}
 }
 
