@@ -42,6 +42,16 @@ export type Route = {
   islands?: boolean;
 };
 
+// a raw "%" (or any malformed escape) in a url must not take the router
+// down; the segment is used as-is instead
+export function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 // pages/index.tsx -> /, pages/about.tsx -> /about, pages/tasks/[id].tsx -> /tasks/:id
 export function filePathToPattern(file: string): string {
   const cleaned = file
@@ -73,8 +83,9 @@ function matchPattern(pattern: string, path: string) {
   const params: Record<string, string> = {};
   for (let i = 0; i < patternParts.length; i++) {
     if (patternParts[i].startsWith(":")) {
-      params[patternParts[i].slice(1)] = decodeURIComponent(pathParts[i]);
-    } else if (patternParts[i] !== pathParts[i]) {
+      params[patternParts[i].slice(1)] = safeDecode(pathParts[i]);
+    } else if (patternParts[i] !== pathParts[i] && patternParts[i] !== safeDecode(pathParts[i])) {
+      // static segments also match percent-encoded, e.g. /città vs /citt%C3%A0
       return null;
     }
   }

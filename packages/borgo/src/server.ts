@@ -8,7 +8,7 @@ import { banner, c, fmtMs, g, statusColor } from "./colors";
 import { gzipStream, isCompressiblePath, isHashedAsset, jsonResponse, pickEncoding } from "./compress";
 import { registerIslands } from "./index";
 import { overlayHtml } from "./overlay";
-import { matchRoute, resolveHead, type Head, type Route } from "./router";
+import { matchRoute, resolveHead, safeDecode, type Head, type Route } from "./router";
 import { shouldBufferBody } from "./util";
 
 const isConnRefused = (err: unknown) => {
@@ -238,10 +238,18 @@ export async function serve({ dev = false } = {}) {
       }
     }
 
-    if (!url.pathname.includes("..")) {
-      const path = "public" + url.pathname;
+    // decode before serving so files with spaces or unicode names resolve;
+    // reject traversal and separator tricks on the decoded form
+    const assetPath = safeDecode(url.pathname);
+    if (
+      assetPath !== "/" &&
+      !assetPath.includes("..") &&
+      !assetPath.includes("\\") &&
+      !assetPath.includes("\0")
+    ) {
+      const path = "public" + assetPath;
       const asset = Bun.file(path);
-      if (url.pathname !== "/" && (await asset.exists())) return serveAsset(req, path, asset);
+      if (await asset.exists()) return serveAsset(req, path, asset);
     }
 
     if (req.method === "POST") {

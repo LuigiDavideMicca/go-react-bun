@@ -47,6 +47,18 @@ describe("matchRoute", () => {
     expect(matchRoute("/tasks/a%20b", routes)?.params).toEqual({ id: "a b" });
   });
 
+  test("malformed percent-encoding falls back to the raw segment, no throw", () => {
+    expect(matchRoute("/tasks/100%", routes)?.params).toEqual({ id: "100%" });
+    expect(matchRoute("/tasks/%zz", routes)?.params).toEqual({ id: "%zz" });
+  });
+
+  test("static unicode segments match their encoded form", () => {
+    const unicodeRoutes = [{ pattern: "/città" }, { pattern: "/docs/héllo" }];
+    expect(matchRoute("/citt%C3%A0", unicodeRoutes)?.route.pattern).toBe("/città");
+    expect(matchRoute("/docs/h%C3%A9llo", unicodeRoutes)?.route.pattern).toBe("/docs/héllo");
+    expect(matchRoute("/città", unicodeRoutes)?.route.pattern).toBe("/città");
+  });
+
   test("ignores trailing slashes", () => {
     expect(matchRoute("/tasks/", routes)?.route.pattern).toBe("/tasks");
     expect(matchRoute("/tasks///", routes)?.route.pattern).toBe("/tasks");
