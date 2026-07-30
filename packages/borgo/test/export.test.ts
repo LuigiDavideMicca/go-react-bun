@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { fillPattern, outputPath, planExport } from "../src/export";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { countAssets, exportSummary, fillPattern, outputPath, planExport } from "../src/export";
 import type { Route } from "../src/router";
 
 const route = (pattern: string, module: Record<string, unknown>, islands = false): Route =>
@@ -41,6 +44,54 @@ describe("planExport", () => {
     ]);
     expect(plans[0].dynamic).toBe(true);
     expect(needApi).toBe(true);
+  });
+
+  test("a _404 without a loader exports", () => {
+    const { export404, needApi } = planExport([route("/about", { default: page })], route("*", { default: page }));
+    expect(export404).toBe(true);
+    expect(needApi).toBe(false);
+  });
+
+  test("a _404 with a loader needs prerender and then the api", () => {
+    const plain = planExport([], route("*", { default: page, loader: async () => ({}) }));
+    expect(plain.export404).toBe(false);
+    expect(plain.skipped[0]).toEqual({ pattern: "404", reason: "has a loader without `export const prerender = true`" });
+
+    const opted = planExport([], route("*", { default: page, loader: async () => ({}), prerender: true }));
+    expect(opted.export404).toBe(true);
+    expect(opted.needApi).toBe(true);
+  });
+
+  test("zero exportable pages still export an exportable _404", () => {
+    const { plans, export404 } = planExport(
+      [route("/", { default: page, loader: async () => ({}) })],
+      route("*", { default: page }),
+    );
+    expect(plans).toEqual([]);
+    expect(export404).toBe(true);
+  });
+});
+
+describe("countAssets", () => {
+  test("precompressed siblings fold into their base asset", () => {
+    const dir = mkdtempSync(join(tmpdir(), "borgo-assets-"));
+    try {
+      mkdirSync(join(dir, "assets"));
+      for (const f of ["assets/client.js", "assets/client.js.gz", "assets/client.js.br", "assets/style.css", "assets/style.css.gz", "logo.svg", "orphan.gz"]) {
+        writeFileSync(join(dir, f), "x");
+      }
+      expect(countAssets(dir)).toEqual({ assets: 4, precompressed: 3 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("exportSummary", () => {
+  test("404.html is its own line item and variants are mentioned once", () => {
+    expect(exportSummary(5, true, 3, 6)).toBe("exported 5 pages + 404.html + 3 assets (with 6 precompressed variants)");
+    expect(exportSummary(2, false, 1, 0)).toBe("exported 2 pages + 1 assets");
+    expect(exportSummary(0, true, 0, 0)).toBe("exported 0 pages + 404.html + 0 assets");
   });
 });
 

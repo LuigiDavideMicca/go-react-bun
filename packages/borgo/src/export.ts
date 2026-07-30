@@ -19,11 +19,13 @@ export type ExportPlan = {
   plans: Array<{ route: Route; dynamic: boolean }>;
   skipped: Array<{ pattern: string; reason: string }>;
   needApi: boolean;
+  export404: boolean;
 };
 
-// pure partition of the route table, unit-testable without a build
-export function planExport(routes: Route[]): ExportPlan {
-  const plan: ExportPlan = { plans: [], skipped: [], needApi: false };
+// pure partition of the route table, unit-testable without a build. a _404
+// page exports as 404.html even when no regular page is exportable
+export function planExport(routes: Route[], notFound: Route | null = null): ExportPlan {
+  const plan: ExportPlan = { plans: [], skipped: [], needApi: false, export404: false };
   for (const route of routes) {
     const module = route.module as ExportModule;
     const dynamic = route.pattern.includes(":");
@@ -37,6 +39,15 @@ export function planExport(routes: Route[]): ExportPlan {
     }
     if (module.loader || module.prerenderPaths) plan.needApi = true;
     plan.plans.push({ route, dynamic });
+  }
+  const notFoundModule = notFound?.module as ExportModule | undefined;
+  if (notFoundModule) {
+    plan.export404 = !notFoundModule.loader || notFoundModule.prerender === true;
+    if (!plan.export404) {
+      plan.skipped.push({ pattern: "404", reason: "has a loader without `export const prerender = true`" });
+    } else if (notFoundModule.loader) {
+      plan.needApi = true;
+    }
   }
   return plan;
 }
@@ -68,13 +79,28 @@ const freePort = () =>
     });
   });
 
-const countFiles = (dir: string): number => {
-  let count = 0;
+// a file plus its .gz/.br siblings is one asset; an orphan .gz/.br with no
+// base file next to it counts as an asset in its own right
+export function countAssets(dir: string): { assets: number; precompressed: number } {
+  let assets = 0;
+  let precompressed = 0;
+  const files = new Set<string>();
   for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-    if (entry.isFile()) count++;
+    if (entry.isFile()) files.add(join(entry.parentPath, entry.name));
   }
-  return count;
-};
+  for (const file of files) {
+    const m = file.match(/\.(gz|br)$/);
+    if (m && files.has(file.slice(0, -m[0].length))) precompressed++;
+    else assets++;
+  }
+  return { assets, precompressed };
+}
+
+export function exportSummary(pages: number, wrote404: boolean, assets: number, precompressed: number): string {
+  const parts = [`${pages} pages`, ...(wrote404 ? ["404.html"] : []), `${assets} assets`];
+  const variants = precompressed ? ` (with ${precompressed} precompressed variants)` : "";
+  return `exported ${parts.join(" + ")}${variants}`;
+}
 
 export async function exportSite(): Promise<number> {
   const t0 = performance.now();
@@ -88,18 +114,9 @@ export async function exportSite(): Promise<number> {
     routes: Route[];
     notFound: Route | null;
   };
-  const { plans, skipped, needApi } = planExport(routes);
+  const { plans, skipped, needApi, export404 } = planExport(routes, notFound);
 
-  // a _404 page exports as 404.html, the file static hosts serve for unknown
-  // paths (nginx error_page, most static hosting picks it up by name)
-  const notFoundModule = notFound?.module as ExportModule | undefined;
-  const export404 = notFoundModule ? !notFoundModule.loader || notFoundModule.prerender === true : false;
-  if (notFoundModule && !export404) {
-    skipped.push({ pattern: "404", reason: "has a loader without `export const prerender = true`" });
-  }
-  const apiNeeded = needApi || (export404 && !!notFoundModule?.loader);
-
-  if (plans.length === 0) {
+  if (plans.length === 0 && !export404) {
     for (const s of skipped) {
       console.log(`  ${c.dim(g.dot)} ${s.pattern.padEnd(16)} ${c.dim(`skipped ${g.dot} ${s.reason}`)}`);
     }
@@ -116,7 +133,7 @@ export async function exportSite(): Promise<number> {
   // loaders and prerenderPaths run for real, so they get a real api: the
   // binary is built and spawned on an ephemeral port, and killed at the end
   let apiProc: import("bun").Subprocess | null = null;
-  if (apiNeeded) {
+  if (needApi) {
     // a scratch binary: dist/ may be running under borgo start right now,
     // and windows locks executing binaries against overwrite
     const bin = `.borgo/export-${goBinName()}`;
@@ -189,13 +206,17 @@ export async function exportSite(): Promise<number> {
         console.log(`  ${c.red(g.err)} ${path.padEnd(16)} ${error instanceof Error ? error.message : error}`);
       }
     }
+    // a _404 page exports as 404.html, the file static hosts serve for unknown
+    // paths (nginx error_page, most static hosting picks it up by name); it is
+    // its own line item, not one of the pages
+    let wrote404 = false;
     if (export404) {
       // any unmatched path renders the _404 page with a 404 status
       try {
         const res = await fetch(`http://localhost:${frontPort}/__borgo-export-404-probe`);
         if (res.status !== 404) throw new Error(`responded ${res.status}`);
         await Bun.write(join(outDir, "404.html"), await res.text());
-        written++;
+        wrote404 = true;
         console.log(
           `  ${c.sage(g.ok)} ${"404".padEnd(16)} ${c.dim(`${g.arrow} ${outDir}/404.html ${g.dot} wire it as your host's error page`)}`,
         );
@@ -211,14 +232,15 @@ export async function exportSite(): Promise<number> {
     // assets ride along, precompressed siblings included, so hydrated pages
     // find their chunks next to the html
     let assets = 0;
+    let precompressed = 0;
     if (existsSync("public")) {
       cpSync("public", outDir, { recursive: true });
-      assets = countFiles(outDir) - written;
+      ({ assets, precompressed } = countAssets("public"));
     }
 
     const mark = failures ? c.red(g.err) : c.sage(g.ok);
     console.log(
-      `\n  ${mark} exported ${written} pages + ${assets} assets ${g.arrow} dist/site in ${c.bold(fmtMs(performance.now() - t0))}`,
+      `\n  ${mark} ${exportSummary(written, wrote404, assets, precompressed)} ${g.arrow} dist/site in ${c.bold(fmtMs(performance.now() - t0))}`,
     );
     if (failures) console.log(`  ${c.red(g.err)} ${failures} page(s) failed to export`);
     console.log(

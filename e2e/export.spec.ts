@@ -155,6 +155,16 @@ test("a _404 page exports as 404.html for static hosts", () => {
   expect(html).toContain("Nothing lives at this address");
 });
 
+test("the summary lists 404.html apart and counts assets logically", () => {
+  const summary = out.match(/exported (\d+) pages \+ 404\.html \+ (\d+) assets \(with (\d+) precompressed variants\)/);
+  expect(summary).not.toBeNull();
+  // the page count is exactly the per-page lines, 404.html not among them
+  const pageLines = out.match(/dist\/site\/(?!404\.html).*index\.html/g) ?? [];
+  expect(Number(summary![1])).toBe(pageLines.length);
+  // logical assets exclude the .gz/.br siblings, which are reported once
+  expect(Number(summary![3])).toBeGreaterThan(0);
+});
+
 test("a hydrate=false page exports with zero javascript", async ({ page }) => {
   const html = readFileSync(join(siteDir, "exp-static", "index.html"), "utf8");
   expect(html).toContain("EXP-STATIC-MARKER");
