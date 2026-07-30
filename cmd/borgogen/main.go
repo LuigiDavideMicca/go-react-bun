@@ -4,8 +4,9 @@
 //   - .borgo/api-types.d.ts - route pattern -> response and request types.
 //     The response type of a route is the union of the T in every
 //     borgo.JSON[T] and borgo.WriteJSON call reachable from its handler
-//     (helper functions in the same package are followed); the request type
-//     comes from borgo.Bind[T] and borgo.BindMax[T] calls the same way. A "//borgo:type Go TS"
+//     (helper functions are followed, into other packages of the same module
+//     too); the request type comes from borgo.Bind[T] and borgo.BindMax[T]
+//     calls the same way. A "//borgo:type Go TS"
 //     directive overrides the mapping for any named Go type. borgo.PushT
 //     calls additionally feed a "topic/event" -> payload map (WsEvents),
 //     typing the browser's subscribe callback per topic.
@@ -82,7 +83,8 @@ func run(root string) (err error) {
 	cfg := &packages.Config{
 		Dir: root,
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
-			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
+			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports |
+			packages.NeedModule,
 	}
 	pkg := loadAPI(cfg, root)
 	if hasErrorIn(pkg, "borgo.gen.go") {
@@ -124,10 +126,11 @@ func run(root string) (err error) {
 		apiPkg:    pkg.Types,
 		overrides: collectTypeOverrides(pkg),
 	}
+	loader := newHelperLoader(root, pkg)
 	entries := make(map[string]string, len(routes))
 	patterns := make([]string, 0, len(routes))
 	for _, r := range routes {
-		resp, req := gen.bridgeTypes(pkg, decls, decls[r.handler])
+		resp, req := gen.bridgeTypes(pkg, decls, decls[r.handler], loader)
 		entry := "{ response: " + resp
 		if req != "" {
 			entry += "; request: " + req
@@ -536,31 +539,112 @@ func (u *union) String() string {
 	return strings.Join(u.parts, " | ")
 }
 
-// localCallee resolves a call to a function of the api package itself, so
-// borgo.JSON/WriteJSON/Bind calls inside helpers are followed.
-func localCallee(pkg *packages.Package, call *ast.CallExpr) *types.Func {
-	var fn *types.Func
-	switch e := call.Fun.(type) {
-	case *ast.Ident:
-		fn, _ = pkg.TypesInfo.Uses[e].(*types.Func)
-	case *ast.SelectorExpr:
-		fn, _ = pkg.TypesInfo.Uses[e.Sel].(*types.Func)
+// maxCrossPkgDepth caps how many package boundaries helper following crosses
+// from one handler. Cycles are already impossible (visited set); the cap
+// bounds how much of the module a single route can pull into analysis.
+const maxCrossPkgDepth = 3
+
+type helperPkg struct {
+	pkg    *packages.Package
+	decls  map[*types.Func]*ast.FuncDecl
+	byName map[string]*ast.FuncDecl // package-level functions only
+}
+
+// helperLoader lazily loads packages of the app's own module that handlers
+// call into, so bridge types coming from helpers outside api/ are still seen.
+// Each package is loaded at most once per run (syntax + type info, deps from
+// export data like the main load) and only when a handler actually calls one
+// of its functions.
+type helperLoader struct {
+	root   string
+	module string // module path of the app; "" disables cross-package following
+	cache  map[string]*helperPkg
+}
+
+func newHelperLoader(root string, apiPkg *packages.Package) *helperLoader {
+	l := &helperLoader{root: root, cache: map[string]*helperPkg{}}
+	if apiPkg.Module != nil {
+		l.module = apiPkg.Module.Path
 	}
-	if fn == nil || fn.Pkg() != pkg.Types {
+	return l
+}
+
+func (l *helperLoader) sameModule(path string) bool {
+	return l.module != "" && (path == l.module || strings.HasPrefix(path, l.module+"/"))
+}
+
+// load returns the analyzed helper package, or nil when it cannot be loaded.
+// A failed package warns once, pointing at the call that needed it.
+func (l *helperLoader) load(path string, from token.Position) *helperPkg {
+	if hp, ok := l.cache[path]; ok {
+		return hp
+	}
+	l.cache[path] = nil
+	cfg := &packages.Config{
+		Dir: l.root,
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
+			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
+	}
+	pkgs, err := packages.Load(cfg, path)
+	if err != nil || len(pkgs) != 1 || len(pkgs[0].Errors) > 0 {
+		fmt.Fprintf(os.Stderr, "borgogen: warning: %s: helper package %s could not be analyzed; response types behind this call are not followed\n", from, path)
 		return nil
 	}
-	return fn
+	hp := &helperPkg{pkg: pkgs[0], decls: funcDecls(pkgs[0]), byName: map[string]*ast.FuncDecl{}}
+	for _, file := range hp.pkg.Syntax {
+		for _, d := range file.Decls {
+			if fd, ok := d.(*ast.FuncDecl); ok && fd.Recv == nil {
+				hp.byName[fd.Name.Name] = fd
+			}
+		}
+	}
+	l.cache[path] = hp
+	return hp
+}
+
+// callee resolves a call to the declared function or method it invokes, or
+// nil for builtins, function values, and interface methods.
+func callee(info *types.Info, call *ast.CallExpr) *types.Func {
+	switch e := call.Fun.(type) {
+	case *ast.Ident:
+		fn, _ := info.Uses[e].(*types.Func)
+		return fn
+	case *ast.SelectorExpr:
+		fn, _ := info.Uses[e.Sel].(*types.Func)
+		return fn
+	}
+	return nil
+}
+
+// takesHTTP reports whether a function's parameters include an
+// http.ResponseWriter or *http.Request. borgo.JSON needs the writer and
+// borgo.Bind the request, so a helper without either cannot contribute bridge
+// types and loading its package would be wasted work (db.Find, log helpers).
+func takesHTTP(fn *types.Func) bool {
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok {
+		return false
+	}
+	for i := 0; i < sig.Params().Len(); i++ {
+		switch sig.Params().At(i).Type().String() {
+		case "net/http.ResponseWriter", "*net/http.Request":
+			return true
+		}
+	}
+	return false
 }
 
 // bridgeTypes unions the response type (borgo.JSON[T] and borgo.WriteJSON
 // calls) and the request type (borgo.Bind[T] calls) reachable from the
-// handler, following calls into same-package helper functions.
-func (g *tsGen) bridgeTypes(pkg *packages.Package, decls map[*types.Func]*ast.FuncDecl, decl *ast.FuncDecl) (response, request string) {
+// handler. Helper calls are followed: freely within the same package, and
+// into other packages of the same module when the helper is a package-level
+// function taking a writer or request, capped at maxCrossPkgDepth hops.
+func (g *tsGen) bridgeTypes(pkg *packages.Package, decls map[*types.Func]*ast.FuncDecl, decl *ast.FuncDecl, loader *helperLoader) (response, request string) {
 	var resp, req union
 	visited := map[*ast.FuncDecl]bool{}
 
-	var walk func(d *ast.FuncDecl)
-	walk = func(d *ast.FuncDecl) {
+	var walk func(pkg *packages.Package, decls map[*types.Func]*ast.FuncDecl, d *ast.FuncDecl, depth int)
+	walk = func(pkg *packages.Package, decls map[*types.Func]*ast.FuncDecl, d *ast.FuncDecl, depth int) {
 		if d == nil || d.Body == nil || visited[d] {
 			return
 		}
@@ -586,14 +670,30 @@ func (g *tsGen) bridgeTypes(pkg *packages.Package, decls map[*types.Func]*ast.Fu
 					}
 				}
 			case "":
-				if fn := localCallee(pkg, call); fn != nil {
-					walk(decls[fn])
+				fn := callee(pkg.TypesInfo, call)
+				if fn == nil {
+					return true
+				}
+				if fn.Pkg() == pkg.Types {
+					walk(pkg, decls, decls[fn], depth)
+					return true
+				}
+				if fn.Pkg() == nil || !loader.sameModule(fn.Pkg().Path()) ||
+					!takesHTTP(fn) || depth >= maxCrossPkgDepth {
+					return true
+				}
+				if sig, ok := fn.Type().(*types.Signature); !ok || sig.Recv() != nil {
+					// methods cannot be matched by name across loads
+					return true
+				}
+				if hp := loader.load(fn.Pkg().Path(), pkg.Fset.Position(call.Pos())); hp != nil {
+					walk(hp.pkg, hp.decls, hp.byName[fn.Name()], depth+1)
 				}
 			}
 			return true
 		})
 	}
-	walk(decl)
+	walk(pkg, decls, decl, 0)
 
 	if len(resp.parts) == 0 {
 		return "unknown", req.String()

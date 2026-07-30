@@ -39,6 +39,9 @@ func TestGenerateFixture(t *testing.T) {
 	}
 
 	wantTypes := []string{
+		`"GET /api/health": { response: Health };`,
+		"status: string",
+		"detail?: string",
 		`"GET /api/widgets": { response: WidgetList };`,
 		`"POST /api/widgets": { response: Widget; request: WidgetCreate };`,
 		`"DELETE /api/widgets/{id}": { response: Deleted };`,
@@ -68,6 +71,7 @@ func TestGenerateFixture(t *testing.T) {
 	}
 
 	wantGen := []string{
+		`borgo.Handle("GET /api/health", HealthCheck)`,
 		`borgo.Handle("DELETE /api/widgets/{id}", DeleteWidget)`,
 		`borgo.Handle("GET /api/widgets", ListWidgets)`,
 		`borgo.Handle("POST /api/widgets", CreateWidget)`,
