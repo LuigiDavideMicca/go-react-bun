@@ -116,6 +116,45 @@ export async function serve({ dev = false } = {}) {
     return new Response(res.body, { status: res.status, headers });
   };
 
+  // an action that logs in (or out) changes the cookie jar mid-request: the
+  // loader that runs right after must see the new session, not the one the
+  // browser sent before the action
+  const withFreshCookies = (req: Request, setCookies: string[]) => {
+    if (!setCookies.length) return req;
+    const jar = new Map<string, string>();
+    for (const part of (req.headers.get("cookie") ?? "").split(";")) {
+      const eq = part.indexOf("=");
+      if (eq === -1) continue;
+      jar.set(part.slice(0, eq).trim(), part.slice(eq + 1).trim());
+    }
+    for (const sc of setCookies) {
+      const pair = sc.split(";")[0];
+      const eq = pair.indexOf("=");
+      if (eq === -1) continue;
+      const name = pair.slice(0, eq).trim();
+      if (/;\s*max-age=0\b/i.test(sc)) jar.delete(name);
+      else jar.set(name, pair.slice(eq + 1).trim());
+    }
+    const headers = new Headers(req.headers);
+    const cookie = [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
+    if (cookie) headers.set("cookie", cookie);
+    else headers.delete("cookie");
+    return new Request(req.url, { method: req.method, headers });
+  };
+
+  // a response built by an action or a loader guard may carry headers of its
+  // own (set-cookie above all); they must survive the translation to json
+  const carryHeaders = (from: Response, json: Response) => {
+    const headers = new Headers(json.headers);
+    from.headers.forEach((value, key) => {
+      const k = key.toLowerCase();
+      if (k === "location" || k === "set-cookie" || k.startsWith("content-")) return;
+      headers.set(key, value);
+    });
+    for (const c of from.headers.getSetCookie()) headers.append("Set-Cookie", c);
+    return new Response(json.body, { status: json.status, headers });
+  };
+
   // csrf: a double-submit token, issued as a cookie on rendered pages and
   // required from form actions of requests carrying a session - a cross-site
   // post cannot read the cookie to echo it in the form. on by default in
@@ -127,7 +166,11 @@ export async function serve({ dev = false } = {}) {
   async function csrfRejects(req: Request): Promise<boolean> {
     if (!csrfEnforced) return false;
     const cookies = req.headers.get("cookie");
-    if (!cookieValue(cookies, "borgo_session")) return false;
+    // enforced for any browser that has been issued a token, not only for
+    // live sessions: otherwise a cross-site post can log the victim into
+    // the attacker's account (login csrf). cookie-less clients (curl, api
+    // consumers) are unaffected.
+    if (!cookieValue(cookies, "borgo_session") && !cookieValue(cookies, CSRF_COOKIE)) return false;
     const expected = cookieValue(cookies, CSRF_COOKIE);
     let given = "";
     try {
@@ -188,8 +231,11 @@ export async function serve({ dev = false } = {}) {
         : "";
       end = shellEnd
         .replace("<!--props-->", devTag)
+        // tolerate any attribute order/extras on the client script tag; a
+        // shell where it cannot be found would otherwise hydrate the wrong
+        // page over this zero-js document
         .replace(
-          /[ \t]*<script type="module" src="\/assets\/client\.js"><\/script>\r?\n?/,
+          /[ \t]*<script\b[^>]*src="\/assets\/client\.js"[^>]*><\/script>\r?\n?/,
           islandsTag,
         );
     } else {
@@ -220,6 +266,7 @@ export async function serve({ dev = false } = {}) {
 
     const headers = new Headers({
       "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "private, no-store",
       Vary: "Accept-Encoding",
     });
     for (const c of apiCookies) headers.append("Set-Cookie", c);
@@ -271,6 +318,9 @@ export async function serve({ dev = false } = {}) {
       const hasBody = req.method !== "GET" && req.method !== "HEAD";
       const buffered = shouldBufferBody(req.method, req.headers.get("content-length"));
       const body = hasBody ? (buffered ? await req.arrayBuffer() : req.body) : undefined;
+      // resendable unless a real body streamed through unbuffered - a
+      // body-less delete/post (body null) is as safe to retry as a get
+      const retriable = !hasBody || buffered || body == null;
       for (let attempt = 0; ; attempt++) {
         try {
           // decompress: false passes go's response through untouched, encoding
@@ -282,7 +332,7 @@ export async function serve({ dev = false } = {}) {
             decompress: false,
           } as RequestInit);
         } catch (err) {
-          if (!(hasBody && !buffered) && attempt < 15 && isConnRefused(err)) {
+          if (retriable && attempt < 15 && isConnRefused(err)) {
             await Bun.sleep(250);
             continue;
           }
@@ -295,17 +345,20 @@ export async function serve({ dev = false } = {}) {
     }
 
     // decode before serving so files with spaces or unicode names resolve;
-    // reject traversal and separator tricks on the decoded form
-    const assetPath = safeDecode(url.pathname);
-    if (
-      assetPath !== "/" &&
-      !assetPath.includes("..") &&
-      !assetPath.includes("\\") &&
-      !assetPath.includes("\0")
-    ) {
-      const path = "public" + assetPath;
-      const asset = Bun.file(path);
-      if (await asset.exists()) return serveAsset(req, path, asset);
+    // reject traversal and separator tricks on the decoded form. get/head
+    // only: a public/ file must not shadow a page action's post
+    if (req.method === "GET" || req.method === "HEAD") {
+      const assetPath = safeDecode(url.pathname);
+      if (
+        assetPath !== "/" &&
+        !assetPath.includes("..") &&
+        !assetPath.includes("\\") &&
+        !assetPath.includes("\0")
+      ) {
+        const path = "public" + assetPath;
+        const asset = Bun.file(path);
+        if (await asset.exists()) return serveAsset(req, path, asset);
+      }
     }
 
     if (req.method === "POST") {
@@ -314,12 +367,20 @@ export async function serve({ dev = false } = {}) {
       // the client runtime submits enhanced forms with this header and gets
       // json back (props + actionData, or a redirect) instead of a document,
       // so the page re-renders in place without losing the scroll position.
-      // classic no-js posts keep the full html render below.
+      // classic no-js posts keep the full html render below. every response
+      // on this path is marked X-Borgo (action = json envelope, raw = a full
+      // document to swap in) so the runtime never has to guess.
       const wantsJson = req.headers.get("x-borgo-action") === "1";
       const actionJson = (value: unknown, init: ResponseInit = {}) => {
         const headers = new Headers(init.headers);
         headers.set("X-Borgo", "action");
+        headers.set("Cache-Control", "private, no-store");
         return sendJson(req, value, { ...init, headers });
+      };
+      const rawDocument = (doc: Response) => {
+        const headers = new Headers(doc.headers);
+        headers.set("X-Borgo", "raw");
+        return new Response(doc.body, { status: doc.status, headers });
       };
       if (target && action) {
         if (typeof action !== "function") {
@@ -330,31 +391,63 @@ export async function serve({ dev = false } = {}) {
           return new Response("invalid csrf token", { status: 403 });
         }
         const apiCookies: string[] = [];
-        const result = await action({
-          request: req,
-          params: target.params,
-          api: apiFor(req, (c) => apiCookies.push(...c)),
-          apiUrl,
-        });
-        if (result instanceof Response) {
-          const location = result.headers.get("Location");
-          if (wantsJson && location) {
-            return withCookies(actionJson({ redirect: location }), apiCookies);
+        try {
+          const result = await action({
+            request: req,
+            params: target.params,
+            api: apiFor(req, (c) => apiCookies.push(...c)),
+            apiUrl,
+          });
+          if (result instanceof Response) {
+            const location = result.headers.get("Location");
+            if (wantsJson && location) {
+              return withCookies(carryHeaders(result, actionJson({ redirect: location })), apiCookies);
+            }
+            if (wantsJson && (result.headers.get("content-type") ?? "").includes("text/html")) {
+              return withCookies(rawDocument(result), apiCookies);
+            }
+            return withCookies(result, apiCookies);
           }
-          return withCookies(result, apiCookies);
-        }
-        if (wantsJson) {
-          const loaded = await runLoader(req, target.route, target.params, (c) =>
-            apiCookies.push(...c),
-          );
-          if (loaded instanceof Response) {
-            const location = loaded.headers.get("Location");
-            if (location) return withCookies(actionJson({ redirect: location }), apiCookies);
-            return withCookies(loaded, apiCookies);
+          const freshReq = withFreshCookies(req, apiCookies);
+          if (wantsJson) {
+            const loaded = await runLoader(freshReq, target.route, target.params, (c) =>
+              apiCookies.push(...c),
+            );
+            if (loaded instanceof Response) {
+              const location = loaded.headers.get("Location");
+              if (location) {
+                return withCookies(carryHeaders(loaded, actionJson({ redirect: location })), apiCookies);
+              }
+              return withCookies(loaded, apiCookies);
+            }
+            return withCookies(actionJson({ props: loaded, actionData: result }), apiCookies);
           }
-          return withCookies(actionJson({ props: loaded, actionData: result }), apiCookies);
+          return renderPage(freshReq, target.route, target.params, 200, { actionData: result }, apiCookies);
+        } catch (error) {
+          if (!wantsJson) throw error;
+          // the native flow would show the overlay or the 500 page; the
+          // enhanced flow must deliver that same document, not vanish the
+          // failure behind a silent reload
+          console.error(error);
+          if (dev) {
+            return rawDocument(
+              new Response(overlayHtml(error), {
+                status: 500,
+                headers: { "Content-Type": "text/html; charset=utf-8" },
+              }),
+            );
+          }
+          if (serverError) {
+            try {
+              return rawDocument(await renderPage(req, serverError, {}, 500));
+            } catch {}
+          }
+          return rawDocument(new Response("internal server error", { status: 500 }));
         }
-        return renderPage(req, target.route, target.params, 200, { actionData: result }, apiCookies);
+      }
+      if (wantsJson && target) {
+        // a post to a page without an action: tell the runtime to go native
+        return actionJson({ unsupported: true }, { status: 405 });
       }
     }
 
@@ -374,13 +467,16 @@ export async function serve({ dev = false } = {}) {
     if (wantsProps) {
       const apiCookies: string[] = [];
       const props = await runLoader(req, matched.route, matched.params, (c) => apiCookies.push(...c));
+      const noStore = { headers: { "Cache-Control": "private, no-store" } };
       if (props instanceof Response) {
         // surface loader redirects as data, so the client runtime can follow
         const location = props.headers.get("Location");
-        if (location) return withCookies(sendJson(req, { redirect: location }), apiCookies);
+        if (location) {
+          return withCookies(carryHeaders(props, sendJson(req, { redirect: location }, noStore)), apiCookies);
+        }
         return withCookies(props, apiCookies);
       }
-      return withCookies(sendJson(req, { props }), apiCookies);
+      return withCookies(sendJson(req, { props }, noStore), apiCookies);
     }
 
     return renderPage(req, matched.route, matched.params, 200);
@@ -499,8 +595,18 @@ export async function serve({ dev = false } = {}) {
       const t0 = performance.now();
       const url = new URL(req.url);
 
-      // app websockets: /ws?topics=a,b subscribes the browser to topics
+      // app websockets: /ws?topics=a,b subscribes the browser to topics.
+      // browsers attach cookies to ws handshakes from any origin, so a
+      // cross-origin page must not be able to join (or publish into) topics
       if (url.pathname === "/ws") {
+        const origin = req.headers.get("origin");
+        if (origin) {
+          let allowed = false;
+          try {
+            allowed = new URL(origin).host === url.host;
+          } catch {}
+          if (!allowed) return new Response("forbidden", { status: 403 });
+        }
         const topics = (url.searchParams.get("topics") ?? "")
           .split(",")
           .map((t) => t.trim())
@@ -512,9 +618,13 @@ export async function serve({ dev = false } = {}) {
       // go -> browser push: accepted from loopback (or with the shared key)
       if (req.method === "POST" && url.pathname === "/__borgo/publish") {
         const key = process.env.BORGO_PUSH_KEY;
+        // without a key, loopback-only - but behind a local reverse proxy
+        // every external request arrives from 127.0.0.1, so anything the
+        // proxy forwarded (it stamps forwarding headers) is rejected too
+        const forwarded = req.headers.get("x-forwarded-for") || req.headers.get("forwarded");
         const authorized = key
           ? keysEqual(req.headers.get("x-borgo-key") ?? "", key)
-          : isLoopback(server.requestIP(req)?.address);
+          : isLoopback(server.requestIP(req)?.address) && !forwarded;
         if (!authorized) return new Response("forbidden", { status: 403 });
         const msg = await req.json().catch(() => null);
         if (!msg || typeof msg.topic !== "string" || typeof msg.event !== "string") {
@@ -558,9 +668,12 @@ export async function serve({ dev = false } = {}) {
       try {
         response = await handle(req);
         // pages render for HEAD too (status and headers must be real), only
-        // the body is dropped
+        // the body is dropped - and cancelled, or the ssr/gzip pipeline
+        // keeps rendering into a stream nobody reads
         if (req.method === "HEAD" && response.body) {
-          response = new Response(null, { status: response.status, headers: response.headers });
+          const rendered = response;
+          response = new Response(null, { status: rendered.status, headers: rendered.headers });
+          void rendered.body?.cancel().catch(() => {});
         }
       } catch (error) {
         console.error(error);

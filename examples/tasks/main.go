@@ -11,7 +11,7 @@ import (
 
 func main() {
 	if os.Getenv("SESSION_SECRET") == "" {
-		os.Setenv("SESSION_SECRET", "tasks-demo-secret") // demo only: set a real one in production
+		os.Setenv("SESSION_SECRET", "tasks-demo-secret-0123456789abcdef") // demo only: set a real one in production
 	}
 	db.Connect()
 	db.Migrate(&api.Task{}, &api.User{})

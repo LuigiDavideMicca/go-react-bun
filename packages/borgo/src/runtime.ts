@@ -192,7 +192,10 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   }
 
   function restoreScroll(key: string) {
-    const saved = sessionStorage.getItem(`borgo:scroll:${key}`);
+    let saved: string | null = null;
+    try {
+      saved = sessionStorage.getItem(`borgo:scroll:${key}`);
+    } catch {}
     if (!saved) return scrollTo(0, 0);
     const [x, y] = saved.split(",").map(Number);
     scrollTo(x, y);
@@ -206,8 +209,9 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   let navSeq = 0;
 
   // keepScroll: an action redirecting back to the page it came from must
-  // refresh the data in place, not jump to the top like a real navigation
-  async function navigate(to: URL, push: boolean, keepScroll = false) {
+  // refresh the data in place, not jump to the top like a real navigation.
+  // hops caps loader-redirect chains, which have no native browser limit.
+  async function navigate(to: URL, push: boolean, keepScroll = false, hops = 0) {
     const seq = ++navSeq;
     const matched = matchRoute(to.pathname, routes);
     if (!matched) {
@@ -230,7 +234,17 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       const data = await res.json();
       if (seq !== navSeq) return;
       if (data.redirect) {
-        navigate(new URL(data.redirect, location.origin), push);
+        const dest = new URL(data.redirect, location.origin);
+        if (dest.origin !== location.origin || hops >= 10) {
+          location.assign(dest.href);
+          return;
+        }
+        // a redirect followed without a push (back/forward) must still fix
+        // the address bar, or the url shows the guard's page, not the target
+        if (!push) {
+          history.replaceState({ __borgo: entryKey }, "", dest.pathname + dest.search + dest.hash);
+        }
+        navigate(dest, push, keepScroll, hops + 1);
         return;
       }
       props = data.props ?? {};
@@ -273,6 +287,11 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   function nativeResubmit(form: HTMLFormElement, submitter: HTMLElement | null) {
     nativePass = form;
     form.requestSubmit(submitter ?? undefined);
+    // an onSubmit that preventDefaults would leave the latch armed and
+    // silently skip the next enhanced submit of this form
+    setTimeout(() => {
+      if (nativePass === form) nativePass = null;
+    }, 0);
   }
 
   async function submitForm(
@@ -293,6 +312,9 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
         ? data
         : new URLSearchParams(data as unknown as Record<string, string>);
 
+    // the mutation is about to change what any prefetched loader would
+    // return - drop the cache now, not on the success path only
+    propsCache.clear();
     let res: Response;
     try {
       res = await fetch(to.pathname + to.search, {
@@ -307,14 +329,25 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     }
     if (seq !== navSeq) return;
 
-    if (res.headers.get("X-Borgo") !== "action") {
+    const marker = res.headers.get("X-Borgo");
+    if (marker === "raw") {
+      // a full document (the error overlay, the 500 page, a custom html
+      // response): swap it in wholesale, exactly like a native submit
+      const html = await res.text();
+      document.open();
+      document.write(html);
+      document.close();
+      return;
+    }
+    if (marker !== "action") {
       // the action ran but answered with something the runtime cannot
       // interpret (a custom response): a plain reload shows the new state
       location.reload();
       return;
     }
-    if (res.status === 403) {
-      // stale csrf token: the native submit surfaces the same error page
+    if (res.status === 403 || res.status === 405) {
+      // stale csrf token, or a post to a page without an action: neither
+      // ran the action, so the native submit can surface the real error
       nativeResubmit(form, submitter);
       return;
     }
@@ -324,10 +357,12 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       actionData?: unknown;
     };
     if (seq !== navSeq) return;
-    // the mutation may have changed what any prefetched loader would return
-    propsCache.clear();
     if (payload.redirect) {
       const dest = new URL(payload.redirect, location.origin);
+      if (dest.origin !== location.origin) {
+        location.assign(dest.href);
+        return;
+      }
       const back = dest.pathname === location.pathname && dest.search === location.search;
       navigate(dest, !back, back);
       return;
@@ -368,7 +403,9 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       ).toLowerCase();
       if (method !== "post") return;
       if (form.hasAttribute("data-borgo-native")) return;
-      if (form.target && form.target !== "_self") return;
+      // getAttribute here too: an input named "target" shadows the property
+      const targetAttr = form.getAttribute("target");
+      if (targetAttr && targetAttr !== "_self") return;
       // getAttribute, not form.action: an input named "action" shadows it
       const raw = submitter?.getAttribute("formaction") || form.getAttribute("action") || "";
       const to = new URL(raw, location.href);
@@ -526,7 +563,9 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
           if (msg.stamp && (msg.stamp <= performance.timeOrigin || msg.stamp <= lastStamp)) return;
           if (msg.stamp) {
             lastStamp = msg.stamp;
-            sessionStorage.setItem("borgo:devstamp", String(msg.stamp));
+            try {
+              sessionStorage.setItem("borgo:devstamp", String(msg.stamp));
+            } catch {}
           }
           location.reload();
         }
