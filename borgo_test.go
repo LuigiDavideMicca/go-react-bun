@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -35,20 +36,23 @@ func TestHealthz(t *testing.T) {
 
 func TestHandleValidation(t *testing.T) {
 	ok := func(http.ResponseWriter, *http.Request) {}
+	// only the accepted patterns reach the global registry, so they carry a
+	// per-run segment: the rest are rejected before it
+	run := patternSeq.Add(1)
 	cases := []struct {
 		name      string
 		pattern   string
 		handler   http.HandlerFunc
 		wantPanic string
 	}{
-		{"valid", "GET /api/ok", ok, ""},
-		{"valid with param", "DELETE /api/ok/{id}", ok, ""},
+		{"valid", fmt.Sprintf("GET /api/v%d/ok", run), ok, ""},
+		{"valid with param", fmt.Sprintf("DELETE /api/v%d/ok/{id}", run), ok, ""},
 		{"missing method", "/api/x", ok, "pattern must be"},
 		{"lowercase method", "get /api/x", ok, "pattern must be"},
 		{"no space", "GET/api/x", ok, "pattern must be"},
 		{"path without slash", "GET api/x", ok, "pattern must be"},
 		{"nil handler", "GET /api/nil", nil, "nil handler"},
-		{"duplicate", "GET /api/ok", ok, "registered twice"},
+		{"duplicate", fmt.Sprintf("GET /api/v%d/ok", run), ok, "registered twice"},
 	}
 
 	for _, c := range cases {
@@ -71,37 +75,48 @@ func TestHandleValidation(t *testing.T) {
 	}
 }
 
+// the registry is package-global, so every run needs fresh patterns
+var patternSeq atomic.Int64
+
+func uniquePattern(suffix string) string {
+	return fmt.Sprintf("GET /api/t%d/%s", patternSeq.Add(1), suffix)
+}
+
 func TestHandleIsConcurrencySafe(t *testing.T) {
 	const n = 64
+	patterns := make([]string, n)
+	for i := range patterns {
+		patterns[i] = uniquePattern("concurrent")
+	}
 	var wg sync.WaitGroup
-	for i := range n {
+	for _, pattern := range patterns {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			Handle(fmt.Sprintf("GET /api/concurrent/%d", i), func(http.ResponseWriter, *http.Request) {})
+			Handle(pattern, func(http.ResponseWriter, *http.Request) {})
 		}()
 	}
 	wg.Wait()
 
 	routesMu.Lock()
 	defer routesMu.Unlock()
-	for i := range n {
-		if _, ok := routes[fmt.Sprintf("GET /api/concurrent/%d", i)]; !ok {
-			t.Fatalf("route %d lost in the race", i)
+	for _, pattern := range patterns {
+		if _, ok := routes[pattern]; !ok {
+			t.Fatalf("route %q lost in the race", pattern)
 		}
 	}
 }
 
-// a recovered panic must leave the registry locked-free for the next caller
+// a recovered panic must leave the registry usable for the next caller
 func TestHandleRecoversAndStaysUsable(t *testing.T) {
 	func() {
 		defer func() { recover() }()
-		Handle("GET /api/{bad", func(http.ResponseWriter, *http.Request) {})
+		Handle(uniquePattern("{bad"), func(http.ResponseWriter, *http.Request) {})
 	}()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		Handle("GET /api/after-panic", func(http.ResponseWriter, *http.Request) {})
+		Handle(uniquePattern("after-panic"), func(http.ResponseWriter, *http.Request) {})
 	}()
 	select {
 	case <-done:
