@@ -41,3 +41,7 @@ Topics with no declared events keep the untyped `(event: string, data: unknown)`
 Go itself stays stdlib-only — the WebSocket termination lives where Bun already provides it natively. Choose SSE for one-way server→browser feeds; choose WebSocket topics for anything browsers also write to. The `/live` page in `examples/tasks` demos both directions: two-tab chat plus Go pushes.
 
 The relay itself stays dumb by design: the front server forwards `{event, data}` between subscribers and Go; per-message business logic belongs in Go routes.
+
+## Streams and server timeouts
+
+`borgo.Serve` runs a hardened `http.Server`: `ReadHeaderTimeout` (5s) cuts off slow-header clients, `IdleTimeout` (2m) reclaims kept-alive connections. Read and write timeouts stay `0` by choice — they are wall-clock deadlines on the *whole* request, and any value long enough to be safe for an SSE stream or a streamed SSR response is too long to protect anything; request-body abuse is bounded by `Bind`'s 1 MB cap instead (see [the typed bridge](typed-bridge.md#typed-request-bodies)). WebSockets terminate on the Bun server and never touch Go's timeouts. All four knobs have env overrides (`BORGO_READ_HEADER_TIMEOUT` and friends — see the [environment reference](deploy.md#environment-reference)), and if you do set a write timeout, `borgo.SSE` clears the deadlines on its own connection, so event streams outlive it by design.

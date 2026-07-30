@@ -25,6 +25,12 @@ func SSE(w http.ResponseWriter, r *http.Request) (*SSEStream, error) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return nil, errors.New("borgo.SSE: response writer does not support flushing")
 	}
+	// a stream outlives any server-wide read/write timeout: clear the
+	// deadlines on this connection so a configured timeout kills slow
+	// requests without killing event streams
+	rc := http.NewResponseController(w)
+	rc.SetReadDeadline(time.Time{})
+	rc.SetWriteDeadline(time.Time{})
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")

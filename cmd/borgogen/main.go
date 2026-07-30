@@ -5,7 +5,7 @@
 //     The response type of a route is the union of the T in every
 //     borgo.JSON[T] and borgo.WriteJSON call reachable from its handler
 //     (helper functions in the same package are followed); the request type
-//     comes from borgo.Bind[T] calls the same way. A "//borgo:type Go TS"
+//     comes from borgo.Bind[T] and borgo.BindMax[T] calls the same way. A "//borgo:type Go TS"
 //     directive overrides the mapping for any named Go type. borgo.PushT
 //     calls additionally feed a "topic/event" -> payload map (WsEvents),
 //     typing the browser's subscribe callback per topic.
@@ -476,7 +476,7 @@ func (g *tsGen) bridgeTypes(pkg *packages.Package, decls map[*types.Func]*ast.Fu
 				return true
 			}
 			switch name, sel := borgoFunc(pkg.TypesInfo, call); name {
-			case "JSON", "Bind":
+			case "JSON", "Bind", "BindMax":
 				if inst, ok := pkg.TypesInfo.Instances[sel]; ok && inst.TypeArgs.Len() == 1 {
 					ts := g.tsType(inst.TypeArgs.At(0))
 					if name == "JSON" {

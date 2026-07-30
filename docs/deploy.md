@@ -151,4 +151,8 @@ Point the load balancer or uptime monitor at the front server's `/healthz` — i
 | `SESSION_SECURE` | unset | `1` adds `Secure` to the session and csrf cookies |
 | `BORGO_CSRF` | unset | `0` disables csrf checks on form actions, `1` forces them in dev |
 | `METRICS` | unset | `1` exposes `/metrics` (Prometheus text) on the front server |
+| `BORGO_READ_HEADER_TIMEOUT` | `5s` | go server: cap on reading request headers (slow-header clients) |
+| `BORGO_IDLE_TIMEOUT` | `2m` | go server: idle keep-alive connections are reclaimed after this |
+| `BORGO_READ_TIMEOUT` | `0` (off) | go server: whole-request read deadline — leave off unless you have no streams |
+| `BORGO_WRITE_TIMEOUT` | `0` (off) | go server: whole-response write deadline — `borgo.SSE` streams exempt themselves |
 | `NO_COLOR` | unset | disable ANSI colors in logs |

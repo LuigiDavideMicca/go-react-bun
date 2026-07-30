@@ -64,6 +64,16 @@ func CreateWidget(w http.ResponseWriter, r *http.Request) {
 	respondWidget(w, http.StatusCreated, widget)
 }
 
+//borgo:route PUT /api/widgets/{id}
+func UpdateWidget(w http.ResponseWriter, r *http.Request) {
+	body, err := borgo.BindMax[WidgetCreate](r, 4<<20)
+	if err != nil {
+		borgo.BindError(w, err)
+		return
+	}
+	respondWidget(w, http.StatusOK, Widget{Name: body.Name})
+}
+
 //borgo:route DELETE /api/widgets/{id}
 func DeleteWidget(w http.ResponseWriter, r *http.Request) {
 	borgo.PushT("widgets", "deleted", 1)

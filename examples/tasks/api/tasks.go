@@ -54,7 +54,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 func CreateTask(w http.ResponseWriter, r *http.Request) {
 	body, err := borgo.Bind[TaskCreate](r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		borgo.BindError(w, err)
 		return
 	}
 

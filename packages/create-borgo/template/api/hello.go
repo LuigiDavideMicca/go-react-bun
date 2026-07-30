@@ -31,7 +31,7 @@ type GreetRequest struct {
 func Greet(w http.ResponseWriter, r *http.Request) {
 	body, err := borgo.Bind[GreetRequest](r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		borgo.BindError(w, err)
 		return
 	}
 	borgo.JSON(w, http.StatusOK, Greeting{Message: "hello, " + body.Name})

@@ -7,4 +7,5 @@ func init() {
 	borgo.Handle("DELETE /api/widgets/{id}", DeleteWidget)
 	borgo.Handle("GET /api/widgets", ListWidgets)
 	borgo.Handle("POST /api/widgets", CreateWidget)
+	borgo.Handle("PUT /api/widgets/{id}", UpdateWidget)
 }

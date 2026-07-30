@@ -5,6 +5,7 @@ package borgo
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -49,13 +50,40 @@ func JSON[T any](w http.ResponseWriter, status int, v T) {
 	WriteJSON(w, status, v)
 }
 
-// Bind decodes the request body as JSON into T. Its type parameter is
+// bindLimit caps request bodies decoded by Bind at 1 MB, so a handler that
+// expects a small JSON payload cannot be fed gigabytes.
+const bindLimit = 1 << 20
+
+// Bind decodes the request body as JSON into T, reading at most 1 MB - use
+// BindMax for routes that legitimately take more. Its type parameter is
 // visible to static analysis: borgogen reads T to type the route's request
-// body for the TypeScript api client.
+// body for the TypeScript api client. On error, respond with BindError to
+// get the right status (413 for an oversized body).
 func Bind[T any](r *http.Request) (T, error) {
+	return BindMax[T](r, bindLimit)
+}
+
+// BindMax is Bind with an explicit body size limit in bytes; limit <= 0
+// disables the cap.
+func BindMax[T any](r *http.Request, limit int64) (T, error) {
 	var v T
-	err := json.NewDecoder(r.Body).Decode(&v)
+	body := r.Body
+	if limit > 0 {
+		body = http.MaxBytesReader(nil, r.Body, limit)
+	}
+	err := json.NewDecoder(body).Decode(&v)
 	return v, err
+}
+
+// BindError answers a Bind error: 413 when the body exceeded the limit,
+// 400 for anything else, as JSON.
+func BindError(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		status = http.StatusRequestEntityTooLarge
+	}
+	WriteJSON(w, status, map[string]string{"error": err.Error()})
 }
 
 var startTime = time.Now()
@@ -67,6 +95,38 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 		"status": "ok",
 		"uptime": time.Since(startTime).Seconds(),
 	})
+}
+
+// envDuration reads a timeout override, e.g. BORGO_READ_HEADER_TIMEOUT=10s;
+// "0" disables the timeout.
+func envDuration(name string, def time.Duration) time.Duration {
+	v := os.Getenv(name)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		panic(`borgo: ` + name + `: invalid duration "` + v + `" (want e.g. "5s"; "0" disables)`)
+	}
+	return d
+}
+
+// newServer configures the http server borgo.Serve runs. ReadHeaderTimeout
+// caps slow-header (slowloris) clients; IdleTimeout reclaims kept-alive
+// connections. Read and write timeouts stay 0 by design: they are wall-clock
+// deadlines on the whole request, which would kill SSE streams and any
+// long-lived response - body abuse is capped by Bind's 1 MB reader instead,
+// and borgo.SSE clears the deadlines on its own connection in case an app
+// sets BORGO_READ_TIMEOUT / BORGO_WRITE_TIMEOUT anyway.
+func newServer(port string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              ":" + port,
+		Handler:           handler,
+		ReadHeaderTimeout: envDuration("BORGO_READ_HEADER_TIMEOUT", 5*time.Second),
+		ReadTimeout:       envDuration("BORGO_READ_TIMEOUT", 0),
+		WriteTimeout:      envDuration("BORGO_WRITE_TIMEOUT", 0),
+		IdleTimeout:       envDuration("BORGO_IDLE_TIMEOUT", 2*time.Minute),
+	}
 }
 
 // Serve mounts every registered route and listens on API_PORT (default 3501).
@@ -95,7 +155,7 @@ func Serve() {
 	}
 
 	printStartup(patterns, port)
-	log.Fatal(http.ListenAndServe(":"+port, gzipMiddleware(mux)))
+	log.Fatal(newServer(port, gzipMiddleware(mux)).ListenAndServe())
 }
 
 func colorEnabled() bool {

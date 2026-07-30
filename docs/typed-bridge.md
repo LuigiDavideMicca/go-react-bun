@@ -37,9 +37,15 @@ type TaskCreate struct {
 //borgo:route POST /api/tasks
 func CreateTask(w http.ResponseWriter, r *http.Request) {
     body, err := borgo.Bind[TaskCreate](r)
+    if err != nil {
+        borgo.BindError(w, err)
+        return
+    }
     // ...
 }
 ```
+
+`Bind` reads at most 1 MB — a route expecting a small JSON payload cannot be fed gigabytes. `borgo.BindError(w, err)` answers a failed bind with the right status as JSON: `413` when the body exceeded the limit, `400` for malformed JSON. The front proxy relays that 413 as-is, so the browser sees the API's answer, not a wrapped error page. A route that legitimately takes more opts up with `borgo.BindMax[T](r, 8<<20)` (`limit <= 0` disables the cap) — borgogen types it exactly like `Bind`.
 
 ## Type overrides
 
