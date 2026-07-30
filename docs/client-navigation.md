@@ -8,6 +8,8 @@ Plain `<a>` tags become client-side transitions — no `<Link>` component. The r
 
 The build emits one lazy chunk per route; React, the runtime and layouts live in the shared entry chunk, loaded once.
 
+The same applies to `<form method="post">`: submits run the page action over `fetch` and re-render in place, keeping the scroll position — see [form actions](pages-and-routing.md#form-actions).
+
 ## Prefetching
 
 Links scrolled into the viewport get their route chunk prefetched; hovering (or focusing, or touching) a link additionally prefetches its loader props, kept for ten seconds and consumed by the navigation — so a hover-then-click usually renders with zero waiting. By design, props arrive as one JSON payload fetched in parallel with the chunk; loader data is not streamed on client navigations.

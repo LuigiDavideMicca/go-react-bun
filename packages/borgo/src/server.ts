@@ -311,11 +311,22 @@ export async function serve({ dev = false } = {}) {
     if (req.method === "POST") {
       const target = matchRoute(url.pathname, routes);
       const action = target?.route.module.action;
+      // the client runtime submits enhanced forms with this header and gets
+      // json back (props + actionData, or a redirect) instead of a document,
+      // so the page re-renders in place without losing the scroll position.
+      // classic no-js posts keep the full html render below.
+      const wantsJson = req.headers.get("x-borgo-action") === "1";
+      const actionJson = (value: unknown, init: ResponseInit = {}) => {
+        const headers = new Headers(init.headers);
+        headers.set("X-Borgo", "action");
+        return sendJson(req, value, { ...init, headers });
+      };
       if (target && action) {
         if (typeof action !== "function") {
           throw new Error(`the action export of pages/${target.route.file} must be a function`);
         }
         if (await csrfRejects(req)) {
+          if (wantsJson) return actionJson({ csrf: true }, { status: 403 });
           return new Response("invalid csrf token", { status: 403 });
         }
         const apiCookies: string[] = [];
@@ -325,7 +336,24 @@ export async function serve({ dev = false } = {}) {
           api: apiFor(req, (c) => apiCookies.push(...c)),
           apiUrl,
         });
-        if (result instanceof Response) return withCookies(result, apiCookies);
+        if (result instanceof Response) {
+          const location = result.headers.get("Location");
+          if (wantsJson && location) {
+            return withCookies(actionJson({ redirect: location }), apiCookies);
+          }
+          return withCookies(result, apiCookies);
+        }
+        if (wantsJson) {
+          const loaded = await runLoader(req, target.route, target.params, (c) =>
+            apiCookies.push(...c),
+          );
+          if (loaded instanceof Response) {
+            const location = loaded.headers.get("Location");
+            if (location) return withCookies(actionJson({ redirect: location }), apiCookies);
+            return withCookies(loaded, apiCookies);
+          }
+          return withCookies(actionJson({ props: loaded, actionData: result }), apiCookies);
+        }
         return renderPage(req, target.route, target.params, 200, { actionData: result }, apiCookies);
       }
     }

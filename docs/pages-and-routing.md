@@ -87,6 +87,16 @@ export async function action({ request, api }: ActionContext) {
 
 Return a `Response` and it is sent as-is — `redirect(to, status = 303)` gives you post/redirect/get. Return any other object and the page re-renders with it as the `actionData` prop, merged over the loader's props.
 
+On hydrated pages the runtime enhances `<form method="post">` automatically: the action runs over `fetch`, the page re-renders in place with fresh loader props and the scroll position stays put — no full reload, no jump to the top. A redirect back to the same page refreshes it in place; a redirect elsewhere becomes a client-side navigation. Without JavaScript (or on `hydrate = false` pages) the same form falls back to the classic post cycle, so both paths stay correct.
+
+Forms whose response the runtime cannot re-render — a file download, a post to `/api/...`, a cross-origin target — are left native. To force the classic full-page submit on any form, add `data-borgo-native`:
+
+```tsx
+<form method="post" action="/report.csv" data-borgo-native>
+  <button>download</button>
+</form>;
+```
+
 In production, actions of authenticated users are protected against cross-site request forgery by a double-submit token — see [CSRF protection](auth-and-sessions.md#csrf-protection-for-actions).
 
 ## Error pages

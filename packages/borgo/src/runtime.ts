@@ -205,7 +205,9 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   // must not render its page over the newer one when its fetch resolves
   let navSeq = 0;
 
-  async function navigate(to: URL, push: boolean) {
+  // keepScroll: an action redirecting back to the page it came from must
+  // refresh the data in place, not jump to the top like a real navigation
+  async function navigate(to: URL, push: boolean, keepScroll = false) {
     const seq = ++navSeq;
     const matched = matchRoute(to.pathname, routes);
     if (!matched) {
@@ -249,13 +251,132 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     const key = entryKey;
     afterRender(() => {
       if (seq !== navSeq) return;
-      if (push) {
+      if (keepScroll) {
+        // nothing: the browser keeps the current position
+      } else if (push) {
         const target = to.hash && document.getElementById(to.hash.slice(1));
         target ? target.scrollIntoView() : scrollTo(0, 0);
       } else {
         restoreScroll(key);
       }
       observeLinks();
+    });
+  }
+
+  // post forms are enhanced: the action runs over fetch and the page
+  // re-renders in place, keeping the scroll position instead of the full
+  // reload (and jump to top) of a native submit. a form can opt out with
+  // data-borgo-native; get forms, cross-origin targets and posts to
+  // non-page urls (e.g. /api) stay native.
+  let nativePass: HTMLFormElement | null = null;
+
+  function nativeResubmit(form: HTMLFormElement, submitter: HTMLElement | null) {
+    nativePass = form;
+    form.requestSubmit(submitter ?? undefined);
+  }
+
+  async function submitForm(
+    form: HTMLFormElement,
+    submitter: HTMLElement | null,
+    to: URL,
+    matched: { route: ClientRoute; params: Record<string, string> },
+  ) {
+    const seq = ++navSeq;
+    const data = new FormData(form, submitter ?? undefined);
+    const enctype = (
+      submitter?.getAttribute("formenctype") ||
+      form.getAttribute("enctype") ||
+      ""
+    ).toLowerCase();
+    const body =
+      enctype === "multipart/form-data"
+        ? data
+        : new URLSearchParams(data as unknown as Record<string, string>);
+
+    let res: Response;
+    try {
+      res = await fetch(to.pathname + to.search, {
+        method: "POST",
+        body,
+        headers: { "X-Borgo-Action": "1", Accept: "application/json" },
+      });
+    } catch {
+      // the submit never reached the server: the native path can retry it
+      if (seq === navSeq) nativeResubmit(form, submitter);
+      return;
+    }
+    if (seq !== navSeq) return;
+
+    if (res.headers.get("X-Borgo") !== "action") {
+      // the action ran but answered with something the runtime cannot
+      // interpret (a custom response): a plain reload shows the new state
+      location.reload();
+      return;
+    }
+    if (res.status === 403) {
+      // stale csrf token: the native submit surfaces the same error page
+      nativeResubmit(form, submitter);
+      return;
+    }
+    const payload = (await res.json()) as {
+      redirect?: string;
+      props?: Record<string, unknown>;
+      actionData?: unknown;
+    };
+    if (seq !== navSeq) return;
+    // the mutation may have changed what any prefetched loader would return
+    propsCache.clear();
+    if (payload.redirect) {
+      const dest = new URL(payload.redirect, location.origin);
+      const back = dest.pathname === location.pathname && dest.search === location.search;
+      navigate(dest, !back, back);
+      return;
+    }
+
+    const module = await matched.route.load();
+    if (seq !== navSeq) return;
+    const props = { ...(payload.props ?? {}), actionData: payload.actionData };
+    const samePage = to.pathname === location.pathname && to.search === location.search;
+    if (!samePage) {
+      saveScroll();
+      entryKey = newKey();
+      history.pushState({ __borgo: entryKey }, "", to.pathname + to.search);
+    }
+    currentRoute = matched.route;
+    root.render(compose(createElement, matched.route, module, props));
+    applyHead(resolveHead(module, props));
+    afterRender(() => {
+      if (seq !== navSeq) return;
+      if (!samePage) scrollTo(0, 0);
+      observeLinks();
+    });
+  }
+
+  function attachFormEnhancement() {
+    document.addEventListener("submit", (event) => {
+      const form = event.target as HTMLFormElement;
+      if (nativePass === form) {
+        nativePass = null;
+        return;
+      }
+      if (event.defaultPrevented) return;
+      const submitter = (event as SubmitEvent).submitter;
+      const method = (
+        submitter?.getAttribute("formmethod") ||
+        form.getAttribute("method") ||
+        "get"
+      ).toLowerCase();
+      if (method !== "post") return;
+      if (form.hasAttribute("data-borgo-native")) return;
+      if (form.target && form.target !== "_self") return;
+      // getAttribute, not form.action: an input named "action" shadows it
+      const raw = submitter?.getAttribute("formaction") || form.getAttribute("action") || "";
+      const to = new URL(raw, location.href);
+      if (to.origin !== location.origin) return;
+      const matched = matchRoute(to.pathname, routes);
+      if (!matched) return;
+      event.preventDefault();
+      submitForm(form, submitter, to, matched);
     });
   }
 
@@ -288,6 +409,7 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   }
 
   function attachNavigation() {
+    attachFormEnhancement();
     history.scrollRestoration = "manual";
     if (!history.state?.__borgo) {
       history.replaceState({ ...history.state, __borgo: entryKey }, "");
