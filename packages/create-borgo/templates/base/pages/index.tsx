@@ -37,8 +37,15 @@ export default function Home({ actionData }: { actionData?: { greeting?: string 
           <p>This page's props are fetched from the Go API on the server, before rendering.</p>
         </a>
         <a className="card" href="/about">
-          <h2>About →</h2>
-          <p>Navigations are swapped in place by the client runtime, no full reload.</p>
+          <h2>Zero-JS page →</h2>
+          <p>
+            <code>hydrate = false</code>: no page bundle at all, with an interactive island in the
+            middle of the static HTML.
+          </p>
+        </a>
+        <a className="card" href="/live">
+          <h2>Realtime →</h2>
+          <p>Server-sent events from a Go goroutine, streamed through the front server.</p>
         </a>
         <button className="card" onClick={greet}>
           <h2>Call the Go API</h2>

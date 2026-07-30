@@ -13,7 +13,10 @@ const sources = [
     .filter((f) => f.endsWith(".md"))
     .map((f) => `docs/${f}`),
   "packages/borgo/README.md",
-  "packages/create-borgo/template/README.md",
+  "packages/create-borgo/README.md",
+  "packages/create-borgo/templates/base/README.md",
+  "packages/create-borgo/templates/minimal/README.md",
+  "packages/create-borgo/templates/full/README.md",
 ];
 
 const slug = (heading: string) =>

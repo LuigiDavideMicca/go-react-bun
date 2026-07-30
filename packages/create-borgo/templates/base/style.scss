@@ -99,3 +99,17 @@ code {
     }
   }
 }
+
+.counter {
+  background: $terracotta;
+  color: $cream;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 1.1rem;
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    filter: brightness(1.05);
+  }
+}

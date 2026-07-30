@@ -10,6 +10,7 @@ export interface GreetRequest {
 
 declare module "borgo-framework" {
   interface ApiRoutes {
+    "GET /api/events": { response: unknown };
     "GET /api/hello": { response: Greeting };
     "POST /api/hello": { response: Greeting; request: GreetRequest };
     "GET /api/hello/{name}": { response: Greeting };

@@ -153,6 +153,29 @@ jobs:
           curl -fs http://localhost:3100/hello/ci | grep -q "hello, ci"
           curl -fs http://localhost:3100/api/hello | grep -q "hello from go"
 
+      # the other two templates get the same day-zero guarantees (fresh
+      # borgogen output matches the shipped types, tsc clean, build passes)
+      # without the serve round-trip that the default template already covers
+      - name: scaffold test (minimal + full)
+        run: |
+          tmp="$(mktemp -d)"
+          cd packages/borgo && bun pm pack --destination "$tmp" && cd "$tmp"
+          tgz="$(ls borgo-*.tgz | head -1)"
+          for t in minimal full; do
+            cd "$tmp"
+            bun "$GITHUB_WORKSPACE/packages/create-borgo/src/cli.ts" "smoke-$t" --template "$t"
+            cd "smoke-$t"
+            echo "replace github.com/LuigiDavideMicca/borgo => $GITHUB_WORKSPACE" >> go.mod
+            sed -i "s#\"borgo-framework\": \"[^\"]*\"#\"borgo-framework\": \"file:../$tgz\"#" package.json
+            bun install
+            go mod tidy
+            cp .borgo/api-types.d.ts "$tmp/shipped-$t.d.ts"
+            go tool borgogen
+            diff "$tmp/shipped-$t.d.ts" .borgo/api-types.d.ts
+            bunx tsc --noEmit
+            bun run build
+          done
+
   # the deploy story must keep building; a separate job so the image build
   # runs in parallel with the test pipeline
   docker:

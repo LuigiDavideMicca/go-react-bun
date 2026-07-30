@@ -2,6 +2,8 @@
 
 A [borgo](https://github.com/LuigiDavideMicca/borgo) app: file-based React pages server-rendered by Bun, API routes written in Go.
 
+This is the `base` template — a small tour of the framework: a loader-backed page (`/hello/world`), a form action, a zero-JS page with an island (`/about`), and live server-sent events from a goroutine (`/live`). Scaffold with `--template minimal` for a bare skeleton or `--template full` for auth + CRUD.
+
 ## Prerequisites
 
 - [Bun](https://bun.sh) >= 1.3

@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      # SESSION_SECRET: use-a-long-random-string
+      # DB_PATH: /data/app.db
+      NODE_ENV: production
+      PORT: "3000"
+    volumes:
+      - data:/data
+    restart: unless-stopped
+
+volumes:
+  data:

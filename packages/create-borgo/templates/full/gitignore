@@ -1,0 +1,8 @@
+node_modules
+.env
+.borgo/*
+!.borgo/api-types.d.ts
+dist
+public/assets
+*.db
+.DS_Store
