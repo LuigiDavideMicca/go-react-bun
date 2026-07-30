@@ -88,14 +88,20 @@ export function resolveHead(module: PageModule, props: Record<string, unknown>):
   return head ?? {};
 }
 
+// segments are compared without collapsing empty ones: "//foo" and "/a//b"
+// are distinct urls, not aliases of "/foo" - collapsing them would give every
+// page a second address (and a "//host" path is a protocol-relative url the
+// moment it lands in an href). trailing slashes are stripped by the caller.
 function matchPattern(pattern: string, path: string) {
-  const patternParts = pattern.split("/").filter(Boolean);
-  const pathParts = path.split("/").filter(Boolean);
+  const patternParts = pattern.split("/");
+  const pathParts = path.split("/");
   if (patternParts.length !== pathParts.length) return null;
 
   const params: Record<string, string> = {};
   for (let i = 0; i < patternParts.length; i++) {
     if (patternParts[i].startsWith(":")) {
+      // an empty segment ("/a//2") is not a value for a param
+      if (!pathParts[i]) return null;
       params[patternParts[i].slice(1)] = safeDecode(pathParts[i]);
     } else if (patternParts[i] !== pathParts[i] && patternParts[i] !== safeDecode(pathParts[i])) {
       // static segments also match percent-encoded, e.g. /città vs /citt%C3%A0

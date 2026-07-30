@@ -64,6 +64,17 @@ describe("matchRoute", () => {
     expect(matchRoute("/tasks///", routes)?.route.pattern).toBe("/tasks");
   });
 
+  test("doubled slashes are not an alias of the single-slash route", () => {
+    expect(matchRoute("//tasks", routes)).toBeNull();
+    expect(matchRoute("//tasks/42", routes)).toBeNull();
+    expect(matchRoute("/a//2", routes)).toBeNull();
+    expect(matchRoute("/tasks//42", routes)).toBeNull();
+  });
+
+  test("an empty segment never binds a param", () => {
+    expect(matchRoute("/a/1//", routes)).toBeNull();
+  });
+
   test("returns null when nothing matches", () => {
     expect(matchRoute("/nope/nope", routes)).toBeNull();
     expect(matchRoute("/tasks/1/2", routes)).toBeNull();
