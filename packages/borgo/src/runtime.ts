@@ -379,7 +379,16 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       };
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
-        if (msg.type === "reload") location.reload();
+        if (msg.type === "reload") {
+          // same guard as the inline client: a reconnect after our own reload
+          // re-delivers the boot's welcome message — applying it would loop
+          if (msg.stamp && (msg.stamp <= performance.timeOrigin || msg.stamp <= lastStamp)) return;
+          if (msg.stamp) {
+            lastStamp = msg.stamp;
+            sessionStorage.setItem("borgo:devstamp", String(msg.stamp));
+          }
+          location.reload();
+        }
         else if (msg.type === "css") {
           for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) {
             link.href = link.href.split("?")[0] + "?t=" + Date.now();
