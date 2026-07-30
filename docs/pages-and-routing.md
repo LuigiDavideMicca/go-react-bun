@@ -33,8 +33,10 @@ A loader may also return a `Response` to short-circuit rendering — `redirect()
 A `_layout.tsx` in any `pages/` directory wraps every page below it. Layouts nest — outermost directory first — and receive only `children`:
 
 ```tsx
+import type { ReactNode } from "react";
+
 export default function RootLayout({ children }: { children: ReactNode }) {
-  return <div className="app"><Nav />{children}</div>;
+  return <div className="app"><nav>{/* ... */}</nav>{children}</div>;
 }
 ```
 
@@ -45,11 +47,15 @@ Layouts have no loaders of their own; data belongs to pages.
 A page may export `head`: either a `Head` object or a function of the page's props.
 
 ```tsx
+export const head = { title: "Tasks · borgo", meta: [{ name: "description", content: "..." }] };
+```
+
+Or, as a function of the page's props (typed wide on purpose — see below):
+
+```tsx
 import type { Head } from "borgo-framework";
 import type { Task } from "../.borgo/api-types";
 
-export const head = { title: "Tasks · borgo", meta: [{ name: "description", content: "..." }] };
-// or, as a function of the page's props (typed wide on purpose - see below)
 export const head = (props: Record<string, unknown>): Head => ({
   title: `${(props.task as Task).title} · borgo`,
 });

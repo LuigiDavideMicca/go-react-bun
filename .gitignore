@@ -6,6 +6,10 @@ dist
 **/.borgo/*
 !**/.borgo/api-types.d.ts
 **/public/assets
+# defensive for local runs: test servers, checkers and builds drop scratch
+# files (dbs, reports, doc snippets, scratch binaries) that must never land
+# in a commit
+.doc-snippets
 test-results
 playwright-report
 *.exe

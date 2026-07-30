@@ -43,6 +43,9 @@ Everything below is a file convention. Each gets one paragraph here and a deep-d
 React components in `pages/`, routed by file name — `pages/tasks/[id].tsx` → `/tasks/:id`. A page may export a `loader` that runs on the server before rendering; its result becomes the component's props. Loader and action code is stripped from client bundles, so server-only imports never reach the browser.
 
 ```tsx
+import type { LoaderContext } from "borgo-framework";
+import type { Task } from "../.borgo/api-types";
+
 export async function loader({ params, api }: LoaderContext) {
   const { task } = await api("GET /api/tasks/{id}", { params: { id: params.id } });
   return { task };
@@ -71,6 +74,8 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 A page may export an `action`; the front server runs it for `POST` requests to that page's URL — classic form posts work without any client JavaScript, and `redirect(to)` gives you post/redirect/get:
 
 ```tsx
+import { redirect, type ActionContext } from "borgo-framework";
+
 export async function action({ request, api }: ActionContext) {
   const form = await request.formData();
   const title = String(form.get("title") ?? "").trim();
