@@ -570,6 +570,15 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       navigate(to, true);
     });
 
+    // a same-page fragment link is left to the browser, which pushes an entry
+    // with no state of ours: claim it here or the scroll writes that follow
+    // land on the key of the entry we just left and overwrite its position
+    window.addEventListener("hashchange", () => {
+      if (history.state?.__borgo) return;
+      entryKey = newKey();
+      history.replaceState({ ...history.state, __borgo: entryKey }, "");
+    });
+
     window.addEventListener("popstate", () => {
       // flush the debounced save under the key of the page being left; the
       // pending timer would otherwise fire after the switch and save the old
