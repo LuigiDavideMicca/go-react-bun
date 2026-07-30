@@ -9,7 +9,7 @@
     "doctor": "borgo doctor"
   },
   "dependencies": {
-    "borgo-framework": "^0.10.1",
+    "borgo-framework": "{{version}}",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

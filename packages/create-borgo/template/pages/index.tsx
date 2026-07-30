@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ActionContext } from "borgo-framework";
+import { CsrfField, type ActionContext } from "borgo-framework";
 
 export const head = {
   title: "borgo app",
@@ -51,6 +51,7 @@ export default function Home({ actionData }: { actionData?: { greeting?: string 
           </p>
         </button>
         <form className="card" method="post">
+          <CsrfField />
           <h2>Form action →</h2>
           <p>{actionData?.greeting ?? "Posts to a server action, typed body end to end."}</p>
           <input name="name" placeholder="Your name" />

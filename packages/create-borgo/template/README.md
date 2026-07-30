@@ -28,6 +28,8 @@ If you are developing against a local borgo checkout, uncomment the `replace` di
 - `bun run start` — run from the build output (supervises both processes)
 - `bun run doctor` — diagnose the environment (bun, go, ports, stale processes, generated types) with a fix per failing check
 
+The `borgo` CLI also has `export` (prerender static pages into `dist/site/`) and `deploy init <caddy|nginx|systemd|compose>` (write the blessed deploy configs) — run them with `bunx borgo <cmd>`.
+
 ## Deploy
 
 `docker compose up -d` builds the multi-stage `Dockerfile` (small `oven/bun:slim` runtime, static Go binary) and mounts a volume at `/data` for SQLite or anything persistent. See the [deploy guide](https://github.com/LuigiDavideMicca/borgo/blob/main/docs/deploy.md) for reverse proxy samples, systemd, and split-service setups.

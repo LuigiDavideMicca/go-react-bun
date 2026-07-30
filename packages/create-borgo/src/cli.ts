@@ -56,7 +56,10 @@ renameSync(join(target, "_borgo"), join(target, ".borgo"));
 
 for (const file of ["package.json", "go.mod", "main.go", "README.md"]) {
   const path = join(target, file);
-  writeFileSync(path, readFileSync(path, "utf8").replaceAll("{{name}}", name));
+  writeFileSync(
+    path,
+    readFileSync(path, "utf8").replaceAll("{{name}}", name).replaceAll("{{version}}", `^${version}`),
+  );
 }
 
 console.log(`
