@@ -21,7 +21,7 @@ import { CSRF_COOKIE, CSRF_FIELD, cookieValue, registerCsrf, registerIslands, wi
 import { createMetrics } from "./metrics";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, safeDecode, type Route } from "./router";
-import { createSecurity, headHtml, shouldBufferBody } from "./util";
+import { createSecurity, envInt, headHtml, shouldBufferBody } from "./util";
 
 const isConnRefused = (err: unknown) => {
   const e = err as { code?: string; message?: string };
@@ -124,6 +124,16 @@ export async function serve({ dev = false } = {}) {
   const api = process.env.API_URL || `http://localhost:${process.env.API_PORT || 3501}`;
   const apiUrl = `${api}/api`;
 
+  // outbound limits towards go. dev restarts the api on every .go edit, so a
+  // refused connection is routine there and worth waiting out; in production
+  // it means the api is down, and holding every request for four seconds only
+  // piles connections up. BORGO_API_TIMEOUT is in ms, 0 disables it.
+  const apiRetries = dev ? 15 : 3;
+  const apiTimeout = envInt(process.env.BORGO_API_TIMEOUT, 30_000);
+  // a body nobody bounded is free memory for anyone who can post: both the
+  // proxy and form actions buffer. BORGO_MAX_BODY (bytes) raises it.
+  const maxRequestBodySize = envInt(process.env.BORGO_MAX_BODY, 32 * 1024 * 1024);
+
   // the api client forwards the browser's cookies, so go handlers see the
   // session during ssr and in actions; set-cookie headers coming back from
   // go (login, logout) are collected and forwarded to the browser
@@ -212,12 +222,15 @@ export async function serve({ dev = false } = {}) {
     // consumers) are unaffected.
     if (!cookieValue(cookies, "borgo_session") && !cookieValue(cookies, CSRF_COOKIE)) return false;
     const expected = cookieValue(cookies, CSRF_COOKIE);
+    // no token to compare against: reject without buffering and parsing the
+    // body, which the action below would parse a second time anyway
+    if (!expected) return true;
     let given = "";
     try {
       const form = await req.clone().formData();
       given = String(form.get(CSRF_FIELD) ?? "");
     } catch {}
-    return !expected || !given || !keysEqual(given, expected);
+    return !given || !keysEqual(given, expected);
   }
 
   async function renderPage(
@@ -363,6 +376,18 @@ export async function serve({ dev = false } = {}) {
       // body-less delete/post (body null) is as safe to retry as a get
       const retriable = !hasBody || buffered || body == null;
       for (let attempt = 0; ; attempt++) {
+        // an api that accepts the connection and then never answers would
+        // otherwise pin this request forever: the deadline covers the wait for
+        // response headers only and is dropped once they arrive, so a stream
+        // (sse) still runs for as long as it wants
+        const abort = apiTimeout > 0 ? new AbortController() : null;
+        let timedOut = false;
+        const deadline = abort
+          ? setTimeout(() => {
+              timedOut = true;
+              abort.abort();
+            }, apiTimeout)
+          : undefined;
         try {
           // decompress: false passes go's response through untouched, encoding
           // included; bun would otherwise inflate it and resend identity
@@ -371,9 +396,11 @@ export async function serve({ dev = false } = {}) {
             headers: req.headers,
             ...(hasBody ? { body } : {}),
             decompress: false,
+            signal: abort?.signal,
           } as RequestInit);
         } catch (err) {
-          if (retriable && attempt < 15 && isConnRefused(err)) {
+          if (timedOut) return new Response("api timeout", { status: 504 });
+          if (retriable && attempt < apiRetries && isConnRefused(err)) {
             await Bun.sleep(250);
             continue;
           }
@@ -381,6 +408,8 @@ export async function serve({ dev = false } = {}) {
           // the rendered 500 page (or the dev overlay) meant for documents
           console.error(err);
           return new Response("api unreachable", { status: 502 });
+        } finally {
+          clearTimeout(deadline);
         }
       }
     }
@@ -496,7 +525,8 @@ export async function serve({ dev = false } = {}) {
     }
 
     if (req.method !== "GET" && req.method !== "HEAD") {
-      return new Response("method not allowed", { status: 405 });
+      // a post only gets this far when the page has no action to run
+      return new Response("method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
 
     const matched = matchRoute(url.pathname, routes);
@@ -533,12 +563,22 @@ export async function serve({ dev = false } = {}) {
   const bootTime = Date.now();
   const metrics = process.env.METRICS === "1" ? createMetrics(bootTime) : null;
 
+  // /healthz answers anyone: a flood of probes must not become a flood of
+  // probes against the api, so the result is shared for a second - the promise
+  // itself, or a concurrent burst would all miss the cache together
+  let apiProbe: { at: number; state: Promise<string> } | null = null;
+  const probeApi = () => {
+    const now = Date.now();
+    if (apiProbe && now - apiProbe.at < 1_000) return apiProbe.state;
+    const state = fetch(`${api}/healthz`, { signal: AbortSignal.timeout(1_500) })
+      .then((res) => (res.ok ? "reachable" : "down"))
+      .catch(() => "down");
+    apiProbe = { at: now, state };
+    return state;
+  };
+
   async function healthz(): Promise<Response> {
-    let apiState = "down";
-    try {
-      const res = await fetch(`${api}/healthz`, { signal: AbortSignal.timeout(1_500) });
-      if (res.ok) apiState = "reachable";
-    } catch {}
+    const apiState = await probeApi();
     return Response.json({
       status: apiState === "reachable" ? "ok" : "degraded",
       uptime: (Date.now() - bootTime) / 1000,
@@ -591,6 +631,7 @@ export async function serve({ dev = false } = {}) {
 
   const server = await bindRetry(() => Bun.serve<SocketData, never>({
     port,
+    maxRequestBodySize,
     // long-lived proxied streams (sse) must not be killed by the default 10s
     idleTimeout: 0,
     websocket: {

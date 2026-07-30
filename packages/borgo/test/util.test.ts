@@ -1,11 +1,32 @@
 import { describe, expect, test } from "bun:test";
 import {
   createSecurity,
+  envInt,
   escapeHtml,
   headHtml,
   PROXY_RETRY_MAX_BODY,
   shouldBufferBody,
 } from "../src/util";
+
+describe("envInt", () => {
+  test("unset and empty fall back", () => {
+    expect(envInt(undefined, 30_000)).toBe(30_000);
+    expect(envInt("", 30_000)).toBe(30_000);
+  });
+
+  test("valid values win, zero is a valid value", () => {
+    expect(envInt("5000", 30_000)).toBe(5000);
+    expect(envInt("0", 30_000)).toBe(0);
+    expect(envInt("1.9", 30_000)).toBe(1);
+  });
+
+  test("garbage and negatives fall back instead of disabling the limit", () => {
+    expect(envInt("banana", 30_000)).toBe(30_000);
+    expect(envInt("-1", 30_000)).toBe(30_000);
+    expect(envInt("Infinity", 30_000)).toBe(30_000);
+    expect(envInt("NaN", 30_000)).toBe(30_000);
+  });
+});
 
 describe("shouldBufferBody", () => {
   test("buffers small bodies of known size", () => {

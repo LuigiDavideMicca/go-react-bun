@@ -90,6 +90,14 @@ export function createSecurity(
   };
 }
 
+// env knobs are limits: a typo must fall back to the default, never become
+// NaN and silently disable the limit it was meant to tune
+export function envInt(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === "") return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
+
 export const goBinName = () => "api" + (process.platform === "win32" ? ".exe" : "");
 
 // the /api proxy buffers request bodies so a refused connection (api mid-
