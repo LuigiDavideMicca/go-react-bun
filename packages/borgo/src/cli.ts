@@ -90,8 +90,18 @@ switch (command) {
     process.exit(await doctor());
   }
 
+  case "deploy": {
+    const { deployInit } = await import("./deploy");
+    const [sub, target] = process.argv.slice(3).filter((a) => !a.startsWith("--"));
+    if (sub !== "init") {
+      console.log(`\n  ${banner("deploy")}\n\n  usage: borgo deploy init <caddy|nginx|systemd|compose> [--force]\n`);
+      process.exit(1);
+    }
+    process.exit(deployInit(target, process.argv.includes("--force")));
+  }
+
   default: {
-    console.log(`\n  ${banner()}\n\n  usage: borgo <dev|build|start|export|doctor>\n`);
+    console.log(`\n  ${banner()}\n\n  usage: borgo <dev|build|start|export|deploy|doctor>\n`);
     process.exit(command ? 1 : 0);
   }
 }

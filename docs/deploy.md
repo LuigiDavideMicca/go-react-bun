@@ -4,7 +4,7 @@ A borgo app in production is two processes: the Go API binary and the Bun front 
 
 ## Docker, one container (recommended)
 
-Every scaffolded app ships a multi-stage `Dockerfile` and a `docker-compose.yml`:
+Every scaffolded app ships a multi-stage `Dockerfile` and a `docker-compose.yml` (missing one? `borgo deploy init compose` writes it):
 
 ```bash
 docker compose up -d
@@ -54,7 +54,7 @@ volumes:
 
 ## Reverse proxy
 
-Only the front server needs to be reachable — it proxies `/api/*` to Go and speaks WebSockets natively. Compression is built-in — static assets are precompressed to `.gz`/`.br` at build time, dynamic responses are gzipped on the fly — so the proxy should not compress again (no `encode` directive in Caddy, `gzip off` is nginx's default). Caddy gives you TLS in three lines:
+Only the front server needs to be reachable — it proxies `/api/*` to Go and speaks WebSockets natively. Compression is built-in — static assets are precompressed to `.gz`/`.br` at build time, dynamic responses are gzipped on the fly — so the proxy should not compress again (no `encode` directive in Caddy, `gzip off` is nginx's default). `borgo deploy init caddy` (or `nginx`) writes these configs into your project, templated with your app's name and port. Caddy gives you TLS in three lines:
 
 ```caddy
 example.com {
@@ -101,7 +101,7 @@ An exported site is pages only: actions, SSE and WebSocket topics need the runni
 
 ## systemd, no Docker
 
-Build on the server (`bun install && bun run build`), then:
+Build on the server (`bun install && bun run build`), then drop in a unit — `borgo deploy init systemd` generates this file as `borgo.service` with your app's name and ports:
 
 ```ini
 [Unit]
