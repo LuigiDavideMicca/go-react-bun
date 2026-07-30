@@ -14,7 +14,7 @@
 
 borgo is a mini Vercel-style full-stack framework: file-based React pages server-rendered by Bun, API routes written in Go. You get the DX — `bunx create-borgo my-app`, drop a file in `pages/`, drop a file in `api/`, one dev command — without the platform. Deployment is one Go binary and one Bun server on any box you control.
 
-Pages get nested layouts, per-page `<head>` management, streaming SSR through Suspense, client-side navigation with hover/viewport prefetching and scroll restoration, per-route code splitting, opt-out and deferred hydration plus islands, form actions with post/redirect/get, live updates over server-sent events and first-class typed WebSocket topics, signed-cookie sessions, fast refresh in dev, custom 404/500 pages, and static export for the pages that need no server — all through file conventions. Loaders and actions talk to the Go API through a client typed end to end by `borgogen`, which reads the Go handlers with `go/types` and generates the TypeScript route map, request bodies and WebSocket payloads included. Around the core: `/healthz` on both servers with opt-in Prometheus metrics, `borgo deploy init` for the blessed reverse-proxy/systemd/compose configs, and `borgo doctor` when something is off.
+Pages get nested layouts, per-page `<head>` management, streaming SSR through Suspense, client-side navigation with hover/viewport prefetching and scroll restoration, per-route code splitting, opt-out and deferred hydration plus islands, form actions that submit in place without losing your scroll (and still work with JavaScript off), live updates over server-sent events and first-class typed WebSocket topics, signed-cookie sessions, fast refresh in dev, opt-in Tailwind, the PWA mechanics (precache manifest, service worker serving, guarded registration), custom 404/500 pages, and static export for the pages that need no server — all through file conventions. Loaders and actions talk to the Go API through a client typed end to end by `borgogen`, which reads the Go handlers with `go/types` and generates the TypeScript route map, request bodies and WebSocket payloads included. Around the core: `/healthz` on both servers with opt-in Prometheus metrics, `borgo deploy init` for the blessed reverse-proxy/systemd/compose configs, and `borgo doctor` when something is off.
 
 The entire framework is a few thousand lines of readable TypeScript and Go; the Go runtime has zero dependencies. It exists because most of what makes Next-style frameworks pleasant is conventions, not machinery — and conventions are cheap.
 
@@ -29,6 +29,8 @@ bun install
 go mod tidy   # fetches the borgo go module
 bun run dev
 ```
+
+Three templates: `base` (default — a tour of loaders, actions, islands and SSE), `minimal` (one page, one route) and `full` (notes CRUD + auth + typed WebSockets) — pick with `--template`, or let the interactive prompt ask.
 
 Open http://localhost:3000 — edit a page and watch fast refresh keep your state. When it's time to ship: `docker compose up -d` (the scaffold includes the Dockerfile), or see the [deploy guide](docs/deploy.md).
 
@@ -71,7 +73,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 
 ### Form actions
 
-A page may export an `action`; the front server runs it for `POST` requests to that page's URL — classic form posts work without any client JavaScript, and `redirect(to)` gives you post/redirect/get:
+A page may export an `action`; the front server runs it for `POST` requests to that page's URL. On hydrated pages the runtime enhances the form — the action runs over `fetch`, the page re-renders in place and the scroll position stays put — while without JavaScript the same form falls back to the classic post cycle. `redirect(to)` gives you post/redirect/get either way:
 
 ```tsx
 import { redirect, type ActionContext } from "borgo-framework";
@@ -102,7 +104,7 @@ Deep dive: [realtime](docs/realtime.md).
 
 ### Sessions and auth
 
-Mechanics, not policy: signed-cookie sessions (`borgo.SetSession`/`GetSession`/`ClearSession`, HMAC with `SESSION_SECRET`, expiry signed in), stdlib PBKDF2 password hashing behind a swappable interface, and `borgo.Auth[U]` — you supply a `Lookup` (and optionally `Register`) over *your* user store, it provides the login/logout/register handlers. `borgo.Authed` guards api routes with a JSON 401; loaders guard pages by returning `redirect()`; form actions of authenticated users are CSRF-protected with a double-submit token (`<CsrfField />`). Deep dive: [auth and sessions](docs/auth-and-sessions.md).
+Mechanics, not policy: signed-cookie sessions (`borgo.SetSession`/`GetSession`/`ClearSession`, HMAC with `SESSION_SECRET`, expiry signed in), stdlib PBKDF2 password hashing behind a swappable interface, and `borgo.Auth[U]` — you supply a `Lookup` (and optionally `Register`) over *your* user store, it provides the login/logout/register handlers. `borgo.Authed` guards api routes with a JSON 401; loaders guard pages by returning `redirect()`; form actions are CSRF-protected with a double-submit token (`<CsrfField />`) for any browser that has been issued one — login forms included. Deep dive: [auth and sessions](docs/auth-and-sessions.md).
 
 ```go
 var auth = borgo.Auth[User]{Lookup: lookupUser, Register: createUser}
@@ -119,7 +121,7 @@ func init() {
 
 ### Dev experience
 
-`borgo dev` keeps the browser hot: component and hook edits apply through react-refresh with state intact, `style.scss` recompiles and swaps in place, Go changes rebuild the binary and reload once the new API answers, and a broken build keeps serving the error overlay instead of taking the port down. When something is off, `borgo doctor` diagnoses the environment — bun, go, ports, stale processes, generated types — with a one-line fix per failing check. Deep dive: [dev experience](docs/dev-experience.md).
+`borgo dev` keeps the browser hot: component and hook edits apply through react-refresh with state intact, styles recompile and swap in place (`style.scss` by default, Tailwind v4 behind the opt-in `--tailwind` flag), Go changes rebuild the binary and reload once the new API answers, and a broken build keeps serving the error overlay instead of taking the port down. When something is off, `borgo doctor` diagnoses the environment — bun, go, ports, stale processes, generated types — with a one-line fix per failing check. Deep dive: [dev experience](docs/dev-experience.md); stuck? [FAQ and troubleshooting](docs/faq-and-troubleshooting.md).
 
 ### Health checks and metrics
 
@@ -134,12 +136,12 @@ Two processes, one front door:
 
 ```
 packages/borgo          npm: the bun/typescript core (cli, ssr server, router, build, runtime, typed api client)
-packages/create-borgo   npm: project scaffolder
+packages/create-borgo   npm: project scaffolder (three templates: base, minimal, full)
 *.go                    go module github.com/LuigiDavideMicca/borgo: route registry, server bootstrap,
                         sse, websocket push, sessions, cache helpers (zero deps)
 cmd/borgogen            go: static analysis codegen for the typed bridge and route mounting (depends on x/tools)
 examples/tasks          demo app: tasks crud with gorm + sqlite, sse, websockets, islands, deferred hydration
-docs/                   deep dives: pages, typed bridge, client nav, realtime, auth, dev experience, deploy
+docs/                   deep dives: pages, typed bridge, client nav, realtime, auth, dev experience, pwa, deploy, faq
 ```
 
 Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo build` (client assets in `public/assets/`, Go binary in `dist/`), `borgo start` (run from build output, supervising both processes; `--front-only` for split deployments with `API_URL`), `borgo export` (static site in `dist/site/`), `borgo deploy init <caddy|nginx|systemd|compose>` (deploy configs), `borgo doctor` (environment diagnosis). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
@@ -154,7 +156,7 @@ Three layers, all run by CI on every push:
 
 - **Go** (`go test ./...`) — table-driven tests for the route registry, sessions (sign/verify/tamper/expiry), password hashing and the `borgo.Auth` handlers (login/register/logout, timing-safe 401s, `Authed`), cache headers, the `/healthz` handler, SSE stream framing and hub broadcast/slow-client behavior, `borgo.Push` and `borgo.PushT`, and borgogen against a committed fixture app: route discovery (directives + `Handle` calls), helper following, `WriteJSON`, `Bind`, type overrides, `PushT` event extraction, snapshot freshness, and the error paths (duplicate patterns, malformed directives, dynamic push topics).
 - **TypeScript** (`bun test packages/borgo/test`) — the router (patterns, matching, params), the api client (URL building, headers, `ApiError`, typed bodies plumbing), hydrate/refresh source parsing, manifest generation against a temp fixture (islands flags, client-route exclusion, precedence), every `borgo doctor` check against a fake environment, the export planner (loader/prerender/dynamic partitioning, path filling), the deploy config templates (ports, names, refuse-overwrite), and the Prometheus exposition format.
-- **End-to-end** (`npx playwright test`) — against a production build of `examples/tasks`: client navigation, hover/viewport prefetching, scroll restoration, islands, hydration modes, form actions, the auth round trip (register, loader guard, logout, login, forged-post CSRF rejection), SSE, two-tab WebSockets with Go push, streaming SSR, error pages, `/healthz` on both servers, `/metrics` series, a `borgo doctor` smoke — plus a dev-server project asserting fast refresh preserves component state (including five consecutive rapid edits), hook add/remove remounts without a reload, custom hook edits hot-apply, Go edits reload exactly once and only after the api answers, CSS hot-swaps, and layouts fall back to a reload — and an export project that runs `borgo export` and serves `dist/site` from a plain static file server, asserting content, hydration against exported props, and the zero-JS page.
+- **End-to-end** (`npx playwright test`) — against a production build of `examples/tasks`: client navigation, hover/viewport prefetching, scroll restoration, islands, hydration modes, form actions (enhanced in-place submits, crash surfacing, anonymous-post CSRF), the auth round trip (register, loader guard, logout, login, forged-post CSRF rejection), the precache manifest, SSE, two-tab WebSockets with Go push, streaming SSR, error pages, `/healthz` on both servers, `/metrics` series, a `borgo doctor` smoke — plus a dev-server project asserting fast refresh preserves component state (including five consecutive rapid edits), hook add/remove remounts without a reload, custom hook edits hot-apply, Go edits reload exactly once and only after the api answers, CSS hot-swaps, and layouts fall back to a reload — and an export project that runs `borgo export` and serves `dist/site` from a plain static file server, asserting content, hydration against exported props, and the zero-JS page.
 
 ## Versioning and releases
 
@@ -184,7 +186,7 @@ Honest comparison with the frameworks a borgo adopter would otherwise pick. ✓ 
 | Image/font optimization | — | ✓ | ✓ | — |
 | Plugin ecosystem | — | ✓ | ✓ | ✓ |
 | Deploy story | one box: Docker/compose/systemd, generated configs | Vercel or DIY | many presets | many presets |
-| Framework size | ~5k lines incl. codegen and cli tooling, readable in a sitting | large | large | medium |
+| Framework size | ~7k lines incl. codegen and cli tooling, readable in a sitting | large | large | medium |
 
 ## What this is not
 
