@@ -81,11 +81,19 @@ server {
 }
 ```
 
-Behind https, set `SESSION_SECURE=1` so session cookies carry the `Secure` attribute. Responses marked with `borgo.Cache` carry ordinary `Cache-Control` headers — enable proxy caching (`proxy_cache` in nginx, `cache` in Caddy plugins) if you want the proxy to serve them.
+Behind https, set `SESSION_SECURE=1` so session cookies carry the `Secure` attribute. Responses marked with `borgo.Cache` carry ordinary `Cache-Control` headers — see [Caching](#caching) below.
 
 ## Static export
 
-`borgo export` prerenders every statically exportable page into `dist/site/`: plain HTML next to the built assets, precompressed siblings included. Pages without a loader export as-is; a page with a loader opts in with `export const prerender = true` (its loader runs once, at export time, against a temporary api process); dynamic routes list their param sets with `export const prerenderPaths`. Pages with `hydrate = false` export with zero JavaScript; hydrated pages carry their chunks and hydrate against the exported props.
+`borgo export` prerenders every statically exportable page into `dist/site/`: plain HTML next to the built assets, precompressed siblings included. Pages without a loader export as-is; a page with a loader opts in with `export const prerender = true` (its loader runs once, at export time, against a temporary api process). Dynamic routes list their param sets:
+
+```tsx
+export const prerender = true;
+export const prerenderPaths = async ({ api }: PrerenderContext) =>
+  (await api("GET /api/tasks")).tasks.map((task) => ({ id: task.ID }));
+```
+
+Pages with `hydrate = false` export with zero JavaScript; hydrated pages carry their chunks and hydrate against the exported props (client-side navigation falls back to plain page loads — there is no server to ask for props). Everything else is skipped, with the reason printed.
 
 Any static file server can host the result — for nginx the one-liner is `try_files`:
 
@@ -98,6 +106,10 @@ server {
 ```
 
 An exported site is pages only: actions, SSE and WebSocket topics need the running borgo servers (`borgo start`).
+
+## Caching
+
+`borgo.Cache(w, 5*time.Minute)` sets `Cache-Control: public, max-age=300` (optional second argument adds `stale-while-revalidate`); `borgo.NoCache(w)` sets `no-store` for anything personalized. A reverse proxy in front turns these headers into actual caching — enable `proxy_cache` in nginx or `cache` in Caddy plugins if you want the proxy to serve them.
 
 ## systemd, no Docker
 

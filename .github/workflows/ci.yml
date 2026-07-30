@@ -22,6 +22,9 @@ jobs:
       - name: install workspace
         run: bun install --frozen-lockfile
 
+      - name: docs links resolve
+        run: bun scripts/check-doc-links.ts
+
       - name: build go core
         run: |
           go build ./...
