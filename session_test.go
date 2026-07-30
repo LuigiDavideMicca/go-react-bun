@@ -1,9 +1,11 @@
 package borgo
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -89,6 +91,48 @@ func TestClearSession(t *testing.T) {
 	if len(cookies) != 1 || cookies[0].MaxAge != -1 || cookies[0].Value != "" {
 		t.Fatalf("clear cookie wrong: %+v", cookies)
 	}
+}
+
+// pooled macs must not outlive the secret they were built for
+func TestSessionSignFollowsTheSecret(t *testing.T) {
+	t.Setenv("SESSION_SECRET", "first-secret-first-secret-first")
+	first := sessionSign("a-payload")
+	t.Setenv("SESSION_SECRET", "second-secret-second-secret-second")
+	second := sessionSign("a-payload")
+	t.Setenv("SESSION_SECRET", "first-secret-first-secret-first")
+	again := sessionSign("a-payload")
+
+	if first == second {
+		t.Fatal("a rotated secret must produce a different signature")
+	}
+	if first != again {
+		t.Fatal("the same secret must produce the same signature")
+	}
+}
+
+func TestSessionConcurrentRoundTrips(t *testing.T) {
+	t.Setenv("SESSION_SECRET", "a-secret-that-is-at-least-32-bytes")
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			want := testSession{User: fmt.Sprintf("user-%d", i), Role: "member"}
+			for range 20 {
+				w := httptest.NewRecorder()
+				if err := SetSession(w, want, time.Hour); err != nil {
+					t.Errorf("user %d: %v", i, err)
+					return
+				}
+				got, ok := GetSession[testSession](sessionRequest(w.Result().Cookies()[0]))
+				if !ok || got != want {
+					t.Errorf("user %d: round trip gave %+v ok=%v", i, got, ok)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestSessionSecretRequired(t *testing.T) {

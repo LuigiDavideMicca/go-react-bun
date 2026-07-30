@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -33,23 +35,45 @@ type sessionEnvelope struct {
 	Data json.RawMessage `json:"data"`
 }
 
-func sessionSecret() []byte {
+func sessionSecret() string {
 	secret := os.Getenv("SESSION_SECRET")
 	if secret == "" {
 		panic("borgo: SESSION_SECRET must be set to use sessions (any long random string)")
 	}
-	return []byte(secret)
+	return secret
 }
 
+// building an hmac is most of the cost of verifying a session, and every
+// guarded request verifies one. Pooled macs are rebuilt only when the secret
+// changes, so rotating SESSION_SECRET still takes effect immediately.
+type sessionSigner struct {
+	secret string
+	mac    hash.Hash
+	buf    []byte
+	sum    []byte
+}
+
+var sessionSigners sync.Pool
+
 func sessionSign(payload string) string {
-	mac := hmac.New(sha256.New, sessionSecret())
-	mac.Write([]byte(payload))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	secret := sessionSecret()
+	s, _ := sessionSigners.Get().(*sessionSigner)
+	if s == nil || s.secret != secret {
+		s = &sessionSigner{secret: secret, mac: hmac.New(sha256.New, []byte(secret))}
+	}
+	s.mac.Reset()
+	s.buf = append(s.buf[:0], payload...)
+	s.mac.Write(s.buf)
+	s.sum = s.mac.Sum(s.sum[:0])
+	sig := base64.RawURLEncoding.EncodeToString(s.sum)
+	sessionSigners.Put(s)
+	return sig
 }
 
 // SetSession stores v, JSON-encoded and HMAC-signed with SESSION_SECRET, in
 // an http-only cookie. The expiry is signed too, so a client cannot extend
-// it. Set SESSION_SECURE=1 to add the Secure attribute behind https.
+// it. Set SESSION_SECURE=1 to add the Secure attribute behind https. A
+// maxAge of zero or less writes an already-expired session.
 func SetSession(w http.ResponseWriter, v any, maxAge time.Duration) error {
 	data, err := json.Marshal(v)
 	if err != nil {
