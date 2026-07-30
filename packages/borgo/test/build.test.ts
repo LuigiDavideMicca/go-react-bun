@@ -67,6 +67,18 @@ describe("refreshTransform", () => {
 });
 
 describe("generateManifest", () => {
+  test("a missing pages/ dir throws a framework message, not a bare ENOENT", async () => {
+    const empty = mkdtempSync(join(tmpdir(), "borgo-no-pages-"));
+    const cwd = process.cwd();
+    process.chdir(empty);
+    try {
+      expect(generateManifest()).rejects.toThrow("pages/");
+    } finally {
+      process.chdir(cwd);
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
   const originalCwd = process.cwd();
   let dir: string;
 

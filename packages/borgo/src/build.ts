@@ -30,6 +30,9 @@ export function parseHydrate(source: string): "false" | "true" | '"visible"' {
 const islandRe = /<Island[\s/>]/;
 
 export async function generateManifest(dev = false) {
+  if (!existsSync("pages")) {
+    throw new Error("no pages/ directory here - run borgo from the app root (the folder holding pages/)");
+  }
   const files = [...new Glob("**/*.tsx").scanSync("pages")]
     .map((f) => f.replaceAll("\\", "/"))
     .sort();
