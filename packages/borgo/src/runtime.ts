@@ -143,6 +143,9 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   const container = document.getElementById("root")!;
   let root: Root;
   let currentRoute: ClientRoute | null = null;
+  // what root currently shows, without the hash: popstate compares against it
+  // to tell a real route change from a fragment move the browser made itself
+  let renderedUrl = location.pathname + location.search;
 
   async function hydrate(route: ClientRoute) {
     const module = await route.load();
@@ -316,6 +319,7 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       history.pushState({ __borgo: entryKey }, "", to.pathname + to.search + to.hash);
     }
     currentRoute = matched.route;
+    renderedUrl = to.pathname + to.search;
     root.render(compose(createElement, matched.route, module, props));
     applyHead(resolveHead(module, props));
     const key = entryKey;
@@ -449,6 +453,7 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       history.pushState({ __borgo: entryKey }, "", to.pathname + to.search);
     }
     currentRoute = matched.route;
+    renderedUrl = to.pathname + to.search;
     root.render(compose(createElement, matched.route, module, props));
     applyHead(resolveHead(module, props));
     afterRender(() => {
@@ -531,15 +536,24 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       { passive: true },
     );
 
-    // hover or focus prefetches the chunk and the loader props
-    const onIntent = (event: Event) => {
+    // hover or focus prefetches the chunk and the loader props. hovering runs
+    // a loader on the server, so a pointer crossing a long list must not fire
+    // one request per anchor it passes over: only a settled hover counts.
+    // focus and touch are deliberate already and prefetch at once
+    let intentTimer: ReturnType<typeof setTimeout> | undefined;
+    const onIntent = (delay: number) => (event: Event) => {
+      clearTimeout(intentTimer);
       const anchor = (event.target as Element).closest?.("a");
       const to = anchor && linkTarget(anchor);
-      if (to && to.pathname !== location.pathname) prefetch(to, true);
+      // compare the search too, or paginated links to the current page never
+      // get their props prefetched
+      if (!to || to.pathname + to.search === location.pathname + location.search) return;
+      if (delay) intentTimer = setTimeout(() => prefetch(to, true), delay);
+      else prefetch(to, true);
     };
-    document.addEventListener("mouseover", onIntent);
-    document.addEventListener("focusin", onIntent);
-    document.addEventListener("touchstart", onIntent, { passive: true });
+    document.addEventListener("mouseover", onIntent(60));
+    document.addEventListener("focusin", onIntent(0));
+    document.addEventListener("touchstart", onIntent(0), { passive: true });
 
     observeLinks();
 
@@ -562,7 +576,16 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       // position under the restored entry's key
       clearTimeout(scrollTimer);
       saveScroll();
-      entryKey = history.state?.__borgo ?? newKey();
+      const stamped = history.state?.__borgo;
+      entryKey = stamped ?? newKey();
+      if (location.pathname + location.search === renderedUrl) {
+        // moving across a fragment entry the browser pushed on its own: the
+        // page and its loader data are unchanged, only the anchor matters
+        if (!stamped) history.replaceState({ ...history.state, __borgo: entryKey }, "");
+        const target = location.hash && document.getElementById(location.hash.slice(1));
+        target ? target.scrollIntoView() : restoreScroll(entryKey);
+        return;
+      }
       navigate(new URL(location.href), false);
     });
   }
@@ -598,12 +621,16 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       if (!chunk) return location.reload();
       try {
         const route = currentRoute;
+        const seq = navSeq;
         const [module, res] = await Promise.all([
           import(chunk + bust) as Promise<ClientPageModule>,
           fetchProps(new URL(location.href)),
         ]);
         if (!res.ok) throw new Error(`props fetch failed: ${res.status}`);
-        const props = (await res.json()).props ?? {};
+        const props = asProps((await res.json()).props);
+        // a navigation started while this was in flight already owns root:
+        // rendering the old route now would put it back on the new url
+        if (seq !== navSeq) return;
         // refresh first: families must swap (and hook-signature changes
         // remount) before the new module renders against existing fibers
         (globalThis as { $RefreshRuntime$?: { performReactRefresh: () => void } }).$RefreshRuntime$?.performReactRefresh();
