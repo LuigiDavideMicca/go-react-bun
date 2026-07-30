@@ -148,6 +148,7 @@ Point the load balancer or uptime monitor at the front server's `/healthz` — i
 | `FRONT_URL` | `http://localhost:$PORT` | where `borgo.Push` reaches the front server |
 | `BORGO_PUSH_KEY` | unset | shared secret for `borgo.Push` across hosts (loopback needs none) |
 | `SESSION_SECRET` | unset | HMAC key for signed-cookie sessions (required to use them) |
-| `SESSION_SECURE` | unset | `1` adds `Secure` to the session cookie |
+| `SESSION_SECURE` | unset | `1` adds `Secure` to the session and csrf cookies |
+| `BORGO_CSRF` | unset | `0` disables csrf checks on form actions, `1` forces them in dev |
 | `METRICS` | unset | `1` exposes `/metrics` (Prometheus text) on the front server |
 | `NO_COLOR` | unset | disable ANSI colors in logs |

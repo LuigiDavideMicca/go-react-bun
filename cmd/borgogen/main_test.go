@@ -42,6 +42,7 @@ func TestGenerateFixture(t *testing.T) {
 		`"POST /api/widgets": { response: Widget; request: WidgetCreate };`,
 		`"DELETE /api/widgets/{id}": { response: Deleted };`,
 		`"GET /api/manual": { response: string };`,
+		`"GET /api/secret": { response: Deleted };`,
 		"created: string",
 		"tags?: Array<string>",
 		"price: string",

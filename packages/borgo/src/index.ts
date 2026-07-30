@@ -105,8 +105,53 @@ export function subscribe(
 // islands: components in islands/*.tsx that hydrate independently, so a
 // hydrate=false page can still have interactive parts. react is injected at
 // registration time so this package never bundles its own copy.
-import type { ComponentType } from "react";
-import type { createElement as CreateElement } from "react";
+import type { ComponentType, Context } from "react";
+import type { createContext as CreateContext, createElement as CreateElement, useContext as UseContext } from "react";
+
+// csrf double-submit: the front server issues a borgo_csrf cookie and, in
+// production, requires form actions of session-carrying requests to echo it
+// in a hidden field. CsrfField renders that field; the token flows through a
+// react context provided by the server render and the client runtime.
+export const CSRF_COOKIE = "borgo_csrf";
+export const CSRF_FIELD = "__borgo_csrf";
+
+export function cookieValue(header: string | null, name: string): string {
+  for (const part of (header ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq !== -1 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+  }
+  return "";
+}
+
+type CsrfReact = {
+  createElement: typeof CreateElement;
+  createContext: typeof CreateContext;
+  useContext: typeof UseContext;
+};
+
+let csrfRuntime: { react: CsrfReact; context: Context<string> } | null = null;
+
+// react is injected (like islands) so this package never bundles its own copy
+export function registerCsrf(react: CsrfReact) {
+  csrfRuntime = { react, context: react.createContext("") };
+}
+
+export function withCsrf(element: import("react").ReactNode, token: string) {
+  if (!csrfRuntime) return element;
+  const { react, context } = csrfRuntime;
+  return react.createElement(context.Provider, { value: token }, element);
+}
+
+// <CsrfField /> inside any <form method="post"> - server-rendered with the
+// same token the cookie carries, so classic no-js posts pass validation too
+export function CsrfField() {
+  if (!csrfRuntime) {
+    throw new Error("csrf runtime not registered - is the app on a current borgo build?");
+  }
+  const { react, context } = csrfRuntime;
+  const token = react.useContext(context);
+  return react.createElement("input", { type: "hidden", name: CSRF_FIELD, value: token });
+}
 
 export type IslandProps = {
   name: string;

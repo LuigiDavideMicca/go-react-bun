@@ -369,6 +369,11 @@ func handlerFunc(info *types.Info, expr ast.Expr) *types.Func {
 		if fn, ok := info.Uses[e.Sel].(*types.Func); ok {
 			return fn
 		}
+	case *ast.CallExpr:
+		// borgo.Authed(h) is transparent: the route keeps h's types
+		if name, _ := borgoFunc(info, e); name == "Authed" && len(e.Args) == 1 {
+			return handlerFunc(info, e.Args[0])
+		}
 	}
 	return nil
 }

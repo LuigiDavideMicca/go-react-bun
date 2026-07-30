@@ -7,7 +7,7 @@ import { makeApiClient } from "./api";
 import { buildAssets, compileCss } from "./build";
 import { banner, c, fmtMs, g, statusColor } from "./colors";
 import { gzipStream, isCompressiblePath, isHashedAsset, jsonResponse, pickEncoding } from "./compress";
-import { registerIslands } from "./index";
+import { CSRF_COOKIE, CSRF_FIELD, cookieValue, registerCsrf, registerIslands, withCsrf } from "./index";
 import { createMetrics } from "./metrics";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, safeDecode, type Head, type Route } from "./router";
@@ -78,6 +78,11 @@ export async function serve({ dev = false } = {}) {
     islands: Record<string, import("react").ComponentType<any>>;
   };
   registerIslands(islands, React.createElement);
+  registerCsrf({
+    createElement: React.createElement,
+    createContext: React.createContext,
+    useContext: React.useContext,
+  });
   const shell = await Bun.file("index.html").text();
   const [shellStart, shellEnd = ""] = shell.split("<!--app-->");
   const shellTitle = shell.match(/<title>(.*?)<\/title>/s)?.[1] ?? "";
@@ -87,16 +92,50 @@ export async function serve({ dev = false } = {}) {
   const apiUrl = `${api}/api`;
 
   // the api client forwards the browser's cookies, so go handlers see the
-  // session during ssr and in actions
-  const apiFor = (req: Request) => {
+  // session during ssr and in actions; set-cookie headers coming back from
+  // go (login, logout) are collected and forwarded to the browser
+  const apiFor = (req: Request, onSetCookie?: (cookies: string[]) => void) => {
     const cookie = req.headers.get("cookie");
-    return makeApiClient(api, cookie ? { cookie } : {});
+    return makeApiClient(api, cookie ? { cookie } : {}, onSetCookie);
   };
 
-  const runLoader = (req: Request, route: Route, params: Record<string, string>) =>
+  const runLoader = (
+    req: Request,
+    route: Route,
+    params: Record<string, string>,
+    onSetCookie?: (cookies: string[]) => void,
+  ) =>
     route.module.loader
-      ? route.module.loader({ request: req, params, api: apiFor(req), apiUrl })
+      ? route.module.loader({ request: req, params, api: apiFor(req, onSetCookie), apiUrl })
       : Promise.resolve({});
+
+  const withCookies = (res: Response, cookies: string[]) => {
+    if (!cookies.length) return res;
+    const headers = new Headers(res.headers);
+    for (const c of cookies) headers.append("Set-Cookie", c);
+    return new Response(res.body, { status: res.status, headers });
+  };
+
+  // csrf: a double-submit token, issued as a cookie on rendered pages and
+  // required from form actions of requests carrying a session - a cross-site
+  // post cannot read the cookie to echo it in the form. on by default in
+  // production; BORGO_CSRF=1 forces the check in dev, BORGO_CSRF=0 disables.
+  const csrfEnforced =
+    process.env.BORGO_CSRF === "0" ? false : dev ? process.env.BORGO_CSRF === "1" : true;
+  const csrfCookieAttrs = `Path=/; SameSite=Lax${process.env.SESSION_SECURE === "1" ? "; Secure" : ""}`;
+
+  async function csrfRejects(req: Request): Promise<boolean> {
+    if (!csrfEnforced) return false;
+    const cookies = req.headers.get("cookie");
+    if (!cookieValue(cookies, "borgo_session")) return false;
+    const expected = cookieValue(cookies, CSRF_COOKIE);
+    let given = "";
+    try {
+      const form = await req.clone().formData();
+      given = String(form.get(CSRF_FIELD) ?? "");
+    } catch {}
+    return !expected || !given || !keysEqual(given, expected);
+  }
 
   async function renderPage(
     req: Request,
@@ -104,14 +143,22 @@ export async function serve({ dev = false } = {}) {
     params: Record<string, string>,
     status: number,
     extraProps?: Record<string, unknown>,
+    extraCookies: string[] = [],
   ): Promise<Response> {
-    const loaded = await runLoader(req, route, params);
+    const apiCookies = [...extraCookies];
+    const loaded = await runLoader(req, route, params, (c) => apiCookies.push(...c));
     // a loader may short-circuit with a response, e.g. redirect() as a guard
-    if (loaded instanceof Response) return loaded;
+    if (loaded instanceof Response) return withCookies(loaded, apiCookies);
     const props = extraProps ? { ...loaded, ...extraProps } : loaded;
 
+    // the same token rides in the cookie and in every <CsrfField />; a
+    // browser without one gets it minted alongside this page
+    const cookieToken = cookieValue(req.headers.get("cookie"), CSRF_COOKIE);
+    const csrfToken = cookieToken || crypto.randomUUID().replaceAll("-", "");
+    if (!cookieToken) apiCookies.push(`${CSRF_COOKIE}=${csrfToken}; ${csrfCookieAttrs}`);
+
     const head = resolveHead(route.module, props);
-    const stream = await renderToReadableStream(composeElement(route, props), {
+    const stream = await renderToReadableStream(withCsrf(composeElement(route, props), csrfToken), {
       onError(error) {
         console.error(error);
       },
@@ -171,16 +218,17 @@ export async function serve({ dev = false } = {}) {
       },
     });
 
-    const headers: Record<string, string> = {
+    const headers = new Headers({
       "Content-Type": "text/html; charset=utf-8",
       Vary: "Accept-Encoding",
-    };
+    });
+    for (const c of apiCookies) headers.append("Set-Cookie", c);
     // gzip only: brotli is too slow for dynamic responses. no size threshold
     // here - a rendered document is virtually always past it, and the length
     // of a stream is unknown up front. the per-chunk sync flush in gzipStream
     // keeps streamed suspense content progressive.
     if (!dev && pickEncoding(req.headers.get("accept-encoding"), ["gzip"])) {
-      headers["Content-Encoding"] = "gzip";
+      headers.set("Content-Encoding", "gzip");
       return new Response(gzipStream(body), { status, headers });
     }
     return new Response(body, { status, headers });
@@ -267,9 +315,18 @@ export async function serve({ dev = false } = {}) {
         if (typeof action !== "function") {
           throw new Error(`the action export of pages/${target.route.file} must be a function`);
         }
-        const result = await action({ request: req, params: target.params, api: apiFor(req), apiUrl });
-        if (result instanceof Response) return result;
-        return renderPage(req, target.route, target.params, 200, { actionData: result });
+        if (await csrfRejects(req)) {
+          return new Response("invalid csrf token", { status: 403 });
+        }
+        const apiCookies: string[] = [];
+        const result = await action({
+          request: req,
+          params: target.params,
+          api: apiFor(req, (c) => apiCookies.push(...c)),
+          apiUrl,
+        });
+        if (result instanceof Response) return withCookies(result, apiCookies);
+        return renderPage(req, target.route, target.params, 200, { actionData: result }, apiCookies);
       }
     }
 
@@ -287,14 +344,15 @@ export async function serve({ dev = false } = {}) {
     }
 
     if (wantsProps) {
-      const props = await runLoader(req, matched.route, matched.params);
+      const apiCookies: string[] = [];
+      const props = await runLoader(req, matched.route, matched.params, (c) => apiCookies.push(...c));
       if (props instanceof Response) {
         // surface loader redirects as data, so the client runtime can follow
         const location = props.headers.get("Location");
-        if (location) return sendJson(req, { redirect: location });
-        return props;
+        if (location) return withCookies(sendJson(req, { redirect: location }), apiCookies);
+        return withCookies(props, apiCookies);
       }
-      return sendJson(req, { props });
+      return withCookies(sendJson(req, { props }), apiCookies);
     }
 
     return renderPage(req, matched.route, matched.params, 200);

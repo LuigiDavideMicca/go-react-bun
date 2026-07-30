@@ -96,7 +96,16 @@ Deep dive: [realtime](docs/realtime.md).
 
 ### Sessions and auth
 
-A signed cookie, not an auth framework: `borgo.SetSession`/`GetSession`/`ClearSession` store a JSON payload HMAC-signed with `SESSION_SECRET`, expiry signed in. Loaders guard pages by returning `redirect()`; Go routes guard with a plain wrapper. `borgo.Cache`/`NoCache` cover response caching. Deep dive: [auth and sessions](docs/auth-and-sessions.md).
+Mechanics, not policy: signed-cookie sessions (`borgo.SetSession`/`GetSession`/`ClearSession`, HMAC with `SESSION_SECRET`, expiry signed in), stdlib PBKDF2 password hashing behind a swappable interface, and `borgo.Auth[U]` — you supply a `Lookup` (and optionally `Register`) over *your* user store, it provides the login/logout/register handlers. `borgo.Authed` guards api routes with a JSON 401; loaders guard pages by returning `redirect()`; form actions of authenticated users are CSRF-protected with a double-submit token (`<CsrfField />`). Deep dive: [auth and sessions](docs/auth-and-sessions.md).
+
+```go
+var auth = borgo.Auth[User]{Lookup: lookupUser, Register: createUser}
+
+func init() {
+    borgo.Handle("POST /api/login", auth.LoginHandler)
+    borgo.Handle("GET /api/me", borgo.Authed(currentUser))
+}
+```
 
 ### Static export
 
@@ -137,9 +146,9 @@ Scaffolded apps ship a multi-stage `Dockerfile` (Go builds static, the runtime i
 
 Three layers, all run by CI on every push:
 
-- **Go** (`go test ./...`) — table-driven tests for the route registry, sessions (sign/verify/tamper/expiry), cache headers, the `/healthz` handler, SSE stream framing and hub broadcast/slow-client behavior, `borgo.Push` and `borgo.PushT`, and borgogen against a committed fixture app: route discovery (directives + `Handle` calls), helper following, `WriteJSON`, `Bind`, type overrides, `PushT` event extraction, snapshot freshness, and the error paths (duplicate patterns, malformed directives, dynamic push topics).
+- **Go** (`go test ./...`) — table-driven tests for the route registry, sessions (sign/verify/tamper/expiry), password hashing and the `borgo.Auth` handlers (login/register/logout, timing-safe 401s, `Authed`), cache headers, the `/healthz` handler, SSE stream framing and hub broadcast/slow-client behavior, `borgo.Push` and `borgo.PushT`, and borgogen against a committed fixture app: route discovery (directives + `Handle` calls), helper following, `WriteJSON`, `Bind`, type overrides, `PushT` event extraction, snapshot freshness, and the error paths (duplicate patterns, malformed directives, dynamic push topics).
 - **TypeScript** (`bun test packages/borgo/test`) — the router (patterns, matching, params), the api client (URL building, headers, `ApiError`, typed bodies plumbing), hydrate/refresh source parsing, manifest generation against a temp fixture (islands flags, client-route exclusion, precedence), every `borgo doctor` check against a fake environment, the export planner (loader/prerender/dynamic partitioning, path filling), the deploy config templates (ports, names, refuse-overwrite), and the Prometheus exposition format.
-- **End-to-end** (`npx playwright test`) — against a production build of `examples/tasks`: client navigation, hover/viewport prefetching, scroll restoration, islands, hydration modes, form actions, SSE, two-tab WebSockets with Go push, streaming SSR, error pages, `/healthz` on both servers, `/metrics` series, a `borgo doctor` smoke — plus a dev-server project asserting fast refresh preserves component state (including five consecutive rapid edits), hook add/remove remounts without a reload, custom hook edits hot-apply, Go edits reload exactly once and only after the api answers, CSS hot-swaps, and layouts fall back to a reload — and an export project that runs `borgo export` and serves `dist/site` from a plain static file server, asserting content, hydration against exported props, and the zero-JS page.
+- **End-to-end** (`npx playwright test`) — against a production build of `examples/tasks`: client navigation, hover/viewport prefetching, scroll restoration, islands, hydration modes, form actions, the auth round trip (register, loader guard, logout, login, forged-post CSRF rejection), SSE, two-tab WebSockets with Go push, streaming SSR, error pages, `/healthz` on both servers, `/metrics` series, a `borgo doctor` smoke — plus a dev-server project asserting fast refresh preserves component state (including five consecutive rapid edits), hook add/remove remounts without a reload, custom hook edits hot-apply, Go edits reload exactly once and only after the api answers, CSS hot-swaps, and layouts fall back to a reload — and an export project that runs `borgo export` and serves `dist/site` from a plain static file server, asserting content, hydration against exported props, and the zero-JS page.
 
 ## Versioning and releases
 
@@ -162,7 +171,7 @@ Honest comparison with the frameworks a borgo adopter would otherwise pick. ✓ 
 | SSE + WebSockets first-class | ✓ typed event payloads | bring your own | ✓ Nitro | bring your own |
 | Static export | ✓ `borgo export` | ✓ | ✓ | ✓ |
 | Health endpoint + metrics | ✓ built-in, opt-in Prometheus | DIY | DIY | DIY |
-| Sessions/auth | ✓ signed cookie + recipes | libraries | modules | libraries |
+| Sessions/auth | ✓ signed cookie, hashing, login helpers, CSRF | libraries | modules | libraries |
 | Fast refresh | ✓ full transform | ✓ full transform | ✓ | ✓ |
 | React Server Components | — | ✓ | n/a | n/a |
 | ISR / edge / serverless targets | — | ✓ | ✓ | ✓ |
@@ -180,7 +189,7 @@ Everything here is a deliberate choice, with the reason attached:
 - **No image/font optimization pipeline.** The build is one `Bun.build` call and stays that way; put a CDN or `vips` in front if you need it.
 - **No plugin system.** The framework is small enough that the extension mechanism is reading the source and changing it.
 - **Loader data is not streamed on client navigations** — one JSON payload, fetched in parallel with the route chunk (and usually prefetched on hover). Streaming applies to initial SSR, where it matters most.
-- **Sessions are mechanics, not policy.** Signed cookie in, tamper-proof out; OAuth, user stores and CSRF strategy stay in your hands.
+- **Auth is mechanics, not policy.** Signed cookie, hashing, login/logout/register handlers and CSRF for actions are provided; the user store, its schema, OAuth and everything beyond username/password stay in your hands.
 - **The typed bridge is static analysis, no runtime reflection.** Helpers inside `api/` are followed and `//borgo:type` covers custom marshalers; a response written through `json.NewEncoder` or a helper in another package types as `unknown` — the escape hatch is visible, not silent.
 - **WebSocket topics are a relay, not RPC.** The front server forwards `{event, data}` between subscribers and Go; per-message business logic belongs in Go routes. `borgo.PushT` types the payloads end to end — the relay itself stays dumb.
 

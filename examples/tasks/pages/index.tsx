@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { redirect, type ActionContext, type LoaderContext } from "borgo-framework";
+import { CsrfField, redirect, type ActionContext, type LoaderContext } from "borgo-framework";
 import type { Task } from "../.borgo/api-types";
 
 export const head = {
@@ -59,6 +59,7 @@ export default function Home({
       <h1>Tasks</h1>
       <p>Server-rendered by Bun, data from the Go API, mutations through a borgo action.</p>
       <form method="post">
+        <CsrfField />
         <input name="title" placeholder="Title" />
         <input name="body" placeholder="Details (optional)" />
         <button>Add</button>

@@ -73,7 +73,7 @@ export async function action({ request, params, api }: ActionContext) {
 
 Return a `Response` and it is sent as-is — `redirect(to, status = 303)` gives you post/redirect/get. Return any other object and the page re-renders with it as the `actionData` prop, merged over the loader's props.
 
-In production, actions of authenticated users are protected against cross-site request forgery by a double-submit token — see [auth and sessions](auth-and-sessions.md).
+In production, actions of authenticated users are protected against cross-site request forgery by a double-submit token — see [CSRF protection](auth-and-sessions.md#csrf-protection-for-actions).
 
 ## Error pages
 

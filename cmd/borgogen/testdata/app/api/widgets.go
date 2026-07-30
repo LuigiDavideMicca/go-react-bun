@@ -75,6 +75,11 @@ func manual(w http.ResponseWriter, r *http.Request) {
 	borgo.JSON(w, http.StatusOK, "plain")
 }
 
+func secret(w http.ResponseWriter, r *http.Request) {
+	borgo.JSON(w, http.StatusOK, Deleted{OK: true})
+}
+
 func init() {
 	borgo.Handle("GET /api/manual", manual)
+	borgo.Handle("GET /api/secret", borgo.Authed(secret))
 }

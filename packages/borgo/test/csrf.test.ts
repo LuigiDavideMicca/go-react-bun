@@ -1,0 +1,56 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { makeApiClient } from "../src/api";
+import { CSRF_COOKIE, cookieValue, withCsrf } from "../src/index";
+
+describe("cookieValue", () => {
+  test("finds a cookie among several", () => {
+    expect(cookieValue("a=1; borgo_csrf=tok3n; b=2", CSRF_COOKIE)).toBe("tok3n");
+  });
+
+  test("exact name match only", () => {
+    expect(cookieValue("xborgo_csrf=nope", CSRF_COOKIE)).toBe("");
+    expect(cookieValue("borgo_csrf_extra=nope", CSRF_COOKIE)).toBe("");
+  });
+
+  test("empty and null headers", () => {
+    expect(cookieValue("", CSRF_COOKIE)).toBe("");
+    expect(cookieValue(null, CSRF_COOKIE)).toBe("");
+  });
+
+  test("value may contain =", () => {
+    expect(cookieValue("s=a=b=c", "s")).toBe("a=b=c");
+  });
+});
+
+describe("withCsrf", () => {
+  test("passes the element through when no react is registered", () => {
+    const element = { marker: true };
+    expect(withCsrf(element as never, "token")).toBe(element as never);
+  });
+});
+
+describe("api client set-cookie forwarding", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  test("collects every set-cookie header, including on errors", async () => {
+    const headers = new Headers();
+    headers.append("Set-Cookie", "borgo_session=abc; Path=/");
+    headers.append("Set-Cookie", "other=1");
+    globalThis.fetch = (async () =>
+      new Response("{}", { headers })) as typeof fetch;
+
+    const seen: string[] = [];
+    const api = makeApiClient("http://api:1", {}, (cookies) => seen.push(...cookies));
+    await api("GET /api/tasks");
+    expect(seen).toEqual(["borgo_session=abc; Path=/", "other=1"]);
+
+    seen.length = 0;
+    globalThis.fetch = (async () =>
+      new Response("no", { status: 401, headers })) as typeof fetch;
+    await expect(api("GET /api/tasks")).rejects.toThrow("responded 401");
+    expect(seen.length).toBe(2);
+  });
+});

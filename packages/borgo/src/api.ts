@@ -49,7 +49,13 @@ export class ApiError extends Error {
   }
 }
 
-export function makeApiClient(base: string, defaults: Record<string, string> = {}): ApiClient {
+// onSetCookie receives every Set-Cookie header an api response carries, so
+// the front server can forward go's cookies (login, logout) to the browser
+export function makeApiClient(
+  base: string,
+  defaults: Record<string, string> = {},
+  onSetCookie?: (cookies: string[]) => void,
+): ApiClient {
   return (async (route: string, opts: ApiOptions<string> = {}) => {
     const space = route.indexOf(" ");
     const method = route.slice(0, space);
@@ -85,6 +91,8 @@ export function makeApiClient(base: string, defaults: Record<string, string> = {
         await new Promise((r) => setTimeout(r, 250));
       }
     }
+    const setCookies = res.headers.getSetCookie?.() ?? [];
+    if (setCookies.length) onSetCookie?.(setCookies);
     if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ""), route);
     if (res.status === 204) return undefined;
     return res.json();

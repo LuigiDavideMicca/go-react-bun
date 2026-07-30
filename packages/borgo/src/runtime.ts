@@ -2,7 +2,12 @@
 // always comes from the app's own node_modules
 import type { createElement as CreateElement } from "react";
 import type { hydrateRoot as HydrateRoot, Root } from "react-dom/client";
+import { CSRF_COOKIE, cookieValue, withCsrf } from "./index";
 import { matchRoute, resolveHead, type Head, type LayoutModule, type PageModule } from "./router";
+
+// the double-submit cookie was set by the response that carried this page,
+// so the token hydrates to the same value the server rendered
+const csrfToken = () => cookieValue(document.cookie, CSRF_COOKIE);
 
 declare global {
   interface Window {
@@ -69,7 +74,7 @@ export function mountIslands({ createElement, hydrateRoot, islands }: MountIslan
     const component = islands[name];
     if (!component) continue;
     const props = JSON.parse(el.getAttribute("data-borgo-props") || "{}");
-    const hydrate = () => hydrateRoot(el, createElement(component, props));
+    const hydrate = () => hydrateRoot(el, withCsrf(createElement(component, props), csrfToken()));
     if (el.getAttribute("data-borgo-client") === "visible") {
       const observer = new IntersectionObserver((entries) => {
         if (entries.some((e) => e.isIntersecting)) {
@@ -101,7 +106,7 @@ function compose(
   for (let i = route.layouts.length - 1; i >= 0; i--) {
     element = createElement(route.layouts[i].default, null, element);
   }
-  return element;
+  return withCsrf(element, csrfToken());
 }
 
 export function mount({ createElement, hydrateRoot, routes, notFound }: MountOptions) {
