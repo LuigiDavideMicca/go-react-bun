@@ -1,5 +1,94 @@
 import { existsSync } from "node:fs";
 import { c, g } from "./colors";
+import type { Head } from "./router";
+
+// attribute values are always double-quoted, so this is the complete set
+export const escapeHtml = (s: string) =>
+  s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+
+// a head export may be computed from loader data, so attribute names are as
+// untrusted as their values: anything but a plain name - and never an event
+// handler - would break out of the tag it is written into
+const safeAttrName = (name: string) => /^[a-z][a-z0-9:._-]*$/i.test(name) && !/^on/i.test(name);
+
+export function headHtml(head: Head): string {
+  let html = "";
+  if (head.title) html += `<title>${escapeHtml(String(head.title))}</title>`;
+  for (const meta of head.meta ?? []) {
+    let attrs = "";
+    for (const [name, value] of Object.entries(meta)) {
+      if (safeAttrName(name)) attrs += ` ${name}="${escapeHtml(String(value))}"`;
+    }
+    html += `<meta${attrs} data-borgo-head>`;
+  }
+  return html;
+}
+
+// security headers, applied to every response borgo builds itself (the /api
+// proxy hands go's own headers through untouched). the defaults are:
+//   X-Content-Type-Options: nosniff
+//   Referrer-Policy: strict-origin-when-cross-origin
+//   X-Frame-Options: DENY
+//   Content-Security-Policy: default-src 'self'; base-uri 'none';
+//     object-src 'none'; frame-ancestors 'none'; form-action 'self';
+//     img-src 'self' data: blob:; font-src 'self' data:;
+//     style-src 'self' 'unsafe-inline'; connect-src 'self';
+//     script-src 'self' 'nonce-<per request>'
+// the csp rides on documents and on svg (which runs its own scripts when
+// navigated to directly), not on every asset. the ssr inline script carrying
+// window.__PROPS__ is allowed by that per-request nonce, never by
+// 'unsafe-inline'; a hydrate=false page has no inline script and is served
+// the same policy without one. style-src keeps 'unsafe-inline' because react
+// renders style={{}} as a style attribute, which no nonce can cover, and
+// connect-src 'self' covers same-origin ws:// per csp level 3. dev swaps the
+// nonce for 'unsafe-inline': the error overlay and the zero-js reload client
+// are inline scripts built outside the render.
+// BORGO_SECURITY_HEADERS=0 drops all of it; BORGO_CSP=0 drops the csp alone
+// and BORGO_CSP=<policy> replaces it, with {nonce} substituted per request.
+export const CSP_DEFAULT =
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; " +
+  "form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:; " +
+  "style-src 'self' 'unsafe-inline'; connect-src 'self'; script-src 'self'";
+
+const STATIC_SECURITY = [
+  ["X-Content-Type-Options", "nosniff"],
+  ["Referrer-Policy", "strict-origin-when-cross-origin"],
+  ["X-Frame-Options", "DENY"],
+] as const;
+
+export type Security = {
+  needsNonce: boolean;
+  cspFor: (nonce: string) => string;
+  apply: (res: Response) => Response;
+};
+
+export function createSecurity(
+  dev: boolean,
+  env: { headers?: string; csp?: string } = {},
+): Security | null {
+  if (env.headers === "0") return null;
+  const enabled = env.csp !== "0";
+  const template =
+    env.csp && enabled ? env.csp : CSP_DEFAULT + (dev ? " 'unsafe-inline'" : "{nonce}");
+  const withoutNonce = template.replaceAll("{nonce}", "");
+  return {
+    needsNonce: enabled && template.includes("{nonce}"),
+    cspFor: (nonce) => template.replaceAll("{nonce}", ` 'nonce-${nonce}'`),
+    apply(res) {
+      const headers = res.headers;
+      for (const [name, value] of STATIC_SECURITY) {
+        if (!headers.has(name)) headers.set(name, value);
+      }
+      if (enabled && !headers.has("Content-Security-Policy")) {
+        const type = headers.get("Content-Type") ?? "";
+        if (type.startsWith("text/html") || type.startsWith("image/svg+xml")) {
+          headers.set("Content-Security-Policy", withoutNonce);
+        }
+      }
+      return res;
+    },
+  };
+}
 
 export const goBinName = () => "api" + (process.platform === "win32" ? ".exe" : "");
 

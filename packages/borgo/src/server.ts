@@ -10,8 +10,8 @@ import { gzipStream, isCompressiblePath, isHashedAsset, jsonResponse, pickEncodi
 import { CSRF_COOKIE, CSRF_FIELD, cookieValue, registerCsrf, registerIslands, withCsrf } from "./index";
 import { createMetrics } from "./metrics";
 import { overlayHtml } from "./overlay";
-import { matchRoute, resolveHead, safeDecode, type Head, type Route } from "./router";
-import { shouldBufferBody } from "./util";
+import { matchRoute, resolveHead, safeDecode, type Route } from "./router";
+import { createSecurity, headHtml, shouldBufferBody } from "./util";
 
 const isConnRefused = (err: unknown) => {
   const e = err as { code?: string; message?: string };
@@ -31,21 +31,6 @@ const React = appRequire("react") as typeof import("react");
 const { renderToReadableStream } = appRequire("react-dom/server") as typeof import("react-dom/server");
 
 const encoder = new TextEncoder();
-
-const escapeHtml = (s: string) =>
-  s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-
-function headHtml(head: Head): string {
-  let html = "";
-  if (head.title) html += `<title>${escapeHtml(head.title)}</title>`;
-  for (const meta of head.meta ?? []) {
-    const attrs = Object.entries(meta)
-      .map(([k, v]) => ` ${k}="${escapeHtml(v)}"`)
-      .join("");
-    html += `<meta${attrs} data-borgo-head>`;
-  }
-  return html;
-}
 
 function composeElement(route: Route, props: Record<string, unknown>) {
   if (typeof route.module.default !== "function") {
@@ -195,6 +180,13 @@ export async function serve({ dev = false } = {}) {
     return new Response(json.body, { status: json.status, headers });
   };
 
+  // the exact defaults, and the env switches, are documented on createSecurity
+  const security = createSecurity(dev, {
+    headers: process.env.BORGO_SECURITY_HEADERS,
+    csp: process.env.BORGO_CSP,
+  });
+  const secure = (res: Response) => (security ? security.apply(res) : res);
+
   // csrf: a double-submit token, issued as a cookie on rendered pages and
   // required from form actions of requests carrying a session - a cross-site
   // post cannot read the cookie to echo it in the form. on by default in
@@ -255,13 +247,17 @@ export async function serve({ dev = false } = {}) {
     }
 
     let end: string;
+    // only the props script is inline, so only a hydrated page mints a nonce
+    let nonce = "";
     if (route.module.hydrate === false) {
       // the page opted out of hydration: ship no props and no client script.
       // pages with islands get the islands entry, which hydrates only those.
       end = route.islands ? zeroJsEnd.islands : zeroJsEnd.plain;
     } else {
+      if (security?.needsNonce) nonce = crypto.randomUUID().replaceAll("-", "");
       const propsJson = JSON.stringify(props).replaceAll("<", "\\u003c");
-      end = `${shellEndProps[0]}<script>window.__PROPS__=${propsJson}${stateTail}${shellEndProps[1]}`;
+      const tag = nonce ? `<script nonce="${nonce}">` : "<script>";
+      end = `${shellEndProps[0]}${tag}window.__PROPS__=${propsJson}${stateTail}${shellEndProps[1]}`;
     }
 
     const body = new ReadableStream({
@@ -287,6 +283,7 @@ export async function serve({ dev = false } = {}) {
       "Cache-Control": "private, no-store",
       Vary: "Accept-Encoding",
     });
+    if (nonce) headers.set("Content-Security-Policy", security!.cspFor(nonce));
     for (const c of apiCookies) headers.append("Set-Cookie", c);
     // gzip only: brotli is too slow for dynamic responses. no size threshold
     // here - a rendered document is virtually always past it, and the length
@@ -679,11 +676,13 @@ export async function serve({ dev = false } = {}) {
         }
         return new Response("not found", { status: 404 });
       }
-      if (url.pathname === "/healthz") return healthz();
+      if (url.pathname === "/healthz") return secure(await healthz());
       if (metrics && url.pathname === "/metrics") {
-        return new Response(metrics.render(), {
-          headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
-        });
+        return secure(
+          new Response(metrics.render(), {
+            headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
+          }),
+        );
       }
 
       const label: Label = { route: "*" };
@@ -719,7 +718,7 @@ export async function serve({ dev = false } = {}) {
         metrics.observe(label.route, response.status, (performance.now() - t0) / 1000);
       }
       if (dev) logRequest(req, url.pathname, response.status, performance.now() - t0);
-      return response;
+      return url.pathname.startsWith("/api/") ? response : secure(response);
     },
   }));
 

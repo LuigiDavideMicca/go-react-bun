@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { PROXY_RETRY_MAX_BODY, shouldBufferBody } from "../src/util";
+import {
+  createSecurity,
+  escapeHtml,
+  headHtml,
+  PROXY_RETRY_MAX_BODY,
+  shouldBufferBody,
+} from "../src/util";
 
 describe("shouldBufferBody", () => {
   test("buffers small bodies of known size", () => {
@@ -22,5 +28,119 @@ describe("shouldBufferBody", () => {
   test("bodyless methods never buffer", () => {
     expect(shouldBufferBody("GET", "100")).toBe(false);
     expect(shouldBufferBody("HEAD", "100")).toBe(false);
+  });
+});
+
+describe("headHtml", () => {
+  test("escapes the title, including a closing tag", () => {
+    expect(headHtml({ title: "</title><script>alert(1)</script>" })).toBe(
+      "<title>&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;</title>",
+    );
+  });
+
+  test("escapes meta values so a quote cannot open an attribute", () => {
+    expect(headHtml({ meta: [{ name: "d", content: '" onload="alert(1)' }] })).toBe(
+      '<meta name="d" content="&quot; onload=&quot;alert(1)" data-borgo-head>',
+    );
+  });
+
+  test("drops attribute names that are not plain names", () => {
+    const html = headHtml({
+      meta: [{ 'x" onload="alert(1)': "y", "a b": "c", name: "ok" }],
+    });
+    expect(html).toBe('<meta name="ok" data-borgo-head>');
+  });
+
+  test("drops event handler attributes even when well formed", () => {
+    expect(headHtml({ meta: [{ onload: "alert(1)", ONERROR: "x", content: "keep" }] })).toBe(
+      '<meta content="keep" data-borgo-head>',
+    );
+  });
+
+  test("non-string values are stringified, not passed through", () => {
+    const meta = [{ content: 5 as unknown as string }];
+    expect(headHtml({ meta })).toBe('<meta content="5" data-borgo-head>');
+  });
+
+  test("an empty head renders nothing", () => {
+    expect(headHtml({})).toBe("");
+    expect(escapeHtml("a&b<c>d\"e")).toBe("a&amp;b&lt;c&gt;d&quot;e");
+  });
+});
+
+describe("createSecurity", () => {
+  const html = (init?: ResponseInit) =>
+    new Response("<p>x</p>", { headers: { "Content-Type": "text/html; charset=utf-8" }, ...init });
+
+  test("production documents get a nonce-carrying csp", () => {
+    const security = createSecurity(false)!;
+    expect(security.needsNonce).toBe(true);
+    const csp = security.cspFor("abc123");
+    expect(csp).toContain("script-src 'self' 'nonce-abc123'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("base-uri 'none'");
+    expect(csp).not.toContain("{nonce}");
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+  });
+
+  test("dev allows inline scripts instead of minting nonces", () => {
+    const security = createSecurity(true)!;
+    expect(security.needsNonce).toBe(false);
+    const res = security.apply(html());
+    expect(res.headers.get("Content-Security-Policy")).toContain(
+      "script-src 'self' 'unsafe-inline'",
+    );
+  });
+
+  test("static headers land on every response, csp only on documents and svg", () => {
+    const security = createSecurity(false)!;
+    const doc = security.apply(html());
+    expect(doc.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(doc.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
+    expect(doc.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(doc.headers.get("Content-Security-Policy")).toContain("script-src 'self'");
+
+    const svg = security.apply(
+      new Response("<svg/>", { headers: { "Content-Type": "image/svg+xml" } }),
+    );
+    expect(svg.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
+
+    const asset = security.apply(
+      new Response("body{}", { headers: { "Content-Type": "text/css" } }),
+    );
+    expect(asset.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(asset.headers.get("Content-Security-Policy")).toBeNull();
+  });
+
+  test("a csp already set by the render survives", () => {
+    const security = createSecurity(false)!;
+    const res = security.apply(
+      new Response("<p>x</p>", {
+        headers: { "Content-Type": "text/html", "Content-Security-Policy": "mine" },
+      }),
+    );
+    expect(res.headers.get("Content-Security-Policy")).toBe("mine");
+  });
+
+  test("BORGO_SECURITY_HEADERS=0 disables everything", () => {
+    expect(createSecurity(false, { headers: "0" })).toBeNull();
+  });
+
+  test("BORGO_CSP=0 keeps the static headers and drops the policy", () => {
+    const security = createSecurity(false, { csp: "0" })!;
+    expect(security.needsNonce).toBe(false);
+    const res = security.apply(html());
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+  });
+
+  test("a custom policy replaces the default and can take the nonce", () => {
+    const security = createSecurity(false, { csp: "default-src 'self'; script-src 'self'{nonce}" })!;
+    expect(security.needsNonce).toBe(true);
+    expect(security.cspFor("n1")).toBe("default-src 'self'; script-src 'self' 'nonce-n1'");
+    const plain = createSecurity(false, { csp: "default-src *" })!;
+    expect(plain.needsNonce).toBe(false);
+    expect(plain.apply(html()).headers.get("Content-Security-Policy")).toBe("default-src *");
   });
 });
