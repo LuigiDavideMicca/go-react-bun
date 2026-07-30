@@ -27,6 +27,14 @@ describe("makeApiClient", () => {
     expect(calls[0].init.method).toBe("GET");
   });
 
+  test("a route key without a method fails loudly, not with a mangled url", async () => {
+    stubFetch(() => Response.json({}));
+    const api = makeApiClient("http://api:1");
+    const untyped = api as unknown as (route: string) => Promise<unknown>;
+    await expect(untyped("/api/tasks")).rejects.toThrow('expected "METHOD /path"');
+    expect(calls.length).toBe(0);
+  });
+
   test("missing param throws before fetching", async () => {
     stubFetch(() => Response.json({}));
     const api = makeApiClient("http://api:1");

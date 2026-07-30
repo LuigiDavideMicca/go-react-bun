@@ -90,6 +90,8 @@ export function makeApiClient(
 ): ApiClient {
   return (async (route: string, opts: ApiOptions<string> = {}) => {
     const space = route.indexOf(" ");
+    // without this, slice(0, -1) silently mangles the key into nonsense
+    if (space === -1) throw new Error(`api route "${route}": expected "METHOD /path"`);
     const method = route.slice(0, space);
     const path = route.slice(space + 1).replace(/\{(\w+)\}/g, (_, name) => {
       const value = opts.params?.[name];
