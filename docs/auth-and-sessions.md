@@ -61,8 +61,8 @@ func init() {
 }
 ```
 
-- `LoginHandler` decodes `{username, password}`, verifies against the stored hash, starts the session and responds with the principal as JSON. Wrong password and unknown user are both a 401 `{"error": "invalid credentials"}` — and a failed lookup still runs a hash verification, so usernames cannot be enumerated by timing.
-- `RegisterHandler` hashes the password, calls `Register`, starts the session, responds 201. `borgo.ErrUserExists` becomes a 409.
+- `LoginHandler` decodes `{username, password}` (`borgo.Credentials`), verifies against the stored hash, starts the session and responds with the principal as JSON. Empty fields are a 400 before any lookup; wrong password and unknown user are both a 401 `{"error": "invalid credentials"}` — and a failed lookup still runs a hash verification, so usernames cannot be enumerated by timing.
+- `RegisterHandler` hashes the password, calls `Register`, starts the session, responds 201. `borgo.ErrUserExists` becomes a 409; with no `Register` configured the route answers 404.
 - `LogoutHandler` clears the cookie, responds 204.
 
 Defaults: 7-day sessions (`MaxAge`), `DefaultHasher` (`Hasher`), the user itself as principal (`Principal`). All three are fields, not policy.
@@ -94,6 +94,8 @@ func admin(h http.HandlerFunc) http.HandlerFunc {
 **This is the pattern** for protected pages. A loader may return a `Response` to short-circuit rendering; `redirect()` makes it a guard, honored on full loads and client navigations alike:
 
 ```tsx
+import { ApiError, redirect, type LoaderContext } from "borgo-framework";
+
 export async function loader({ api }: LoaderContext) {
   try {
     return { me: await api("GET /api/me") };
@@ -108,9 +110,11 @@ The api call carries the browser's cookies, Go's `Authed` (or your own check) an
 
 ## Login and logout as form actions
 
-Actions work without client JavaScript, and `Set-Cookie` forwarding makes them the natural login flow:
+[Form actions](pages-and-routing.md#form-actions) work without client JavaScript, and `Set-Cookie` forwarding makes them the natural login flow:
 
 ```tsx
+import { ApiError, redirect, type ActionContext } from "borgo-framework";
+
 export async function action({ request, api }: ActionContext) {
   const form = await request.formData();
   try {

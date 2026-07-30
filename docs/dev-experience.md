@@ -7,7 +7,7 @@ The dev loop: fast refresh and its contract, the error overlay, `borgo doctor`, 
 `borgo dev` keeps the browser hot over a WebSocket channel (`/__borgo/dev`):
 
 - **Component, page and hook edits** apply through [react-refresh](https://www.npmjs.com/package/react-refresh) with the full babel transform (dev builds only) — the current route's new chunk is imported, loader props are refetched, and component state survives a body edit. Changing a component's *hooks* (add, remove, reorder, or a signature change inside a custom hook) remounts just that component, Next-style; the rest of the page keeps its state. Custom hook body edits hot-apply with dependent state intact.
-- **CSS edits** recompile and swap the stylesheet in place, no reload, no state loss.
+- **Style edits** recompile and swap the stylesheet in place, no reload, no state loss. The pipeline compiles the single root `style.scss` (plain CSS is valid SCSS — but the file watched and built is that one).
 - **Everything else falls back to a full reload**: layouts and error pages (they live in the entry chunk), `index.html`, and any Go change — the API binary is rebuilt while the old one keeps serving, swapped in, and the browser reloads only once the new API actually answers.
 - **A broken build doesn't take the port down**: the front server keeps serving the error overlay and the dev channel, and the page reloads itself when the next good save lands.
 

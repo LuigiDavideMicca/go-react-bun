@@ -1,10 +1,12 @@
 # Deploying borgo
 
+Everything between `borgo build` and traffic: container and bare-metal layouts, reverse proxy configs, [static export](#static-export), caching, health checks and the full environment reference. You need this page once, when the app first ships — and the `borgo deploy init` templates write most of it for you.
+
 A borgo app in production is two processes: the Go API binary and the Bun front server. `borgo start` runs both and exits if either dies, so one supervisor — Docker, systemd, compose — supervises the pair.
 
 ## Docker, one container (recommended)
 
-Every scaffolded app ships a multi-stage `Dockerfile` and a `docker-compose.yml` (missing one? `borgo deploy init compose` writes it):
+Every scaffolded app ships a multi-stage `Dockerfile` and a `docker-compose.yml` (missing one? `borgo deploy init compose` writes the same shape, templated with your app's port):
 
 ```bash
 docker compose up -d
@@ -37,7 +39,7 @@ services:
 
   front:
     build: .
-    command: ["bun", "x", "borgo", "start", "--front-only"]
+    command: ["bun", "run", "start", "--front-only"]
     environment:
       API_URL: http://api:3501
     ports:
@@ -54,7 +56,7 @@ volumes:
 
 ## Reverse proxy
 
-Only the front server needs to be reachable — it proxies `/api/*` to Go and speaks WebSockets natively. Compression is built-in — static assets are precompressed to `.gz`/`.br` at build time, dynamic responses are gzipped on the fly — so the proxy should not compress again (no `encode` directive in Caddy, `gzip off` is nginx's default). `borgo deploy init caddy` (or `nginx`) writes these configs into your project, templated with your app's name and port. Caddy gives you TLS in three lines:
+Only the front server needs to be reachable — it proxies `/api/*` to Go and speaks WebSockets natively. Compression is built-in — static assets are precompressed to `.gz`/`.br` at build time, dynamic responses are gzipped on the fly — so the proxy should not compress again (no `encode` directive in Caddy, `gzip off` is nginx's default). `borgo deploy init caddy` (or `nginx`) writes these configs into your project — `Caddyfile` and `site.conf` respectively — templated with your app's name and port; an existing file is never overwritten unless you pass `--force`. Caddy gives you TLS in three lines:
 
 ```caddy
 example.com {
@@ -85,9 +87,11 @@ Behind https, set `SESSION_SECURE=1` so session cookies carry the `Secure` attri
 
 ## Static export
 
-`borgo export` prerenders every statically exportable page into `dist/site/`: plain HTML next to the built assets, precompressed siblings included. Pages without a loader export as-is; a page with a loader opts in with `export const prerender = true` (its loader runs once, at export time, against a temporary api process). Dynamic routes list their param sets:
+`borgo export` prerenders every statically exportable page into `dist/site/`: plain HTML next to the built assets, precompressed siblings included. Pages without a loader export as-is; a page with a loader opts in with `export const prerender = true` — its loader runs once, at export time, against a temporary api process, so exporting needs the Go toolchain just like `borgo build` (borgogen runs, a scratch api binary is compiled and booted on an ephemeral port). Dynamic routes list their param sets:
 
 ```tsx
+import type { PrerenderContext } from "borgo-framework";
+
 export const prerender = true;
 export const prerenderPaths = async ({ api }: PrerenderContext) =>
   (await api("GET /api/tasks")).tasks.map((task) => ({ id: task.ID }));
@@ -106,7 +110,7 @@ server {
 }
 ```
 
-An exported site is pages only: actions, SSE and WebSocket topics need the running borgo servers (`borgo start`).
+An exported site is pages only: [form actions](pages-and-routing.md#form-actions), [SSE and WebSocket topics](realtime.md) need the running borgo servers (`borgo start`). Which pages ship JavaScript is the page's own `hydrate` choice — see [hydration modes](client-navigation.md#partial-hydration).
 
 ## Caching
 
@@ -114,17 +118,19 @@ An exported site is pages only: actions, SSE and WebSocket topics need the runni
 
 ## systemd, no Docker
 
-Build on the server (`bun install && bun run build`), then drop in a unit — `borgo deploy init systemd` generates this file as `borgo.service` with your app's name and ports:
+Build on the server (`bun install && bun run build`), then drop in a unit — `borgo deploy init systemd` generates exactly this file as `borgo.service`, with your app's name and ports filled in:
 
 ```ini
 [Unit]
-Description=my borgo app
+Description=my-app (borgo app)
 After=network.target
 
 [Service]
 WorkingDirectory=/srv/my-app
 ExecStart=/usr/local/bin/bun run start
 Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=API_PORT=3501
 Environment=SESSION_SECRET=change-me
 Restart=on-failure
 User=www-data
@@ -137,7 +143,15 @@ WantedBy=multi-user.target
 
 ## Health and metrics
 
-Point the load balancer or uptime monitor at the front server's `/healthz` — it returns `{status, uptime, api}`, probing the Go server's own `/healthz` (mounted by `borgo.Serve`) with a short timeout. Set `METRICS=1` and the front server also serves `/metrics` in Prometheus text format: request counts and a duration histogram by route pattern and status, plus process uptime.
+Point the uptime monitor at the front server's `/healthz` — it returns `{status, uptime, api}`, probing the Go server's own `/healthz` (mounted by `borgo.Serve`) with a short timeout. The answer is always HTTP 200: `status` is `"ok"` or `"degraded"` and `api` is `"reachable"` or `"down"`, so a monitor that only checks the status code will never fire — match on the body.
+
+Set `METRICS=1` and the front server also serves `/metrics` in Prometheus text format, hand-rolled, zero dependencies:
+
+- `borgo_http_requests_total{route, status}` — counter by route pattern and status code
+- `borgo_http_request_duration_seconds{route, le}` — histogram, buckets `0.005 0.025 0.1 0.5 1 5`
+- `borgo_process_uptime_seconds` — gauge
+
+Route labels are the file-convention patterns (`/tasks/[id]`, not each concrete URL); after 100 distinct routes new ones fold into `route="other"`, so cardinality stays bounded.
 
 ## Environment reference
 
@@ -147,7 +161,7 @@ Point the load balancer or uptime monitor at the front server's `/healthz` — i
 | `API_PORT` | `3501` | go api port |
 | `API_URL` | `http://localhost:$API_PORT` | where the front server reaches the api (split deployments) |
 | `FRONT_URL` | `http://localhost:$PORT` | where `borgo.Push` reaches the front server |
-| `BORGO_PUSH_KEY` | unset | shared secret for `borgo.Push` across hosts (loopback needs none) |
+| `BORGO_PUSH_KEY` | unset | shared secret for `borgo.Push` across hosts — once set it *replaces* the loopback check, so set it on both halves or neither |
 | `SESSION_SECRET` | unset | HMAC key for signed-cookie sessions (required to use them) |
 | `SESSION_SECURE` | unset | `1` adds `Secure` to the session and csrf cookies |
 | `BORGO_CSRF` | unset | `0` disables csrf checks on form actions, `1` forces them in dev |
@@ -157,3 +171,5 @@ Point the load balancer or uptime monitor at the front server's `/healthz` — i
 | `BORGO_READ_TIMEOUT` | `0` (off) | go server: whole-request read deadline — leave off unless you have no streams |
 | `BORGO_WRITE_TIMEOUT` | `0` (off) | go server: whole-response write deadline — `borgo.SSE` streams exempt themselves |
 | `NO_COLOR` | unset | disable ANSI colors in logs |
+
+The timeout values are Go duration strings (`5s`, `2m`; `0` disables one) — a malformed value fails loudly at boot instead of silently defaulting. `DB_PATH` in the samples above is the app's own variable, not the framework's. Variables prefixed `BORGO_` but absent here (`BORGO_RELOAD`, `BORGO_CHANGED`) are internal, set by the CLI for its child processes.

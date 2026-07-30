@@ -4,7 +4,27 @@ Live updates in both directions: server-sent events for one-way feeds, WebSocket
 
 ## Server-sent events
 
-`borgo.SSE(w, r)` turns any handler into an event stream; `borgo.NewSSEHub()` adds broadcast — `hub.Publish(event, data)` from anywhere, `hub.ServeHTTP` as the route handler. The front server proxies streams without buffering, so an `EventSource` in the browser just works. All stdlib. See the tasks example: create a task in one tab, watch it appear in another.
+`borgo.SSE(w, r)` turns any handler into an event stream — it returns the stream, with `Send(event, data)` (data JSON-encoded), `Ping()` to keep idle proxies from closing it, and `Done()` for the client's disconnect:
+
+```go
+//borgo:route GET /api/ticker
+func Ticker(w http.ResponseWriter, r *http.Request) {
+    stream, err := borgo.SSE(w, r)
+    if err != nil {
+        return
+    }
+    for {
+        select {
+        case tick := <-ticks:
+            stream.Send("tick", tick)
+        case <-stream.Done():
+            return
+        }
+    }
+}
+```
+
+`borgo.NewSSEHub()` adds broadcast — `hub.Publish(event, data)` from anywhere, `hub.ServeHTTP` as the route handler. The front server proxies streams without buffering, so an `EventSource` in the browser just works. All stdlib. See the tasks example: create a task in one tab, watch it appear in another.
 
 ## WebSocket topics
 
@@ -18,7 +38,7 @@ channel.publish("message", "hello");   // browser -> everyone on the topic
 channel.close();
 ```
 
-The built-in `__count` event reports the topic's subscriber count (presence for free), and the connection reconnects itself. On the Go side, `borgo.Push(topic, event, data)` publishes into the same topics — it POSTs to the front server's internal endpoint, accepted from loopback (set `FRONT_URL` and a shared `BORGO_PUSH_KEY` when the two halves are on different hosts):
+The built-in `__count` event reports the topic's subscriber count (presence for free), and the connection reconnects itself. On the Go side, `borgo.Push(topic, event, data)` publishes into the same topics — it POSTs to the front server's internal endpoint, accepted from loopback. When the two halves are on different hosts, set `FRONT_URL` and the same `BORGO_PUSH_KEY` on both: once a key is set it *replaces* the loopback check, so a key on one side only means every push is refused.
 
 ```go
 borgo.PushT("live", "task-created", task.Title)
@@ -36,7 +56,11 @@ declare module "borgo-framework" {
 }
 ```
 
-Topics with no declared events keep the untyped `(event: string, data: unknown)` callback, and `borgo.Push` stays available for dynamic topic or event names — those simply stay out of the map.
+Topics with no declared events keep the untyped `(event: string, data: unknown)` callback, and `borgo.Push` stays available for dynamic topic or event names — those simply stay out of the map. One naming rule: a topic passed to `PushT` cannot contain `/` — it would make the `"topic/event"` key ambiguous, and borgogen rejects it at generation time.
+
+### Typing nuances
+
+`Channel.publish` is declared with method syntax on purpose: TypeScript checks method parameters bivariantly, so a typed `Channel<"live">` stays assignable to a plain `Channel` — you can keep a `Channel[]` of mixed topics for cleanup, or pass a typed channel to a helper that only ever calls `close()`. Strict property syntax would reject those assignments; the loosened direction (publishing through the widened reference) is the same escape hatch `borgo.Push` already provides, so nothing new leaks. Wrong payloads through the *typed* reference still fail `tsc`, and CI proves it with deliberate wrong-payload files.
 
 Go itself stays stdlib-only — the WebSocket termination lives where Bun already provides it natively. Choose SSE for one-way server→browser feeds; choose WebSocket topics for anything browsers also write to. The `/live` page in `examples/tasks` demos both directions: two-tab chat plus Go pushes.
 

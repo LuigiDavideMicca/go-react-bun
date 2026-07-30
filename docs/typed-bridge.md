@@ -1,6 +1,6 @@
 # The typed bridge
 
-Go API routes, and the static analysis that types them end to end for TypeScript. This page covers writing API routes, `borgogen`, typed request bodies, type overrides, and the honest limits of the approach.
+Go API routes, and the static analysis that types them end to end for TypeScript. This page covers writing API routes, `borgogen`, typed request bodies, type overrides, and the honest limits of the approach. The typed client it produces is the `api` argument [loaders and actions](pages-and-routing.md#pages-and-loaders) receive; the same analysis also types [WebSocket events](realtime.md#typed-events).
 
 ## API routes
 
@@ -17,7 +17,7 @@ Prefer explicitness? `init()` + `borgo.Handle("GET /api/tasks", listTasks)` stil
 
 ## borgogen
 
-`borgogen` (run automatically by `borgo dev` on every `api/*.go` change, and by `borgo build`) statically analyzes the `api` package with `go/ast` + `go/types` — no reflection, nothing at runtime — and generates:
+`borgogen` (run automatically by `borgo dev` on every `api/*.go` change, and by `borgo build` and `borgo export`) statically analyzes the `api` package with `go/ast` + `go/types` — no reflection, nothing at runtime — and generates:
 
 - `.borgo/api-types.d.ts` — route pattern → response and request types, plus a TypeScript interface for every Go struct involved (import them in your pages). A route's response type is the union of `T` across the `borgo.JSON[T]` and `borgo.WriteJSON` calls reachable from its handler — calls into helper functions in the `api` package are followed.
 - `api/borgo.gen.go` — the mounting for `//borgo:route` handlers.

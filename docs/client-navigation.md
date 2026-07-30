@@ -20,7 +20,7 @@ Every history entry gets a key; scroll positions are saved per entry (in `sessio
 
 A page may export `hydrate` (as a literal, so the build can read it without executing the page):
 
-- `export const hydrate = false` — the page is server-rendered HTML only: no props script, no client bundle, no route chunk built. Right for pure content pages; classic form actions still work, and links on it are normal full navigations.
+- `export const hydrate = false` — the page is server-rendered HTML only: no props script, no client bundle, no route chunk built. Right for pure content pages; classic form actions still work, and links on it are normal full navigations. These pages also [export statically](deploy.md#static-export) with zero JavaScript.
 - `export const hydrate = "visible"` — the entry loads, but the page's chunk is fetched and hydrated only when the element marked `data-borgo-visible` (or the page root, if unmarked) scrolls into view. Right for pages whose interactive part sits below a long read.
 
 The default is eager hydration. Client-side navigation *to* a `"visible"` page hydrates it immediately — the deferral applies to the initial load, where the HTML is already on screen.
@@ -34,8 +34,15 @@ import { Island } from "borgo-framework";
 
 export const hydrate = false; // the page ships no page bundle at all
 
-<Island name="Counter" props={{ start: 5 }} />
-<Island name="Counter" props={{ start: 0 }} client="visible" />
+export default function Guide() {
+  return (
+    <article>
+      {/* ...static content... */}
+      <Island name="Counter" props={{ start: 5 }} />
+      <Island name="Counter" props={{ start: 0 }} client="visible" />
+    </article>
+  );
+}
 ```
 
 On a `hydrate = false` page each island hydrates independently — through a small dedicated entry that touches only the island markers — so a content page can carry a search box without hydrating anything else. `client="visible"` waits until the island scrolls into view. On normally hydrated pages `<Island>` renders inline as part of the page tree.

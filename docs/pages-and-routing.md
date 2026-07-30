@@ -45,10 +45,17 @@ Layouts have no loaders of their own; data belongs to pages.
 A page may export `head`: either a `Head` object or a function of the page's props.
 
 ```tsx
+import type { Head } from "borgo-framework";
+import type { Task } from "../.borgo/api-types";
+
 export const head = { title: "Tasks · borgo", meta: [{ name: "description", content: "..." }] };
-// or
-export const head = (props): Head => ({ title: `${props.task.title} · borgo` });
+// or, as a function of the page's props (typed wide on purpose - see below)
+export const head = (props: Record<string, unknown>): Head => ({
+  title: `${(props.task as Task).title} · borgo`,
+});
 ```
+
+The function form receives `Record<string, unknown>`, not your page's props type — the runtime calls every page's `head` through one signature, so a narrower parameter would not be assignable under `strictFunctionTypes`. Cast inside, as above.
 
 During SSR the title replaces the shell's `<title>` and metas are injected into `<head>`; after hydration the runtime owns both, updating them on every client-side navigation (and restoring the shell title on pages without a `head`).
 
@@ -63,10 +70,11 @@ A page may export an `action`; the front server runs it for `POST` requests to t
 ```tsx
 import { redirect, type ActionContext } from "borgo-framework";
 
-export async function action({ request, params, api }: ActionContext) {
+export async function action({ request, api }: ActionContext) {
   const form = await request.formData();
-  if (!String(form.get("title") ?? "").trim()) return { error: "give the task a title" };
-  await api("POST /api/tasks", { body: { title: form.get("title") } });
+  const title = String(form.get("title") ?? "").trim();
+  if (!title) return { error: "give the task a title" };
+  await api("POST /api/tasks", { body: { title, body: String(form.get("body") ?? "") } });
   return redirect("/");
 }
 ```

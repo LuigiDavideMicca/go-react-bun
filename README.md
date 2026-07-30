@@ -73,7 +73,8 @@ A page may export an `action`; the front server runs it for `POST` requests to t
 ```tsx
 export async function action({ request, api }: ActionContext) {
   const form = await request.formData();
-  await api("POST /api/tasks", { body: { title: form.get("title") } });
+  const title = String(form.get("title") ?? "").trim();
+  await api("POST /api/tasks", { body: { title, body: String(form.get("body") ?? "") } });
   return redirect("/");
 }
 ```
@@ -113,7 +114,7 @@ func init() {
 
 ### Dev experience
 
-`borgo dev` keeps the browser hot: component and hook edits apply through react-refresh with state intact, CSS swaps in place, Go changes rebuild the binary and reload once the new API answers, and a broken build keeps serving the error overlay instead of taking the port down. When something is off, `borgo doctor` diagnoses the environment — bun, go, ports, stale processes, generated types — with a one-line fix per failing check. Deep dive: [dev experience](docs/dev-experience.md).
+`borgo dev` keeps the browser hot: component and hook edits apply through react-refresh with state intact, `style.scss` recompiles and swaps in place, Go changes rebuild the binary and reload once the new API answers, and a broken build keeps serving the error overlay instead of taking the port down. When something is off, `borgo doctor` diagnoses the environment — bun, go, ports, stale processes, generated types — with a one-line fix per failing check. Deep dive: [dev experience](docs/dev-experience.md).
 
 ### Health checks and metrics
 
@@ -152,7 +153,7 @@ Three layers, all run by CI on every push:
 
 ## Versioning and releases
 
-[release-please](https://github.com/googleapis/release-please) maintains a release PR from conventional commits; merging it tags `vX.Y.Z` and publishes both npm packages (`borgo`, `create-borgo`) with linked versions via npm trusted publishing, provenance attached. The Go module `github.com/LuigiDavideMicca/borgo` lives at the repo root and resolves the **same** `vX.Y.Z` tag — one version number across all three artifacts.
+[release-please](https://github.com/googleapis/release-please) maintains a release PR from conventional commits; merging it tags `vX.Y.Z` and publishes both npm packages (`borgo-framework`, `create-borgo`) with linked versions via npm trusted publishing, provenance attached. The Go module `github.com/LuigiDavideMicca/borgo` lives at the repo root and resolves the **same** `vX.Y.Z` tag — one version number across all three artifacts.
 
 ## How it compares
 

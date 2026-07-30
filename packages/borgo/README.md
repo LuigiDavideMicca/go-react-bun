@@ -21,11 +21,11 @@ Run the CLI through Bun (`bun run dev` in an app). If you hit `error: bun is not
 
 ## Exports
 
-- `borgo` — browser-safe: `redirect`, `Island`/`registerIslands`, the websocket `subscribe` helper (typed against the borgogen-generated event map), `ApiError`, plus `LoaderContext`, `ActionContext`, `Head`, `PageModule`, `Route` types and the router functions
-- `borgo/server` — `serve`, the SSR front server (server-only)
-- `borgo/router` — router internals shared by server and client
-- `borgo/runtime` — the hydration/navigation runtime and islands mounter, imported by the generated client entries
-- `borgo/refresh-runtime` — react-refresh re-export used by the generated dev entry
+- `borgo-framework` — browser-safe: `redirect`, `Island`/`registerIslands`, `CsrfField`, the websocket `subscribe` helper (typed against the borgogen-generated event map), `ApiError`, plus `LoaderContext`, `ActionContext`, `PrerenderContext`, `Head`, `PageModule`, `Route` types and the router functions
+- `borgo-framework/server` — `serve`, the SSR front server (server-only)
+- `borgo-framework/router` — router internals shared by server and client
+- `borgo-framework/runtime` — the hydration/navigation runtime and islands mounter, imported by the generated client entries
+- `borgo-framework/refresh-runtime` — react-refresh re-export used by the generated dev entry
 
 The client hydration entry is generated into the app (`.borgo/client.tsx`) so that React always resolves from the app's own `node_modules`.
 
