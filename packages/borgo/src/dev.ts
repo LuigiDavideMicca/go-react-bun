@@ -5,7 +5,10 @@ import { c, g } from "./colors";
 import { goBinName, runBorgogen } from "./util";
 
 const serverEntry = fileURLToPath(new URL("serve-entry.ts", import.meta.url));
-const ignored = /^(node_modules|\.git|\.borgo|public|dist)([\\/]|$)|borgo\.gen\.go$/;
+// node_modules and .git are ignored at any depth (workspaces nest them);
+// .borgo, public and dist are our own output dirs, ignored only at the root
+// so an app dir that happens to share a name stays watched
+const ignored = /(^|[\\/])(node_modules|\.git)([\\/]|$)|^(\.borgo|public|dist)([\\/]|$)|borgo\.gen\.go$/;
 
 export async function dev() {
   const goBin = `.borgo/${goBinName()}`;
@@ -70,11 +73,12 @@ export async function dev() {
         break;
       } catch (error) {
         if (attempt >= 20) {
-          // a stale api process from a force-killed session still holds the
-          // binary: tell the user what to do instead of dumping an EPERM stack
+          // our own api was already killed to release its lock, so if the
+          // rename still fails a stale process from a force-killed session
+          // holds the binary — and the api is down until the user acts
           console.error(
-            `  ${c.red(g.err)} cannot replace ${goBin}: an old api process is still running.\n` +
-              `  kill it (its name is "${goBinName().replace(/\.exe$/, "")}") and save again — the previous api keeps serving meanwhile.`,
+            `  ${c.red(g.err)} cannot replace ${goBin}: a stale api process still holds it.\n` +
+              `  kill it (its name is "${goBinName().replace(/\.exe$/, "")}") and save again — the api is down until then.`,
           );
           return;
         }
@@ -199,6 +203,7 @@ export async function dev() {
   });
 
   process.on("SIGINT", () => process.exit(0));
+  process.on("SIGTERM", () => process.exit(0));
   // also fires on crashes (uncaught exceptions), not just ctrl-c: the api
   // and front server must never outlive the watcher
   process.on("exit", () => {
