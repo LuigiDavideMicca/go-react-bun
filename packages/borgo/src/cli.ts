@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { existsSync } from "node:fs";
-import { buildAssets } from "./build";
+import { assetsBuildMode, buildAssets } from "./build";
 import { banner, c, fmtMs, g } from "./colors";
 import { goBinName, runBorgogen } from "./util";
 
@@ -81,6 +81,13 @@ switch (command) {
         console.error(`  ${c.red(g.err)} api process exited (${code})`);
         process.exit(code);
       });
+    }
+
+    // a tree last built by `borgo dev` holds dev assets (dev react, no
+    // precompression): rebuild for production instead of serving them silently
+    if (assetsBuildMode() === "dev") {
+      console.log(`  ${c.terracotta(g.change)} public/assets holds a dev build ${c.dim("- rebuilding for production")}`);
+      await buildAssets();
     }
 
     const { serve } = await import("./server");

@@ -1,11 +1,23 @@
 import { Glob } from "bun";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, sep } from "node:path";
 import { precompressAssets } from "./compress";
 import { filePathToPattern } from "./router";
 
 const outDir = "public/assets";
 const genDir = ".borgo";
+const buildModePath = `${genDir}/build-mode`;
+
+// which kind of build last wrote public/assets: `borgo start` must not
+// silently serve what `borgo dev` left there (dev react, no precompression)
+export function assetsBuildMode(): "dev" | "production" | null {
+  try {
+    const mode = readFileSync(buildModePath, "utf8").trim();
+    return mode === "dev" || mode === "production" ? mode : null;
+  } catch {
+    return null;
+  }
+}
 
 const dynamicSegments = (pattern: string) =>
   pattern.split("/").filter((s) => s.startsWith(":")).length;
@@ -244,6 +256,7 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
   // prod only: emit .gz/.br siblings once here instead of compressing on
   // every request; dev skips the cost and serves identity
   if (!dev) await precompressAssets(outDir);
+  await Bun.write(buildModePath, dev ? "dev" : "production");
 
   // dev: page chunks carry an injected marker, so the fast-refresh channel
   // can tell the browser which chunk file belongs to which page

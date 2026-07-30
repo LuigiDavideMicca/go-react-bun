@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateManifest, parseHydrate, refreshTransform } from "../src/build";
+import { assetsBuildMode, generateManifest, parseHydrate, refreshTransform } from "../src/build";
 
 describe("parseHydrate", () => {
   const cases: Array<[string, string, ReturnType<typeof parseHydrate>]> = [
@@ -63,6 +63,25 @@ describe("refreshTransform", () => {
   test("passes plain modules through untouched", async () => {
     const js = "export const x = 1;\n";
     expect(await refreshTransform(js, "lib/util.ts")).toBe(js);
+  });
+});
+
+describe("assetsBuildMode", () => {
+  test("reads the stamp, null when missing or unknown", () => {
+    const dir = mkdtempSync(join(tmpdir(), "borgo-mode-"));
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(assetsBuildMode()).toBeNull();
+      mkdirSync(".borgo");
+      for (const [stamp, want] of [["dev", "dev"], ["production", "production"], ["garbage", null]] as const) {
+        writeFileSync(".borgo/build-mode", stamp);
+        expect(assetsBuildMode()).toBe(want);
+      }
+    } finally {
+      process.chdir(cwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
