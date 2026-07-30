@@ -5,8 +5,32 @@ import {
   escapeHtml,
   headHtml,
   PROXY_RETRY_MAX_BODY,
+  scriptJson,
   shouldBufferBody,
 } from "../src/util";
+
+describe("scriptJson", () => {
+  test("a closing script tag cannot end the block", () => {
+    const out = scriptJson({ bio: "</script><script>alert(1)</script>" });
+    expect(out).not.toContain("</script>");
+    expect(out).not.toContain("<");
+    expect(JSON.parse(out)).toEqual({ bio: "</script><script>alert(1)</script>" });
+  });
+
+  test("an html comment opener cannot switch the parser into escaped state", () => {
+    expect(scriptJson({ x: "<!--" })).toBe('{"x":"\\u003c!--"}');
+  });
+
+  test("u+2028 and u+2029 leave as escapes, not raw separators", () => {
+    const out = scriptJson({ x: "a\u2028b\u2029c" });
+    expect(out).toBe('{"x":"a\\u2028b\\u2029c"}');
+    expect(JSON.parse(out)).toEqual({ x: "a\u2028b\u2029c" });
+  });
+
+  test("keys are escaped like values", () => {
+    expect(scriptJson({ "</script>": 1 })).toBe('{"\\u003c/script>":1}');
+  });
+});
 
 describe("envInt", () => {
   test("unset and empty fall back", () => {

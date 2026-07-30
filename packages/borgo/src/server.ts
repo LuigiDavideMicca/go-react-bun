@@ -21,7 +21,7 @@ import { CSRF_COOKIE, CSRF_FIELD, cookieValue, registerCsrf, registerIslands, wi
 import { createMetrics } from "./metrics";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, safeDecode, type Route } from "./router";
-import { createSecurity, envInt, headHtml, shouldBufferBody } from "./util";
+import { createSecurity, envInt, headHtml, scriptJson, shouldBufferBody } from "./util";
 
 const isConnRefused = (err: unknown) => {
   const e = err as { code?: string; message?: string };
@@ -118,7 +118,7 @@ export async function serve({ dev = false } = {}) {
         islands ? '<script type="module" src="/assets/islands-client.js"></script>' : "",
       );
   const zeroJsEnd = { plain: zeroJsTail(false), islands: zeroJsTail(true) };
-  const stateTail = `;window.__BORGO_TITLE__=${JSON.stringify(shellTitle).replaceAll("<", "\\u003c")}${dev ? ";window.__BORGO_DEV__=1" : ""}</script>`;
+  const stateTail = `;window.__BORGO_TITLE__=${scriptJson(shellTitle)}${dev ? ";window.__BORGO_DEV__=1" : ""}</script>`;
 
   const port = Number(process.env.PORT || 3000);
   const api = process.env.API_URL || `http://localhost:${process.env.API_PORT || 3501}`;
@@ -279,7 +279,7 @@ export async function serve({ dev = false } = {}) {
       // pages with islands get the islands entry, which hydrates only those.
       end = route.islands ? zeroJsEnd.islands : zeroJsEnd.plain;
     } else {
-      const propsJson = JSON.stringify(props).replaceAll("<", "\\u003c");
+      const propsJson = scriptJson(props);
       const tag = nonce ? `<script nonce="${nonce}">` : "<script>";
       end = `${shellEndProps[0]}${tag}window.__PROPS__=${propsJson}${stateTail}${shellEndProps[1]}`;
     }
