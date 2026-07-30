@@ -73,7 +73,13 @@ export function mountIslands({ createElement, hydrateRoot, islands }: MountIslan
     const name = el.getAttribute("data-borgo-island")!;
     const component = islands[name];
     if (!component) continue;
-    const props = JSON.parse(el.getAttribute("data-borgo-props") || "{}");
+    let props: Record<string, unknown>;
+    try {
+      props = JSON.parse(el.getAttribute("data-borgo-props") || "{}");
+    } catch {
+      // one unreadable marker must not stop the rest of the page hydrating
+      continue;
+    }
     const hydrate = () => hydrateRoot(el, withCsrf(createElement(component, props), csrfToken()));
     if (el.getAttribute("data-borgo-client") === "visible") {
       const observer = new IntersectionObserver((entries) => {
@@ -88,6 +94,24 @@ export function mountIslands({ createElement, hydrateRoot, islands }: MountIslan
     }
   }
 }
+
+// a redirect the runtime must never hand to location.assign: "javascript:"
+// executes in the page's own origin, and a malformed value throws
+export function redirectUrl(raw: string): URL | null {
+  try {
+    const dest = new URL(raw, location.origin);
+    return dest.protocol === "http:" || dest.protocol === "https:" ? dest : null;
+  } catch {
+    return null;
+  }
+}
+
+// the server is not trusted to answer with an object: a string or an array
+// under "props" would blow up inside createElement
+export const asProps = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 
 export type MountOptions = {
   createElement: typeof CreateElement;
@@ -234,7 +258,10 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       const data = await res.json();
       if (seq !== navSeq) return;
       if (data.redirect) {
-        const dest = new URL(data.redirect, location.origin);
+        const dest = redirectUrl(data.redirect);
+        // unusable target: fall through to the catch, which reloads `to` and
+        // lets the browser follow the server's redirect natively
+        if (!dest) throw new Error("unusable redirect");
         if (dest.origin !== location.origin || hops >= 10) {
           location.assign(dest.href);
           return;
@@ -247,7 +274,7 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
         navigate(dest, push, keepScroll, hops + 1);
         return;
       }
-      props = data.props ?? {};
+      props = asProps(data.props);
     } catch {
       if (seq !== navSeq) return;
       location.assign(to.href);
@@ -333,7 +360,9 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     if (marker === "raw") {
       // a full document (the error overlay, the 500 page, a custom html
       // response): swap it in wholesale, exactly like a native submit
-      const html = await res.text();
+      // a truncated body would blank the document instead of showing the error
+      const html = await res.text().catch(() => "");
+      if (!html) return location.reload();
       document.open();
       document.write(html);
       document.close();
@@ -351,14 +380,22 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       nativeResubmit(form, submitter);
       return;
     }
-    const payload = (await res.json()) as {
+    // the action ran: from here a thrown parse or a chunk that will not load
+    // must never leave the form dead - a reload shows the real state
+    let payload: {
       redirect?: string;
       props?: Record<string, unknown>;
       actionData?: unknown;
     };
+    try {
+      payload = await res.json();
+    } catch {
+      return location.reload();
+    }
     if (seq !== navSeq) return;
     if (payload.redirect) {
-      const dest = new URL(payload.redirect, location.origin);
+      const dest = redirectUrl(payload.redirect);
+      if (!dest) return location.reload();
       if (dest.origin !== location.origin) {
         location.assign(dest.href);
         return;
@@ -368,9 +405,14 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       return;
     }
 
-    const module = await matched.route.load();
+    let module: ClientPageModule;
+    try {
+      module = await matched.route.load();
+    } catch {
+      return location.reload();
+    }
     if (seq !== navSeq) return;
-    const props = { ...(payload.props ?? {}), actionData: payload.actionData };
+    const props = { ...asProps(payload.props), actionData: payload.actionData };
     const samePage = to.pathname === location.pathname && to.search === location.search;
     if (!samePage) {
       saveScroll();
