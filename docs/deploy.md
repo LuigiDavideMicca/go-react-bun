@@ -4,6 +4,23 @@ Everything between `borgo build` and traffic: container and bare-metal layouts, 
 
 A borgo app in production is two processes: the Go API binary and the Bun front server. `borgo start` runs both and exits if either dies, so one supervisor — Docker, systemd, compose — supervises the pair.
 
+## borgo deploy init
+
+The command writes this page's blessed config for a target into your project, templated with the app's name (from `package.json`) and ports (`PORT`/`API_PORT`, defaulting to 3000/3501). It never overwrites an existing file unless you pass `--force`, and it prints the next command to run.
+
+```bash
+bunx borgo deploy init <caddy|nginx|systemd|compose> [--force]
+```
+
+| Target | Writes | It is | Then |
+| --- | --- | --- | --- |
+| `caddy` | `Caddyfile` | reverse proxy with automatic TLS, three lines | set your domain, `caddy run --config Caddyfile` |
+| `nginx` | `site.conf` | reverse proxy: websocket upgrades, `proxy_buffering off` for SSE, long read timeout | set domain and certs, link into `sites-enabled/` |
+| `systemd` | `borgo.service` | a unit running `bun run start` with the environment stubbed in | copy to `/etc/systemd/system/`, `systemctl enable --now` |
+| `compose` | `docker-compose.yml` | the scaffolded compose shape (build, ports, `/data` volume, restart policy) | `docker compose up -d` |
+
+Which one? **One box, Docker installed** → `compose` and you are done. **One box, no Docker** → `systemd`, plus `caddy` or `nginx` in front for TLS. **A proxy already terminates TLS for other apps** → just `caddy`/`nginx` to add the site. The generated files are a starting point in your repo, not managed state — edit them freely; `deploy init` never touches them again without `--force`.
+
 ## Docker, one container (recommended)
 
 Every scaffolded app ships a multi-stage `Dockerfile` and a `docker-compose.yml` (missing one? `borgo deploy init compose` writes the same shape, templated with your app's port):

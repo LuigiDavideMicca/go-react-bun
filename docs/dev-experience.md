@@ -53,7 +53,4 @@ In dev, SSR errors render as a readable overlay page instead of the production 5
 
 ## Troubleshooting
 
-- **Start with `borgo doctor`** — it checks bun, go, both ports (naming the process holding a taken one), stale api processes, generated types freshness and the app's dependencies, each failure with its one-line fix.
-- **`error: bun is not installed in %PATH%`** — the `borgo` bin shim locates `bun` through `PATH`. Start the app through Bun itself (`bun run dev`): Bun resolves its own shims even when `bun` is not on `PATH`. The error appears when something else spawns the shim, e.g. `npm run dev` or calling `node_modules/.bin/borgo` directly. To make the shim callable from anywhere, install Bun with the [official installer](https://bun.sh) so `bun` lands on `PATH`.
-- **Two Buns on one machine** — an npm-installed Bun (`npm i -g bun`) puts a wrapper ahead of the official install on `PATH`. `borgo dev` spawns its workers by absolute path, so either install works for the dev loop, but prefer the official installer and check `where bun` (`which bun`) points where you expect.
-- **Odd characters like `âŒ‚` in the terminal** — a legacy Windows console codepage renders UTF-8 as mojibake; borgo detects this and falls back to plain ASCII marks. `chcp 65001`, or Windows Terminal, brings the branded glyphs back.
+Moved to its own page as it grew: [FAQ and troubleshooting](faq-and-troubleshooting.md). The short version: start with `bunx borgo doctor` — it diagnoses the common ones and prints the fix.
