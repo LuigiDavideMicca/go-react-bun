@@ -134,6 +134,27 @@ func TestInvalidDirectiveWritesNoMounting(t *testing.T) {
 	}
 }
 
+func TestStaleGeneratedMountingRecovers(t *testing.T) {
+	root := filepath.Join("testdata", "stalegen")
+	genPath := filepath.Join(root, "api", "borgo.gen.go")
+	good := read(t, genPath)
+	stale := strings.Replace(good, "borgo.Handle(\"GET /api/ping\", Ping)", "borgo.Handle(\"GET /api/gone\", DeletedHandler)", 1)
+	if stale == good {
+		t.Fatal("fixture does not contain the expected mounting line")
+	}
+	if err := os.WriteFile(genPath, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.WriteFile(genPath, []byte(good), 0o644) })
+
+	if err := run(root); err != nil {
+		t.Fatalf("stale borgo.gen.go must not fail the run: %v", err)
+	}
+	if read(t, genPath) != good {
+		t.Errorf("borgo.gen.go not regenerated:\n%s", read(t, genPath))
+	}
+}
+
 func TestGenericInstantiationsStayDistinct(t *testing.T) {
 	root := filepath.Join("testdata", "generics")
 	if err := run(root); err != nil {

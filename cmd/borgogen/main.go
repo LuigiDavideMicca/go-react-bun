@@ -77,23 +77,22 @@ func run(root string) (err error) {
 		fail("no api/ directory here; run borgogen from the app root")
 	}
 
-	// the previous generated mounting may reference deleted handlers; type
-	// check against an empty stub of it instead
-	genGoAbs, _ := filepath.Abs(filepath.Join(root, genGoFile))
+	// no NeedDeps: dependency types come from export data instead of a full
+	// source re-typecheck of the import graph, which dominates wall time
 	cfg := &packages.Config{
 		Dir: root,
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
-			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedDeps | packages.NeedImports,
-		Overlay: map[string][]byte{genGoAbs: []byte("package " + apiPackageName(root) + "\n")},
+			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
 	}
-	pkgs, loadErr := packages.Load(cfg, "./api")
-	if loadErr != nil {
-		fail("loading api package: %v", loadErr)
+	pkg := loadAPI(cfg, root)
+	if hasErrorIn(pkg, "borgo.gen.go") {
+		// the previous generated mounting references deleted handlers; retry
+		// against an empty stub of it. only then: -overlay defeats the go
+		// list cache and roughly triples the load
+		genGoAbs, _ := filepath.Abs(filepath.Join(root, genGoFile))
+		cfg.Overlay = map[string][]byte{genGoAbs: []byte("package " + apiPackageName(root) + "\n")}
+		pkg = loadAPI(cfg, root)
 	}
-	if len(pkgs) != 1 {
-		fail("expected one package in api/, got %d", len(pkgs))
-	}
-	pkg := pkgs[0]
 	if len(pkg.Errors) > 0 {
 		msgs := make([]string, 0, len(pkg.Errors))
 		for _, e := range pkg.Errors {
@@ -101,6 +100,7 @@ func run(root string) (err error) {
 		}
 		fail("%s", strings.Join(msgs, "\n"))
 	}
+	dropGeneratedFile(pkg)
 
 	routes := collectRoutes(pkg)
 	decls := funcDecls(pkg)
@@ -164,6 +164,40 @@ func run(root string) (err error) {
 	writeIfChanged(filepath.Join(root, ".borgo", "api-types.d.ts"), out.String())
 	fmt.Printf("borgogen: %d routes -> .borgo/api-types.d.ts\n", len(patterns))
 	return nil
+}
+
+func loadAPI(cfg *packages.Config, root string) *packages.Package {
+	pkgs, loadErr := packages.Load(cfg, "./api")
+	if loadErr != nil {
+		fail("loading api package: %v", loadErr)
+	}
+	if len(pkgs) != 1 {
+		fail("expected one package in api/, got %d", len(pkgs))
+	}
+	return pkgs[0]
+}
+
+// dropGeneratedFile removes borgo.gen.go from the analyzed syntax: its
+// borgo.Handle calls would otherwise re-register every directive route as a
+// manual one and collide with the directives that produced them.
+func dropGeneratedFile(pkg *packages.Package) {
+	kept := pkg.Syntax[:0]
+	for _, file := range pkg.Syntax {
+		name := filepath.Base(pkg.Fset.Position(file.Pos()).Filename)
+		if name != "borgo.gen.go" {
+			kept = append(kept, file)
+		}
+	}
+	pkg.Syntax = kept
+}
+
+func hasErrorIn(pkg *packages.Package, file string) bool {
+	for _, e := range pkg.Errors {
+		if strings.Contains(e.Pos, file) {
+			return true
+		}
+	}
+	return false
 }
 
 // apiPackageName reads the package clause of the first real api/*.go file so
