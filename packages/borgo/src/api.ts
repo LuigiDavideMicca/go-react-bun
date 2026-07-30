@@ -22,6 +22,12 @@ type ParamNames<S extends string> = S extends `${string}{${infer P}}${infer Rest
 export type ApiOptions<K extends string> = {
   query?: Record<string, string | number | boolean>;
   headers?: Record<string, string>;
+  // milliseconds until the call is abandoned. off by default: a handler that
+  // streams (sse, long poll, big export) must not be cut mid-response, and
+  // only the caller knows which routes those are. a loader calling a plain
+  // crud route wants this set - a hung go handler otherwise holds the ssr
+  // render (and the browser tab) open forever
+  timeout?: number;
 } & ([ApiRequest<K>] extends [never] ? { body?: unknown } : { body: ApiRequest<K> }) &
   ([ParamNames<K>] extends [never]
     ? { params?: Record<string, string | number> }
@@ -110,26 +116,45 @@ export function makeApiClient(
     };
     // loaders and actions run while the go api may be mid-restart in dev; a
     // refused connection never reached it, so a short retry is always safe
-    let res: Response;
-    for (let attempt = 0; ; attempt++) {
-      try {
-        res = await fetch(url, init);
-        break;
-      } catch (err) {
-        if (attempt >= 15 || !isConnRefused(err)) throw err;
-        await new Promise((r) => setTimeout(r, 250));
-      }
-    }
-    const setCookies = res.headers.getSetCookie?.() ?? [];
-    if (setCookies.length) onSetCookie?.(setCookies);
-    if (!res.ok) throw new ApiError(res.status, await errorBody(res), route);
-    // a handler that answered with headers only: json() would throw on ""
-    if (res.status === 204 || res.headers.get("content-length") === "0") return undefined;
+    // an explicit controller instead of AbortSignal.timeout: the timer is
+    // cleared once the body is consumed, so a fast call leaves nothing behind
+    const abort = opts.timeout ? new AbortController() : null;
+    const deadline = abort
+      ? setTimeout(
+          () => abort.abort(new DOMException(`timed out after ${opts.timeout}ms`, "TimeoutError")),
+          opts.timeout,
+        )
+      : undefined;
+    const timedOut = (err: unknown) =>
+      (err as Error)?.name === "TimeoutError" || abort?.signal.aborted === true;
     try {
-      return await res.json();
-    } catch {
-      // without the route the caller only sees "Unexpected end of JSON input"
-      throw new ApiError(res.status, "response body is not json", route);
+      let res: Response;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          res = await fetch(url, abort ? { ...init, signal: abort.signal } : init);
+          break;
+        } catch (err) {
+          if (timedOut(err)) throw new Error(`api ${route}: no response within ${opts.timeout}ms`);
+          if (attempt >= 15 || !isConnRefused(err)) throw err;
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+      const setCookies = res.headers.getSetCookie?.() ?? [];
+      if (setCookies.length) onSetCookie?.(setCookies);
+      if (!res.ok) throw new ApiError(res.status, await errorBody(res), route);
+      // a handler that answered with headers only: json() would throw on ""
+      if (res.status === 204 || res.headers.get("content-length") === "0") return undefined;
+      try {
+        return await res.json();
+      } catch (err) {
+        // the deadline can also land mid-body: a stalled stream is a timeout,
+        // not a malformed payload
+        if (timedOut(err)) throw new Error(`api ${route}: no response within ${opts.timeout}ms`);
+        // without the route the caller only sees "Unexpected end of JSON input"
+        throw new ApiError(res.status, "response body is not json", route);
+      }
+    } finally {
+      clearTimeout(deadline);
     }
   }) as ApiClient;
 }

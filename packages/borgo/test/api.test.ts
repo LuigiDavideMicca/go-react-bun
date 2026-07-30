@@ -118,4 +118,31 @@ describe("makeApiClient", () => {
     const api = makeApiClient("http://api:1");
     expect(await api("GET /api/tasks")).toEqual({ tasks: [1, 2] });
   });
+
+  test("no timeout by default: fetch gets no signal", async () => {
+    stubFetch(() => Response.json({}));
+    const api = makeApiClient("http://api:1");
+    await api("GET /api/tasks");
+    expect(calls[0].init.signal).toBeUndefined();
+  });
+
+  test("timeout abandons a hung handler with the route in the error", async () => {
+    calls.length = 0;
+    globalThis.fetch = ((url: URL | string, init: RequestInit = {}) => {
+      calls.push({ url: String(url), init });
+      return new Promise((_, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+      });
+    }) as typeof fetch;
+    const api = makeApiClient("http://api:1");
+    const error = (await api("GET /api/tasks", { timeout: 20 }).catch((e) => e)) as Error;
+    expect(error.message).toBe("api GET /api/tasks: no response within 20ms");
+    expect(calls.length).toBe(1); // a timeout is not retried like a refused connection
+  });
+
+  test("a fast response is untouched by the timeout", async () => {
+    stubFetch(() => Response.json({ ok: true }));
+    const api = makeApiClient("http://api:1");
+    expect(await api("GET /api/tasks", { timeout: 5_000 })).toEqual({ ok: true });
+  });
 });
