@@ -9,6 +9,7 @@ import (
 	"hash"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -100,11 +101,17 @@ func SetSession(w http.ResponseWriter, v any, maxAge time.Duration) error {
 func GetSession[T any](r *http.Request) (T, bool) {
 	var zero T
 	cookie, err := r.Cookie(sessionCookie)
-	if err != nil {
+	// nothing this server issued is over the limit, so an oversized value is
+	// junk: reject it before hashing it
+	if err != nil || len(cookie.Value) > sessionCookieMaxLen {
 		return zero, false
 	}
-	payload, sig, ok := splitLast(cookie.Value, '.')
-	if !ok || !hmac.Equal([]byte(sessionSign(payload)), []byte(sig)) {
+	dot := strings.LastIndexByte(cookie.Value, '.')
+	if dot < 0 {
+		return zero, false
+	}
+	payload, sig := cookie.Value[:dot], cookie.Value[dot+1:]
+	if !hmac.Equal([]byte(sessionSign(payload)), []byte(sig)) {
 		return zero, false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(payload)
@@ -127,13 +134,4 @@ func ClearSession(w http.ResponseWriter) {
 	cookie := newSessionCookie()
 	cookie.MaxAge = -1
 	http.SetCookie(w, cookie)
-}
-
-func splitLast(s string, sep byte) (string, string, bool) {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == sep {
-			return s[:i], s[i+1:], true
-		}
-	}
-	return "", "", false
 }

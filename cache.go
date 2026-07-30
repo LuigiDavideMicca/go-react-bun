@@ -9,7 +9,8 @@ import (
 // Cache marks the response publicly cacheable for maxAge. An optional
 // staleWhileRevalidate window lets proxies serve stale content while they
 // refresh in the background. A response that already carries Set-Cookie is
-// marked private instead, so shared caches never store it.
+// marked private instead, so shared caches never store it - which means
+// calling Cache before SetSession skips that check: set cookies first.
 func Cache(w http.ResponseWriter, maxAge time.Duration, staleWhileRevalidate ...time.Duration) {
 	scope := "public"
 	if len(w.Header().Values("Set-Cookie")) > 0 {

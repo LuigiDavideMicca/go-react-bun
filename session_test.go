@@ -69,6 +69,7 @@ func TestSessionRejects(t *testing.T) {
 		{"garbage value", &http.Cookie{Name: "borgo_session", Value: "not.a.session"}, nil},
 		{"no signature separator", &http.Cookie{Name: "borgo_session", Value: "nodothere"}, nil},
 		{"expired", setAndExtract(t, testSession{User: "luigi"}, -time.Second), nil},
+		{"oversized value", &http.Cookie{Name: "borgo_session", Value: strings.Repeat("a", sessionCookieMaxLen+1) + ".sig"}, nil},
 		{"wrong secret", valid, func(t *testing.T) { t.Setenv("SESSION_SECRET", "other-secret") }},
 	}
 

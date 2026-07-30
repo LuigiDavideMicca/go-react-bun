@@ -301,7 +301,8 @@ func Serve() {
 
 // shutdown stops accepting and lets in-flight requests finish. Event streams
 // end as soon as Shutdown runs the registered hook; anything still open when
-// BORGO_SHUTDOWN_TIMEOUT expires is cut, so the process always exits.
+// BORGO_SHUTDOWN_TIMEOUT expires is cut, so the process always exits. A grace
+// of 0 waits for the last request however long it takes.
 func shutdown(srv *http.Server, grace time.Duration) {
 	ctx := context.Background()
 	if grace > 0 {
