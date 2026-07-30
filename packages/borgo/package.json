@@ -11,7 +11,8 @@
     "./refresh-runtime": "./src/refresh-runtime.ts",
     "./router": "./src/router.ts",
     "./runtime": "./src/runtime.ts",
-    "./server": "./src/server.ts"
+    "./server": "./src/server.ts",
+    "./package.json": "./package.json"
   },
   "files": [
     "src"
