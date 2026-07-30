@@ -216,9 +216,11 @@ export async function exportSite(): Promise<number> {
       assets = countFiles(outDir) - written;
     }
 
+    const mark = failures ? c.red(g.err) : c.sage(g.ok);
     console.log(
-      `\n  ${c.sage(g.ok)} exported ${written} pages + ${assets} assets ${g.arrow} dist/site in ${c.bold(fmtMs(performance.now() - t0))}`,
+      `\n  ${mark} exported ${written} pages + ${assets} assets ${g.arrow} dist/site in ${c.bold(fmtMs(performance.now() - t0))}`,
     );
+    if (failures) console.log(`  ${c.red(g.err)} ${failures} page(s) failed to export`);
     console.log(
       `  ${c.dim(`${g.dot} a static export serves pages only: actions, sse and websocket topics need borgo start`)}\n`,
     );
