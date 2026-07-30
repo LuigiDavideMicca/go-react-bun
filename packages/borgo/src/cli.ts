@@ -64,14 +64,22 @@ switch (command) {
       }
 
       const apiProc = Bun.spawn([bin], { stdout: "inherit", stderr: "inherit" });
-      process.on("SIGINT", () => {
+      // an intentional stop must exit 0, or a supervisor restart-loops; the
+      // flag also wins the race when the signal reaches the child first
+      let stopping = false;
+      const stop = () => {
+        stopping = true;
         apiProc.kill();
         process.exit(0);
-      });
-      // if the api dies, exit too, so a supervisor restarts the pair
+      };
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
+      // if the api dies on its own, exit with its real code so a supervisor
+      // restarts the pair (or accepts a clean 0)
       apiProc.exited.then((code) => {
+        if (stopping) return;
         console.error(`  ${c.red(g.err)} api process exited (${code})`);
-        process.exit(code || 1);
+        process.exit(code);
       });
     }
 
