@@ -6,6 +6,10 @@ import { goBinName, runBorgogen } from "./util";
 
 const command = process.argv[2];
 
+// tailwind is strictly opt-in: the flag (never detection) hands the css
+// pipeline to @tailwindcss/cli; the env carries it into child processes
+if (process.argv.includes("--tailwind")) process.env.BORGO_TAILWIND = "1";
+
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} kB`;
 
 async function assetLine(path: string, note = "") {

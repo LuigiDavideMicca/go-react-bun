@@ -219,6 +219,26 @@ export type Asset = { path: string; kind: "entry-point" | "chunk" | string; size
 export type BuildResult = { assets: Asset[]; chunkMap: Record<string, string> };
 
 export async function compileCss(dev = false) {
+  if (process.env.BORGO_TAILWIND === "1") {
+    if (!existsSync("style.css")) {
+      throw new Error(
+        '--tailwind expects a style.css entry in the app root (start with `@import "tailwindcss";`)',
+      );
+    }
+    if (!existsSync("node_modules/@tailwindcss/cli")) {
+      throw new Error("--tailwind needs the tailwind cli in the app: bun add tailwindcss @tailwindcss/cli");
+    }
+    const args = ["x", "@tailwindcss/cli", "-i", "style.css", "-o", `${outDir}/style.css`];
+    if (!dev) args.push("--minify");
+    // tailwind logs its banner to stderr even on success: only the exit
+    // code decides
+    const proc = Bun.spawn(["bun", ...args], { stdout: "ignore", stderr: "pipe" });
+    const stderr = await new Response(proc.stderr).text();
+    if ((await proc.exited) !== 0) {
+      throw new Error(`tailwind failed:\n${stderr.trim()}`);
+    }
+    return;
+  }
   if (!existsSync("style.scss")) return;
   const sass = await import("sass-embedded");
   const css = await sass.compileAsync("style.scss", { style: dev ? "expanded" : "compressed" });

@@ -195,7 +195,7 @@ export async function dev() {
     if (file.endsWith(".go")) {
       if (isUnchanged(file)) return;
       schedule(file, "api", startGo);
-    } else if (file.endsWith(".scss")) schedule(file, "css", () => swapCss(normalized));
+    } else if (/\.(scss|css)$/.test(file)) schedule(file, "css", () => swapCss(normalized));
     else if (/\.(tsx?|html)$/.test(file)) {
       if (isUnchanged(file)) return;
       schedule(file, "app", () => startFront(normalized));

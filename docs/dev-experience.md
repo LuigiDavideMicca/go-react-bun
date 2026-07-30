@@ -1,6 +1,6 @@
 # Dev experience
 
-The dev loop: fast refresh and its contract, the error overlay, `borgo doctor`, and the troubleshooting list.
+The dev loop: fast refresh and its contract, styling (SCSS by default, Tailwind opt-in), the error overlay, `borgo doctor`, and the troubleshooting list.
 
 ## Fast refresh
 
@@ -13,7 +13,37 @@ The dev loop: fast refresh and its contract, the error overlay, `borgo doctor`, 
 
 The mechanics, honestly: an edit restarts the front server for a clean server module graph; the browser never reloads — it reconnects and hot-applies the change from the boot greeting.
 
-## The error overlay
+## Styling
+
+The default pipeline compiles the single root `style.scss` to `public/assets/style.css` — expanded in dev, compressed in production. Plain CSS is valid SCSS, so no Sass knowledge is required.
+
+### Tailwind (opt-in)
+
+Tailwind v4 rides behind a CLI flag — never autodetection. Three steps:
+
+```bash
+bun add tailwindcss @tailwindcss/cli
+```
+
+Create `style.css` in the app root:
+
+```css
+@import "tailwindcss";
+```
+
+Then pass `--tailwind` to the commands in `package.json`:
+
+```json
+{
+  "scripts": {
+    "dev": "borgo dev --tailwind",
+    "build": "borgo build --tailwind",
+    "start": "borgo start --tailwind"
+  }
+}
+```
+
+With the flag, `@tailwindcss/cli` owns the stylesheet: it scans pages and islands for class names and rewrites `public/assets/style.css` (minified in production builds). Editing a page hot-applies new utilities through the normal refresh cycle, and editing `style.css` swaps the stylesheet in place. Without the flag, the SCSS pipeline stays in charge and `style.css` is ignored.
 
 In dev, SSR errors render as a readable overlay page instead of the production 500 page, and the client runtime surfaces uncaught errors and unhandled rejections in-browser, with a dismissable overlay showing the stack.
 
