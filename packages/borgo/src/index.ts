@@ -201,3 +201,14 @@ export function Island({ name, props = {}, client = "load" }: IslandProps) {
     h(component, props),
   );
 }
+
+// registers a service worker in production only: a dev session held by a
+// caching sw is the fastest way to debug ghosts. safe to call from any
+// hydrated page or island; no-ops server-side and in unsupported browsers.
+export function registerServiceWorker(path = "/sw.js") {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  if (typeof window !== "undefined" && (window as { __BORGO_DEV__?: number }).__BORGO_DEV__) return;
+  const register = () => void navigator.serviceWorker.register(path).catch(() => {});
+  if (document.readyState === "complete") register();
+  else addEventListener("load", register);
+}

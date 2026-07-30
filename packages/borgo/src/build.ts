@@ -254,7 +254,7 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
   // precompressed siblings so dev never serves an outdated .gz/.br
   if (existsSync(outDir)) {
     for (const f of readdirSync(outDir)) {
-      if (/\.(js|gz|br)$/.test(f)) rmSync(`${outDir}/${f}`, { force: true });
+      if (/\.(js|gz|br)$/.test(f) || f === "precache.json") rmSync(`${outDir}/${f}`, { force: true });
     }
   }
 
@@ -272,6 +272,23 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
     plugins: [appTranspile(define, dev)],
   });
   const assets = result.outputs.map((o) => ({ path: o.path, kind: o.kind, size: o.size }));
+
+  // prod only: the hashed asset list a service worker can precache; the
+  // stamp changes whenever any listed content does (chunk names are
+  // content-hashed, style.css is not, so its bytes join the stamp)
+  if (!dev) {
+    const files = result.outputs
+      .filter((o) => o.path.endsWith(".js"))
+      .map((o) => "/assets/" + o.path.replaceAll("\\", "/").split("/").pop());
+    let styleHash = "";
+    if (existsSync(`${outDir}/style.css`)) {
+      files.push("/assets/style.css");
+      styleHash = String(Bun.hash(await Bun.file(`${outDir}/style.css`).arrayBuffer()));
+    }
+    files.sort();
+    const stamp = String(Bun.hash(files.join("|") + styleHash));
+    await Bun.write(`${outDir}/precache.json`, JSON.stringify({ stamp, assets: files }));
+  }
 
   // prod only: emit .gz/.br siblings once here instead of compressing on
   // every request; dev skips the cost and serves identity

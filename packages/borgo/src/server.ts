@@ -287,6 +287,9 @@ export async function serve({ dev = false } = {}) {
   async function serveAsset(req: Request, path: string, asset: ReturnType<typeof Bun.file>) {
     const headers: Record<string, string> = {};
     if (isHashedAsset(path)) headers["Cache-Control"] = "public, max-age=31536000, immutable";
+    // a service worker must never be heuristically cached, or updates to it
+    // (and everything it controls) lag behind deploys
+    if (path === "public/sw.js") headers["Cache-Control"] = "no-cache";
     if (!isCompressiblePath(path)) return new Response(asset, { headers });
     headers["Vary"] = "Accept-Encoding";
     if (!dev) {

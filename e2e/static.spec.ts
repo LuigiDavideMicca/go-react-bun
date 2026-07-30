@@ -28,3 +28,16 @@ test("head requests carry real status and headers, but no body", async ({ reques
   const missing = await request.head("/definitely/not/here");
   expect(missing.status()).toBe(404);
 });
+
+test("the build emits a precache manifest listing live assets", async ({ request }) => {
+  const res = await request.get("/assets/precache.json");
+  expect(res.status()).toBe(200);
+  const { stamp, assets } = await res.json();
+  expect(String(stamp).length).toBeGreaterThan(0);
+  expect(assets).toContain("/assets/client.js");
+  expect(assets).toContain("/assets/style.css");
+  for (const asset of assets) {
+    const hit = await request.get(asset);
+    expect(hit.status(), asset).toBe(200);
+  }
+});

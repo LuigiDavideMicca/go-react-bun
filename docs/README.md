@@ -9,7 +9,8 @@ Deep dives for every convention the [README](../README.md) summarizes. Each page
 | [Client navigation and hydration](client-navigation.md) | client-side transitions, prefetching, scroll restoration, code splitting, hydration modes, islands |
 | [Realtime](realtime.md) | server-sent events, WebSocket topics, typed event payloads, `borgo.Push`/`PushT` |
 | [Auth and sessions](auth-and-sessions.md) | signed-cookie sessions, password hashing, `borgo.Auth`, guards on both sides of the bridge, CSRF |
-| [Dev experience](dev-experience.md) | fast refresh and its contract, the error overlay, `borgo doctor`, troubleshooting |
+| [Dev experience](dev-experience.md) | fast refresh and its contract, styling and Tailwind, the error overlay, `borgo doctor`, troubleshooting |
+| [PWA](pwa.md) | manifest, service worker, the precache list, guarded registration |
 | [Deploy](deploy.md) | Docker, compose, reverse proxy, systemd, static export, caching, health and metrics, environment reference |
 
 ## Where to start
