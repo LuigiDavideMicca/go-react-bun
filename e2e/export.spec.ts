@@ -149,6 +149,12 @@ test("export writes the exportable pages and explains the skips", () => {
   expect(existsSync(join(siteDir, "assets", "client.js.gz"))).toBe(true);
 });
 
+test("a _404 page exports as 404.html for static hosts", () => {
+  expect(out).toContain("404.html");
+  const html = readFileSync(join(siteDir, "404.html"), "utf8");
+  expect(html).toContain("Nothing lives at this address");
+});
+
 test("a hydrate=false page exports with zero javascript", async ({ page }) => {
   const html = readFileSync(join(siteDir, "exp-static", "index.html"), "utf8");
   expect(html).toContain("EXP-STATIC-MARKER");

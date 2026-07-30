@@ -93,14 +93,15 @@ export const prerenderPaths = async ({ api }: PrerenderContext) =>
   (await api("GET /api/tasks")).tasks.map((task) => ({ id: task.ID }));
 ```
 
-Pages with `hydrate = false` export with zero JavaScript; hydrated pages carry their chunks and hydrate against the exported props (client-side navigation falls back to plain page loads — there is no server to ask for props). Everything else is skipped, with the reason printed.
+Pages with `hydrate = false` export with zero JavaScript; hydrated pages carry their chunks and hydrate against the exported props (client-side navigation falls back to plain page loads — there is no server to ask for props). A `pages/_404.tsx` exports as `dist/site/404.html` — the filename most static hosts pick up as their error page automatically. Everything else is skipped, with the reason printed.
 
-Any static file server can host the result — for nginx the one-liner is `try_files`:
+Any static file server can host the result — for nginx the one-liner is `try_files`, plus `error_page` for the exported 404:
 
 ```nginx
 server {
     listen 80;
     root /srv/my-app/dist/site;
+    error_page 404 /404.html;
     location / { try_files $uri $uri/index.html =404; }
 }
 ```

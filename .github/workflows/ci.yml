@@ -80,6 +80,20 @@ jobs:
           if bunx tsc --noEmit; then echo "wrong ws payload was accepted" && exit 1; fi
           rm pages/__wrong-ws.tsx
 
+      - name: typed ws publish rejects a wrong payload
+        working-directory: examples/tasks
+        run: |
+          printf '%s\n' \
+            'import { subscribe } from "borgo-framework";' \
+            'export function wrong() {' \
+            '  const channel = subscribe("live", () => {});' \
+            '  channel.publish("message", 42);' \
+            '}' \
+            'export default function Wrong() { return null; }' \
+            > pages/__wrong-publish.tsx
+          if bunx tsc --noEmit; then echo "wrong publish payload was accepted" && exit 1; fi
+          rm pages/__wrong-publish.tsx
+
       - name: build example app
         working-directory: examples/tasks
         run: bun run build

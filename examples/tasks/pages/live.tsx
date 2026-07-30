@@ -7,7 +7,7 @@ export default function Live() {
   const [log, setLog] = useState<string[]>([]);
   const [present, setPresent] = useState(0);
   const [text, setText] = useState("");
-  const channel = useRef<Channel | null>(null);
+  const channel = useRef<Channel<"live"> | null>(null);
 
   useEffect(() => {
     // the events are typed: "task-created" comes from borgo.PushT in go via

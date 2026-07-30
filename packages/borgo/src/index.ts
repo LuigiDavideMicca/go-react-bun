@@ -24,9 +24,12 @@ export const redirect = (to: string, status = 303) =>
 // websocket channels: the front server relays {topic, event, data} between
 // every subscriber of a topic; go pushes into the same topics via borgo.Push.
 // the built-in "__count" event reports the topic's subscriber count.
-export type Channel = {
-  publish: (event: string, data?: unknown) => void;
-  close: () => void;
+// publish is typed against the same WsEvents map as subscribe: a topic with
+// declared events only publishes those, with the matching payload; topics
+// without declarations (and non-literal topics) keep the untyped shape.
+export type Channel<T extends string = string> = {
+  publish(...args: PublishArgs<T>): void;
+  close(): void;
 };
 
 // "topic/event" -> payload type. borgogen fills this in from borgo.PushT
@@ -53,16 +56,24 @@ export type TopicEventName<T extends string> = [keyof EventsFor<T>] extends [nev
   ? string
   : Extract<keyof EventsFor<T>, string> | "__count";
 
+// what a browser may publish: the declared events minus the server-only
+// "__count"; same fallback as subscribe when nothing is declared
+export type PublishArgs<T extends string> = string extends T
+  ? [event: string, data?: unknown]
+  : [keyof EventsFor<T>] extends [never]
+    ? [event: string, data?: unknown]
+    : EventPairs<EventsFor<T>>;
+
 // the second overload keeps single-parameter callbacks compiling: tsc does
 // not accept them against a rest signature made of a tuple union
 export function subscribe<T extends string>(
   topic: T,
   onEvent: (...args: TopicEvents<T>) => void,
-): Channel;
+): Channel<T>;
 export function subscribe<T extends string>(
   topic: T,
   onEvent: (event: TopicEventName<T>) => void,
-): Channel;
+): Channel<T>;
 export function subscribe(
   topic: string,
   onEvent: (...args: any[]) => void,

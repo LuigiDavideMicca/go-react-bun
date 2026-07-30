@@ -84,8 +84,20 @@ export async function exportSite(): Promise<number> {
   await buildAssets(false);
 
   const manifest = pathToFileURL(join(process.cwd(), ".borgo/routes.gen.tsx")).href;
-  const { routes } = (await import(manifest)) as { routes: Route[] };
+  const { routes, notFound } = (await import(manifest)) as {
+    routes: Route[];
+    notFound: Route | null;
+  };
   const { plans, skipped, needApi } = planExport(routes);
+
+  // a _404 page exports as 404.html, the file static hosts serve for unknown
+  // paths (nginx error_page, most static hosting picks it up by name)
+  const notFoundModule = notFound?.module as ExportModule | undefined;
+  const export404 = notFoundModule ? !notFoundModule.loader || notFoundModule.prerender === true : false;
+  if (notFoundModule && !export404) {
+    skipped.push({ pattern: "404", reason: "has a loader without `export const prerender = true`" });
+  }
+  const apiNeeded = needApi || (export404 && !!notFoundModule?.loader);
 
   if (plans.length === 0) {
     for (const s of skipped) {
@@ -104,7 +116,7 @@ export async function exportSite(): Promise<number> {
   // loaders and prerenderPaths run for real, so they get a real api: the
   // binary is built and spawned on an ephemeral port, and killed at the end
   let apiProc: import("bun").Subprocess | null = null;
-  if (needApi) {
+  if (apiNeeded) {
     // a scratch binary: dist/ may be running under borgo start right now,
     // and windows locks executing binaries against overwrite
     const bin = `.borgo/export-${goBinName()}`;
@@ -158,6 +170,7 @@ export async function exportSite(): Promise<number> {
     rmSync(outDir, { recursive: true, force: true });
     mkdirSync(outDir, { recursive: true });
 
+    let written = 0;
     for (const { path, route } of pages) {
       const zeroJs = route.module.hydrate === false && !route.islands;
       const target = join(outDir, outputPath(path));
@@ -167,12 +180,28 @@ export async function exportSite(): Promise<number> {
         const html = await res.text();
         mkdirSync(dirname(target), { recursive: true });
         await Bun.write(target, html);
+        written++;
         const rel = target.replaceAll("\\", "/");
         const note = zeroJs ? ` ${g.dot} zero js` : "";
         console.log(`  ${c.sage(g.ok)} ${path.padEnd(16)} ${c.dim(`${g.arrow} ${rel}${note}`)}`);
       } catch (error) {
         failures++;
         console.log(`  ${c.red(g.err)} ${path.padEnd(16)} ${error instanceof Error ? error.message : error}`);
+      }
+    }
+    if (export404) {
+      // any unmatched path renders the _404 page with a 404 status
+      try {
+        const res = await fetch(`http://localhost:${frontPort}/__borgo-export-404-probe`);
+        if (res.status !== 404) throw new Error(`responded ${res.status}`);
+        await Bun.write(join(outDir, "404.html"), await res.text());
+        written++;
+        console.log(
+          `  ${c.sage(g.ok)} ${"404".padEnd(16)} ${c.dim(`${g.arrow} ${outDir}/404.html ${g.dot} wire it as your host's error page`)}`,
+        );
+      } catch (error) {
+        failures++;
+        console.log(`  ${c.red(g.err)} ${"404".padEnd(16)} ${error instanceof Error ? error.message : error}`);
       }
     }
     for (const s of skipped) {
@@ -184,11 +213,11 @@ export async function exportSite(): Promise<number> {
     let assets = 0;
     if (existsSync("public")) {
       cpSync("public", outDir, { recursive: true });
-      assets = countFiles(outDir) - pages.length + failures;
+      assets = countFiles(outDir) - written;
     }
 
     console.log(
-      `\n  ${c.sage(g.ok)} exported ${pages.length - failures} pages + ${assets} assets ${g.arrow} dist/site in ${c.bold(fmtMs(performance.now() - t0))}`,
+      `\n  ${c.sage(g.ok)} exported ${written} pages + ${assets} assets ${g.arrow} dist/site in ${c.bold(fmtMs(performance.now() - t0))}`,
     );
     console.log(
       `  ${c.dim(`${g.dot} a static export serves pages only: actions, sse and websocket topics need borgo start`)}\n`,

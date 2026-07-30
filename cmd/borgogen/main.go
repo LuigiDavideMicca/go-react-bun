@@ -338,6 +338,9 @@ func collectPushes(pkg *packages.Package, gen *tsGen) ([]string, map[string]stri
 			if !topicOK || !eventOK {
 				fail("%s: borgo.PushT needs constant topic and event strings; use borgo.Push for dynamic ones", pos)
 			}
+			if strings.Contains(topic, "/") {
+				fail(`%s: borgo.PushT topic %q must not contain "/" - WsEvents keys are "topic/event", so the browser would subscribe to the wrong topic`, pos, topic)
+			}
 			inst, ok := pkg.TypesInfo.Instances[sel]
 			if !ok || inst.TypeArgs.Len() != 1 {
 				return true

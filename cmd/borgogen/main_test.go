@@ -107,6 +107,7 @@ func TestGenerateErrors(t *testing.T) {
 		{"malformed type directive", "badtype", "malformed directive"},
 		{"directive on non-handler", "badsig", "not a func(http.ResponseWriter"},
 		{"dynamic push topic", "badpush", "constant topic and event"},
+		{"slash in push topic", "slashpush", `must not contain "/"`},
 		{"missing api dir", "none", "no api/ directory"},
 	}
 	for _, c := range cases {
@@ -116,5 +117,12 @@ func TestGenerateErrors(t *testing.T) {
 				t.Fatalf("want error containing %q, got %v", c.want, err)
 			}
 		})
+	}
+}
+
+func TestSlashPushErrorCarriesPosition(t *testing.T) {
+	err := run(filepath.Join("testdata", "slashpush"))
+	if err == nil || !strings.Contains(err.Error(), "bad.go:6") {
+		t.Fatalf("want file:line in the error, got %v", err)
 	}
 }
