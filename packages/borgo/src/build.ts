@@ -305,7 +305,7 @@ function appTranspile(define: Record<string, string>, dev: boolean): import("bun
   const pagesDir = join(process.cwd(), "pages") + sep;
   const pageTranspiler = new Bun.Transpiler({
     loader: "tsx",
-    exports: { eliminate: ["loader", "action"] },
+    exports: { eliminate: ["loader", "action", "prerender", "prerenderPaths"] },
     trimUnusedImports: true,
     treeShaking: true,
     autoImportJSX: true,

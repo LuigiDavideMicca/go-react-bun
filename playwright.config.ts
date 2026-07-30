@@ -11,7 +11,7 @@ export default defineConfig({
   projects: [
     {
       name: "app",
-      testIgnore: /fastrefresh/,
+      testIgnore: /fastrefresh|export/,
       use: { baseURL: "http://localhost:3400" },
     },
     {
@@ -19,6 +19,13 @@ export default defineConfig({
       testMatch: /fastrefresh/,
       dependencies: ["app"],
       use: { baseURL: "http://localhost:3410" },
+    },
+    // export rebuilds the example's production assets and adds scratch pages,
+    // so it runs last, alone, against its own static server
+    {
+      name: "export",
+      testMatch: /export/,
+      dependencies: ["dev"],
     },
   ],
   webServer: {

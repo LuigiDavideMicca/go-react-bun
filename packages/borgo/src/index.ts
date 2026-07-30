@@ -8,6 +8,7 @@ export type {
   LayoutModule,
   LoaderContext,
   PageModule,
+  PrerenderContext,
   Route,
 } from "./router";
 export { ApiError } from "./api";

@@ -83,6 +83,22 @@ server {
 
 Behind https, set `SESSION_SECURE=1` so session cookies carry the `Secure` attribute. Responses marked with `borgo.Cache` carry ordinary `Cache-Control` headers — enable proxy caching (`proxy_cache` in nginx, `cache` in Caddy plugins) if you want the proxy to serve them.
 
+## Static export
+
+`borgo export` prerenders every statically exportable page into `dist/site/`: plain HTML next to the built assets, precompressed siblings included. Pages without a loader export as-is; a page with a loader opts in with `export const prerender = true` (its loader runs once, at export time, against a temporary api process); dynamic routes list their param sets with `export const prerenderPaths`. Pages with `hydrate = false` export with zero JavaScript; hydrated pages carry their chunks and hydrate against the exported props.
+
+Any static file server can host the result — for nginx the one-liner is `try_files`:
+
+```nginx
+server {
+    listen 80;
+    root /srv/my-app/dist/site;
+    location / { try_files $uri $uri/index.html =404; }
+}
+```
+
+An exported site is pages only: actions, SSE and WebSocket topics need the running borgo servers (`borgo start`).
+
 ## systemd, no Docker
 
 Build on the server (`bun install && bun run build`), then:

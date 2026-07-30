@@ -22,12 +22,25 @@ export type Head = { title?: string; meta?: Array<Record<string, string>> };
 
 export type HydrateMode = boolean | "visible";
 
+// context handed to prerenderPaths during `borgo export`: the api is up and
+// queryable, exactly like in a loader
+export type PrerenderContext = {
+  api: ApiClient;
+  apiUrl: string;
+};
+
 export type PageModule = {
   default: ComponentType<any>;
   loader?: (ctx: LoaderContext) => Promise<Record<string, unknown> | Response>;
   action?: (ctx: ActionContext) => Promise<Response | Record<string, unknown>>;
   head?: Head | ((props: Record<string, unknown>) => Head);
   hydrate?: HydrateMode;
+  // static export: a page with a loader opts in with `prerender = true`; a
+  // dynamic route lists its param sets with prerenderPaths
+  prerender?: boolean;
+  prerenderPaths?: (
+    ctx: PrerenderContext,
+  ) => Array<Record<string, string | number>> | Promise<Array<Record<string, string | number>>>;
 };
 
 export type LayoutModule = {

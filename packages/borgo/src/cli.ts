@@ -80,13 +80,18 @@ switch (command) {
     break;
   }
 
+  case "export": {
+    const { exportSite } = await import("./export");
+    process.exit(await exportSite());
+  }
+
   case "doctor": {
     const { doctor } = await import("./doctor");
     process.exit(await doctor());
   }
 
   default: {
-    console.log(`\n  ${banner()}\n\n  usage: borgo <dev|build|start|doctor>\n`);
+    console.log(`\n  ${banner()}\n\n  usage: borgo <dev|build|start|export|doctor>\n`);
     process.exit(command ? 1 : 0);
   }
 }
