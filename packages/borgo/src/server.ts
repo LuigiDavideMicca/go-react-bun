@@ -9,6 +9,7 @@ import { gzipStream, isCompressiblePath, isHashedAsset, jsonResponse, pickEncodi
 import { registerIslands } from "./index";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, type Head, type Route } from "./router";
+import { shouldBufferBody } from "./util";
 
 const isConnRefused = (err: unknown) => {
   const e = err as { code?: string; message?: string };
@@ -208,10 +209,12 @@ export async function serve({ dev = false } = {}) {
     if (url.pathname.startsWith("/api/")) {
       // the go api restarts on every .go edit in dev: a refused connection
       // never reached it, so retrying briefly is safe even for mutations.
-      // the body is buffered once so the request can be re-sent.
+      // small bodies are buffered once so the request can be re-sent; large
+      // or unsized bodies stream through, at the price of no retry.
       const target = api + url.pathname + url.search;
       const hasBody = req.method !== "GET" && req.method !== "HEAD";
-      const body = hasBody ? await req.arrayBuffer() : undefined;
+      const buffered = shouldBufferBody(req.method, req.headers.get("content-length"));
+      const body = hasBody ? (buffered ? await req.arrayBuffer() : req.body) : undefined;
       for (let attempt = 0; ; attempt++) {
         try {
           // decompress: false passes go's response through untouched, encoding
@@ -223,8 +226,14 @@ export async function serve({ dev = false } = {}) {
             decompress: false,
           } as RequestInit);
         } catch (err) {
-          if (attempt >= 15 || !isConnRefused(err)) throw err;
-          await Bun.sleep(250);
+          if (!(hasBody && !buffered) && attempt < 15 && isConnRefused(err)) {
+            await Bun.sleep(250);
+            continue;
+          }
+          // an api endpoint must fail as an api: a bad gateway status, not
+          // the rendered 500 page (or the dev overlay) meant for documents
+          console.error(err);
+          return new Response("api unreachable", { status: 502 });
         }
       }
     }
