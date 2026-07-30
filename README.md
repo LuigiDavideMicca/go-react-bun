@@ -178,7 +178,7 @@ Honest comparison with the frameworks a borgo adopter would otherwise pick. ✓ 
 | Image/font optimization | — | ✓ | ✓ | — |
 | Plugin ecosystem | — | ✓ | ✓ | ✓ |
 | Deploy story | one box: Docker/compose/systemd, generated configs | Vercel or DIY | many presets | many presets |
-| Framework size | ~4k lines incl. codegen and cli tooling, readable in a sitting | large | large | medium |
+| Framework size | ~5k lines incl. codegen and cli tooling, readable in a sitting | large | large | medium |
 
 ## What this is not
 

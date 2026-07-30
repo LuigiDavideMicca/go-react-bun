@@ -326,6 +326,14 @@ test("layout edits fall back to a full reload", async ({ page }) => {
   );
 
   await expect(page.locator("footer")).toContainText("framework — edited", { timeout: 20_000 });
-  expect(await page.evaluate(() => (window as any).__stayed)).toBeUndefined();
+  // the reload that carried the new footer may still be settling (or a
+  // deduped second reload lands late); evaluating mid-navigation destroys
+  // the execution context, so poll instead of asserting once
+  await expect
+    .poll(
+      () => page.evaluate(() => (window as any).__stayed).catch(() => "navigating"),
+      { timeout: 15_000 },
+    )
+    .toBeUndefined();
   writeFileSync(layoutFile, originals.get(layoutFile)!);
 });
