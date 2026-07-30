@@ -43,7 +43,9 @@ test("scroll position restores on back and forward", async ({ page, request }) =
   const ids = await seedTasks(request, "nav seed", 25);
   try {
     await page.goto("/");
-    await page.evaluate(() => scrollTo(0, 800));
+    // 300 stays reachable however many tasks other workers add or remove;
+    // a taller target can clamp and record a smaller position than expected
+    await page.evaluate(() => scrollTo(0, 300));
     await page.waitForTimeout(300);
 
     const visibleHref = await page.evaluate(() => {
@@ -61,13 +63,33 @@ test("scroll position restores on back and forward", async ({ page, request }) =
     expect(await page.evaluate(() => scrollY)).toBe(0);
 
     await page.goBack();
-    await expect.poll(() => page.evaluate(() => scrollY), { timeout: 5000 }).toBe(800);
+    await expect.poll(() => page.evaluate(() => scrollY), { timeout: 5000 }).toBe(300);
 
     await page.goForward();
     await expect.poll(() => page.evaluate(() => scrollY), { timeout: 5000 }).toBeLessThan(5);
   } finally {
     await deleteTasks(request, ids);
   }
+});
+
+test("a second navigation wins over a slower first one", async ({ page }) => {
+  // must start on a hydrated page: hydrate=false pages have no client nav
+  await page.goto("/");
+  await page.waitForTimeout(300);
+  // hold the first navigation's props fetch so the second finishes first
+  await page.route(/\/slow\?.*__borgo=props/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.continue();
+  });
+
+  await page.click('nav a[href="/slow"]');
+  await page.click('nav a[href="/"]');
+  await expect(page.locator("h1")).toHaveText("Tasks");
+
+  // the delayed response lands now: it must not render /slow over home
+  await page.waitForTimeout(1200);
+  await expect(page.locator("h1")).toHaveText("Tasks");
+  expect(new URL(page.url()).pathname).toBe("/");
 });
 
 test("head updates on client navigation", async ({ page }) => {

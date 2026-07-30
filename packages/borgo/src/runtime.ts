@@ -196,7 +196,12 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   const afterRender = (fn: () => void) =>
     requestAnimationFrame(() => requestAnimationFrame(fn));
 
+  // a navigation started while another is in flight wins: the slower one
+  // must not render its page over the newer one when its fetch resolves
+  let navSeq = 0;
+
   async function navigate(to: URL, push: boolean) {
+    const seq = ++navSeq;
     const matched = matchRoute(to.pathname, routes);
     if (!matched) {
       location.assign(to.href);
@@ -212,15 +217,18 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       const propsPromise =
         cached && performance.now() - cached.time < propsTtl ? cached.promise : fetchProps(to);
       const [loaded, res] = await Promise.all([matched.route.load(), propsPromise]);
+      if (seq !== navSeq) return;
       if (!res.ok) throw new Error(`props fetch failed: ${res.status}`);
       module = loaded;
       const data = await res.json();
+      if (seq !== navSeq) return;
       if (data.redirect) {
         navigate(new URL(data.redirect, location.origin), push);
         return;
       }
       props = data.props ?? {};
     } catch {
+      if (seq !== navSeq) return;
       location.assign(to.href);
       return;
     }
@@ -235,6 +243,7 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     applyHead(resolveHead(module, props));
     const key = entryKey;
     afterRender(() => {
+      if (seq !== navSeq) return;
       if (push) {
         const target = to.hash && document.getElementById(to.hash.slice(1));
         target ? target.scrollIntoView() : scrollTo(0, 0);
@@ -314,6 +323,11 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
     });
 
     window.addEventListener("popstate", () => {
+      // flush the debounced save under the key of the page being left; the
+      // pending timer would otherwise fire after the switch and save the old
+      // position under the restored entry's key
+      clearTimeout(scrollTimer);
+      saveScroll();
       entryKey = history.state?.__borgo ?? newKey();
       navigate(new URL(location.href), false);
     });
