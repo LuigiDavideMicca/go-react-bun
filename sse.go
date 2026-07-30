@@ -1,6 +1,7 @@
 package borgo
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,13 +16,20 @@ import (
 // pin its goroutine (and hub slot) forever
 const sseWriteTimeout = 10 * time.Second
 
+// an event stream never ends on its own, so a graceful shutdown would sit out
+// its whole grace period waiting for one. Serve cancels this when it starts
+// shutting down and every stream's Done fires: browsers reconnect to the next
+// instance on their own.
+var shuttingDown, signalShutdown = context.WithCancel(context.Background())
+
 // SSEStream is one open server-sent-events response.
 type SSEStream struct {
-	w  http.ResponseWriter
-	f  http.Flusher
-	r  *http.Request
-	rc *http.ResponseController
-	mu sync.Mutex
+	w    http.ResponseWriter
+	f    http.Flusher
+	r    *http.Request
+	rc   *http.ResponseController
+	done <-chan struct{}
+	mu   sync.Mutex
 }
 
 // SSE prepares the response for server-sent events and returns the stream.
@@ -44,7 +52,22 @@ func SSE(w http.ResponseWriter, r *http.Request) (*SSEStream, error) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	f.Flush()
-	return &SSEStream{w: w, f: f, r: r, rc: rc}, nil
+	return &SSEStream{w: w, f: f, r: r, rc: rc, done: streamDone(r.Context())}, nil
+}
+
+// streamDone closes on client disconnect or on shutdown, whichever comes
+// first; the watcher goroutine ends with the stream either way.
+func streamDone(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	stopping := shuttingDown.Done()
+	go func() {
+		defer close(done)
+		select {
+		case <-ctx.Done():
+		case <-stopping:
+		}
+	}()
+	return done
 }
 
 // Send writes one named event with data encoded as JSON. The event name must
@@ -92,9 +115,10 @@ func sseFrame(event string, data any) ([]byte, error) {
 	return append(frame, "\n\n"...), nil
 }
 
-// Done closes when the client disconnects.
+// Done closes when the client disconnects or the server starts shutting down.
+// A stream handler must return once it fires.
 func (s *SSEStream) Done() <-chan struct{} {
-	return s.r.Context().Done()
+	return s.done
 }
 
 // SSEHub broadcasts events to every connected client. Register its ServeHTTP

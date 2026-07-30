@@ -227,6 +227,8 @@ func Serve() {
 	// build the server before the banner so a bad BORGO_*_TIMEOUT fails
 	// before "api on :port" is printed
 	srv := newServer(port, gzipMiddleware(mux))
+	grace := envDuration("BORGO_SHUTDOWN_TIMEOUT", 10*time.Second)
+	srv.RegisterOnShutdown(signalShutdown)
 	warnSessionSecret()
 	printStartup(patterns, port)
 
@@ -238,14 +240,26 @@ func Serve() {
 	case err := <-errCh:
 		log.Fatal(err)
 	case <-ctx.Done():
+		// stop restores the default handlers: a second ctrl-c kills a
+		// shutdown that is taking too long
 		stop()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdown(srv, grace)
+	}
+}
+
+// shutdown stops accepting and lets in-flight requests finish. Event streams
+// end as soon as Shutdown runs the registered hook; anything still open when
+// BORGO_SHUTDOWN_TIMEOUT expires is cut, so the process always exits.
+func shutdown(srv *http.Server, grace time.Duration) {
+	ctx := context.Background()
+	if grace > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, grace)
 		defer cancel()
-		// SSE streams never drain on their own: after the grace period,
-		// Close cuts them so shutdown always completes
-		if srv.Shutdown(shutdownCtx) != nil {
-			srv.Close()
-		}
+	}
+	if srv.Shutdown(ctx) != nil {
+		log.Printf("borgo: %v shutdown grace elapsed with requests still open; closing them", grace)
+		srv.Close()
 	}
 }
 

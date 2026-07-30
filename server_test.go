@@ -2,6 +2,7 @@ package borgo
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -109,6 +110,111 @@ func TestSSEOutlivesWriteTimeout(t *testing.T) {
 	}
 	if events != 3 {
 		t.Fatalf("want 3 events through the write timeout, got %d", events)
+	}
+}
+
+// serveOn starts srv on a loopback port and returns its base url
+func serveOn(t *testing.T, srv *http.Server) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(ln)
+	return "http://" + ln.Addr().String()
+}
+
+// the shutdown signal is process-wide; swap in a fresh one so the rest of the
+// package still sees live streams
+func isolateShutdownSignal(t *testing.T) {
+	t.Helper()
+	prevCtx, prevCancel := shuttingDown, signalShutdown
+	shuttingDown, signalShutdown = context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		signalShutdown()
+		shuttingDown, signalShutdown = prevCtx, prevCancel
+	})
+}
+
+func TestShutdownEndsEventStreams(t *testing.T) {
+	isolateShutdownSignal(t)
+
+	handlerReturned := make(chan struct{})
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(handlerReturned)
+		stream, err := SSE(w, r)
+		if err != nil {
+			return
+		}
+		for {
+			select {
+			case <-stream.Done():
+				return
+			case <-time.After(20 * time.Millisecond):
+				if stream.Ping() != nil {
+					return
+				}
+			}
+		}
+	})}
+	srv.RegisterOnShutdown(signalShutdown)
+
+	res, err := http.Get(serveOn(t, srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	start := time.Now()
+	shutdown(srv, 10*time.Second)
+	// without the shutdown signal the stream would hold the connection for
+	// the whole grace period
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("shutdown waited %v on an open event stream", elapsed)
+	}
+	select {
+	case <-handlerReturned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stream handler never returned")
+	}
+}
+
+func TestShutdownCutsRequestsPastTheGrace(t *testing.T) {
+	isolateShutdownSignal(t)
+
+	stuck := make(chan struct{})
+	defer close(stuck)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-stuck
+	})}
+	base := serveOn(t, srv)
+
+	inFlight := make(chan struct{})
+	go func() {
+		defer close(inFlight)
+		res, err := http.Get(base)
+		if err == nil {
+			res.Body.Close()
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	start := time.Now()
+	shutdown(srv, 200*time.Millisecond)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("a stuck handler blocked shutdown for %v", elapsed)
+	}
+	select {
+	case <-inFlight:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the cut connection left its client hanging")
+	}
+}
+
+func TestShutdownGraceIsConfigurable(t *testing.T) {
+	t.Setenv("BORGO_SHUTDOWN_TIMEOUT", "3s")
+	if got := envDuration("BORGO_SHUTDOWN_TIMEOUT", 10*time.Second); got != 3*time.Second {
+		t.Fatalf("grace = %v, want 3s", got)
 	}
 }
 
