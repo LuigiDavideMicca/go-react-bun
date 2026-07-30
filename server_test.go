@@ -80,8 +80,10 @@ func TestSlowHeadersAreCutOff(t *testing.T) {
 	}
 }
 
+// the whole Serve chain: the deadline reset has to reach the real connection
+// through the recovery and gzip wrappers
 func TestSSEOutlivesWriteTimeout(t *testing.T) {
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewUnstartedServer(recoverMiddleware(gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		stream, err := SSE(w, r)
 		if err != nil {
 			return
@@ -92,7 +94,7 @@ func TestSSEOutlivesWriteTimeout(t *testing.T) {
 				return
 			}
 		}
-	}))
+	}))))
 	// far shorter than the stream: without the deadline reset in SSE the
 	// connection dies before the second event
 	srv.Config.WriteTimeout = 100 * time.Millisecond
