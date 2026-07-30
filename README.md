@@ -12,11 +12,23 @@
 
 *Italian for "village": small, self-governing, self-hosted.*
 
-borgo is a mini Vercel-style full-stack framework: file-based React pages server-rendered by Bun, API routes written in Go. You get the DX — `bunx create-borgo my-app`, drop a file in `pages/`, drop a file in `api/`, one dev command — without the platform. Deployment is one Go binary and one Bun server on any box you control.
+**The self-hosted React framework.** Vercel developer experience. Go performance. Bun tooling.
+
+File-based React pages server-rendered by Bun, API routes written in Go. You get the DX — `bunx create-borgo my-app`, drop a file in `pages/`, drop a file in `api/`, one dev command — without the platform. Deployment is one Go binary and one Bun server on any box you control.
 
 Pages get nested layouts, per-page `<head>` management, streaming SSR through Suspense, client-side navigation with hover/viewport prefetching and scroll restoration, per-route code splitting, opt-out and deferred hydration plus islands, form actions that submit in place without losing your scroll (and still work with JavaScript off), live updates over server-sent events and first-class typed WebSocket topics, signed-cookie sessions, fast refresh in dev, opt-in Tailwind, the PWA mechanics (precache manifest, service worker serving, guarded registration), custom 404/500 pages, and static export for the pages that need no server — all through file conventions. Loaders and actions talk to the Go API through a client typed end to end by `borgogen`, which reads the Go handlers with `go/types` and generates the TypeScript route map, request bodies and WebSocket payloads included. Around the core: `/healthz` on both servers with opt-in Prometheus metrics, `borgo deploy init` for the blessed reverse-proxy/systemd/compose configs, and `borgo doctor` when something is off.
 
 The entire framework is a few thousand lines of readable TypeScript and Go; the Go runtime has zero dependencies. It exists because most of what makes Next-style frameworks pleasant is conventions, not machinery — and conventions are cheap.
+
+## Why borgo?
+
+Not a feature list — the reasoning:
+
+- **Go in production.** One static binary, small memory footprint, real concurrency. The API server is `net/http` with zero dependencies; what you deploy is what you read.
+- **Bun for development.** Fast builds, fast refresh, one toolchain — the dev loop of a modern meta-framework without a bundler config to own.
+- **React, unmodified.** The ecosystem you already know; no fork, no compiler magic, no proprietary component model.
+- **Types generated, not maintained.** `borgogen` reads the Go handlers and emits the TypeScript bridge — request bodies, responses, WebSocket payloads. No OpenAPI spec drifting out of date.
+- **Self-hosted, by conviction.** Any VPS, container host or bare-metal box. React, SSR, typed APIs, WebSockets, streaming and Docker — without depending on Vercel, Cloudflare or Netlify.
 
 ## Quickstart
 

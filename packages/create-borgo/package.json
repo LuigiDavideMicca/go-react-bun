@@ -1,7 +1,7 @@
 {
   "name": "create-borgo",
   "version": "0.11.0",
-  "description": "Scaffold a new borgo app: file-based React SSR on Bun with a Go API.",
+  "description": "Scaffold a new borgo app: the self-hosted React framework - React SSR on Bun, API routes in Go, typed end to end.",
   "type": "module",
   "bin": {
     "create-borgo": "./src/cli.ts"

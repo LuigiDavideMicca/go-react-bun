@@ -1,7 +1,7 @@
 {
   "name": "borgo-framework",
   "version": "0.11.0",
-  "description": "Mini Vercel-style fullstack framework: file-based React SSR on Bun, API routes in Go, one binary + one server, self-hosted.",
+  "description": "The self-hosted React framework: file-based React SSR on Bun, API routes in Go, typed end to end. Vercel DX, Go performance, no platform lock-in.",
   "type": "module",
   "bin": {
     "borgo": "./src/cli.ts"
