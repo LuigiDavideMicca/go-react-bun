@@ -69,7 +69,15 @@ export async function dev() {
         renameSync(goNext, goBin);
         break;
       } catch (error) {
-        if (attempt >= 20) throw error;
+        if (attempt >= 20) {
+          // a stale api process from a force-killed session still holds the
+          // binary: tell the user what to do instead of dumping an EPERM stack
+          console.error(
+            `  ${c.red(g.err)} cannot replace ${goBin}: an old api process is still running.\n` +
+              `  kill it (its name is "${goBinName().replace(/\.exe$/, "")}") and save again — the previous api keeps serving meanwhile.`,
+          );
+          return;
+        }
         await Bun.sleep(100);
       }
     }
