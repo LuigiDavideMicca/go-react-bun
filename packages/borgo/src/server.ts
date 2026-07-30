@@ -265,7 +265,9 @@ export async function serve({ dev = false } = {}) {
       }
     }
 
-    if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return new Response("method not allowed", { status: 405 });
+    }
 
     const matched = matchRoute(url.pathname, routes);
     const wantsProps = url.searchParams.get("__borgo") === "props";
@@ -432,6 +434,11 @@ export async function serve({ dev = false } = {}) {
       let response: Response;
       try {
         response = await handle(req);
+        // pages render for HEAD too (status and headers must be real), only
+        // the body is dropped
+        if (req.method === "HEAD" && response.body) {
+          response = new Response(null, { status: response.status, headers: response.headers });
+        }
       } catch (error) {
         console.error(error);
         if (dev) {

@@ -18,3 +18,13 @@ test("encoded traversal attempts never escape public/", async ({ request }) => {
     expect(res.status(), path).toBe(404);
   }
 });
+
+test("head requests carry real status and headers, but no body", async ({ request }) => {
+  const ok = await request.head("/");
+  expect(ok.status()).toBe(200);
+  expect(ok.headers()["content-type"]).toContain("text/html");
+  expect((await ok.body()).length).toBe(0);
+
+  const missing = await request.head("/definitely/not/here");
+  expect(missing.status()).toBe(404);
+});
