@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 var (
@@ -57,13 +58,28 @@ func Bind[T any](r *http.Request) (T, error) {
 	return v, err
 }
 
+var startTime = time.Now()
+
+// healthz answers the api's own liveness probe; the front server's /healthz
+// aggregates it into the app-level view.
+func healthz(w http.ResponseWriter, r *http.Request) {
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"uptime": time.Since(startTime).Seconds(),
+	})
+}
+
 // Serve mounts every registered route and listens on API_PORT (default 3501).
+// It also answers GET /healthz, unless a registered route claims it.
 func Serve() {
 	mux := http.NewServeMux()
 	patterns := make([]string, 0, len(routes))
 	for pattern, handler := range routes {
 		mux.HandleFunc(pattern, handler)
 		patterns = append(patterns, pattern)
+	}
+	if _, taken := routes["GET /healthz"]; !taken {
+		mux.HandleFunc("GET /healthz", healthz)
 	}
 	sort.Slice(patterns, func(i, j int) bool {
 		a, b := strings.SplitN(patterns[i], " ", 2), strings.SplitN(patterns[j], " ", 2)

@@ -8,6 +8,7 @@ import { buildAssets, compileCss } from "./build";
 import { banner, c, fmtMs, g, statusColor } from "./colors";
 import { gzipStream, isCompressiblePath, isHashedAsset, jsonResponse, pickEncoding } from "./compress";
 import { registerIslands } from "./index";
+import { createMetrics } from "./metrics";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, safeDecode, type Head, type Route } from "./router";
 import { shouldBufferBody } from "./util";
@@ -299,6 +300,28 @@ export async function serve({ dev = false } = {}) {
     return renderPage(req, matched.route, matched.params, 200);
   }
 
+  // observability: /healthz always answers (and probes the go api with a
+  // short timeout), /metrics appears with METRICS=1. both stay out of the
+  // request log, the metrics themselves and any compression.
+  const bootTime = Date.now();
+  const metrics = process.env.METRICS === "1" ? createMetrics(bootTime) : null;
+
+  async function healthz(): Promise<Response> {
+    let apiState = "down";
+    try {
+      const res = await fetch(`${api}/healthz`, { signal: AbortSignal.timeout(1_500) });
+      if (res.ok) apiState = "reachable";
+    } catch {}
+    return Response.json({
+      status: apiState === "reachable" ? "ok" : "degraded",
+      uptime: (Date.now() - bootTime) / 1000,
+      api: apiState,
+    });
+  }
+
+  const routeLabel = (pathname: string) =>
+    pathname.startsWith("/api/") ? "/api/*" : (matchRoute(pathname, routes)?.route.pattern ?? "*");
+
   function logRequest(req: Request, status: number, ms: number) {
     const path = new URL(req.url).pathname;
     if (path.startsWith("/assets/") || path === "/favicon.ico") return;
@@ -438,6 +461,13 @@ export async function serve({ dev = false } = {}) {
         }
         return new Response("not found", { status: 404 });
       }
+      if (url.pathname === "/healthz") return healthz();
+      if (metrics && url.pathname === "/metrics") {
+        return new Response(metrics.render(), {
+          headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
+        });
+      }
+
       let response: Response;
       try {
         response = await handle(req);
@@ -462,6 +492,9 @@ export async function serve({ dev = false } = {}) {
         } else {
           response = new Response("internal server error", { status: 500 });
         }
+      }
+      if (metrics && !url.pathname.startsWith("/assets/") && url.pathname !== "/favicon.ico") {
+        metrics.observe(routeLabel(url.pathname), response.status, (performance.now() - t0) / 1000);
       }
       if (dev) logRequest(req, response.status, performance.now() - t0);
       return response;
