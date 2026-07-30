@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -14,6 +15,12 @@ import { shouldBufferBody } from "./util";
 const isConnRefused = (err: unknown) => {
   const e = err as { code?: string; message?: string };
   return e?.code === "ConnectionRefused" || e?.code === "ECONNREFUSED" || /unable to connect|refused/i.test(e?.message ?? "");
+};
+
+const keysEqual = (given: string, expected: string) => {
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 };
 
 // resolve react from the app, not from this package: with a linked borgo
@@ -397,7 +404,7 @@ export async function serve({ dev = false } = {}) {
       if (req.method === "POST" && url.pathname === "/__borgo/publish") {
         const key = process.env.BORGO_PUSH_KEY;
         const authorized = key
-          ? req.headers.get("x-borgo-key") === key
+          ? keysEqual(req.headers.get("x-borgo-key") ?? "", key)
           : isLoopback(server.requestIP(req)?.address);
         if (!authorized) return new Response("forbidden", { status: 403 });
         const msg = await req.json().catch(() => null);
