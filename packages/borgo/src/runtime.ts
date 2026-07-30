@@ -387,10 +387,14 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       form.getAttribute("enctype") ||
       ""
     ).toLowerCase();
+    // urlencoded serialization of a file input is its filename (the spec's
+    // "entry list" conversion), not String(File) = "[object File]"
     const body =
       enctype === "multipart/form-data"
         ? data
-        : new URLSearchParams(data as unknown as Record<string, string>);
+        : new URLSearchParams(
+            [...data].map(([k, v]) => [k, typeof v === "string" ? v : v.name]),
+          );
 
     // the mutation is about to change what any prefetched loader would
     // return - drop the cache now, not on the success path only
@@ -510,6 +514,14 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       ).toLowerCase();
       if (method !== "post") return;
       if (form.hasAttribute("data-borgo-native")) return;
+      // a text/plain form asked for an encoding the enhanced path would
+      // silently rewrite to urlencoded: leave it to the browser
+      const enctype = (
+        submitter?.getAttribute("formenctype") ||
+        form.getAttribute("enctype") ||
+        ""
+      ).toLowerCase();
+      if (enctype === "text/plain") return;
       // getAttribute here too: an input named "target" shadows the property
       const targetAttr = form.getAttribute("target");
       if (targetAttr && targetAttr !== "_self") return;
