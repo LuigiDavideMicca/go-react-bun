@@ -81,9 +81,13 @@ export function subscribe(
   let ws: WebSocket | null = null;
   let closed = false;
   let attempts = 0;
+  let retry: ReturnType<typeof setTimeout> | undefined;
   const queue: string[] = [];
 
   const connect = () => {
+    // a close() racing the reconnect timer must win: without this, the timer
+    // dials a socket nothing will ever close and onEvent outlives the channel
+    if (closed) return;
     const scheme = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${scheme}://${location.host}/ws?topics=${encodeURIComponent(topic)}`);
     ws.onopen = () => {
@@ -99,19 +103,22 @@ export function subscribe(
     ws.onclose = () => {
       // an unreachable server would otherwise be dialled once a second for as
       // long as the tab stays open; backoff resets on the next successful open
-      if (!closed) setTimeout(connect, Math.min(30_000, 1_000 * 2 ** attempts++));
+      if (!closed) retry = setTimeout(connect, Math.min(30_000, 1_000 * 2 ** attempts++));
     };
   };
   connect();
 
   return {
     publish(event, data) {
+      // a closed channel will never flush its queue: drop instead of growing it
+      if (closed) return;
       const msg = JSON.stringify({ topic, event, data });
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg);
       else queue.push(msg);
     },
     close() {
       closed = true;
+      clearTimeout(retry);
       ws?.close();
     },
   };
