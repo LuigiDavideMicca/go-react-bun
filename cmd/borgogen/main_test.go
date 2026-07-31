@@ -383,6 +383,29 @@ func TestNonIdentifierJSONNamesAreQuoted(t *testing.T) {
 	}
 }
 
+// omitzero (go 1.24) drops a field whose value is the zero of its type, which
+// is exactly the case omitempty does not cover for structs and time.Time. A
+// required property for a field the wire routinely omits is the dangerous
+// direction: the browser reads undefined off a type that promised a value.
+func TestOmitzeroFieldsAreOptional(t *testing.T) {
+	root := filepath.Join("testdata", "optional")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	for _, want := range []string{
+		"zerost?: Inner",
+		"zeronum?: number",
+		"zerotime?: string",
+		// an option encoding/json does not recognize is not omitempty either
+		"typo: number",
+	} {
+		if !strings.Contains(types, want) {
+			t.Errorf("api-types.d.ts missing %q\n%s", want, types)
+		}
+	}
+}
+
 // A struct that embeds a pointer to itself used to recurse until the stack
 // blew up - a fatal error, not a recoverable one, on every save in dev.
 func TestSelfEmbeddingStructTerminates(t *testing.T) {

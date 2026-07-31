@@ -1085,11 +1085,14 @@ func (g *tsGen) collectFields(s *types.Struct, depth int, expanded map[*types.St
 			name = f.Name()
 		}
 		optional := ""
-		if strings.Contains(opts, "omitempty") {
+		if hasOpt(opts, "omitempty") || hasOpt(opts, "omitzero") {
+			// omitzero drops the field whenever the value is the zero of its
+			// type - or its IsZero() says so - which omitempty never does for
+			// a struct: a `json:"t,omitzero"` time.Time is routinely absent
 			optional = "?"
 		}
 		ts := g.tsType(f.Type())
-		if strings.Contains(opts, "string") {
+		if hasOpt(opts, "string") {
 			// ,string quotes booleans and pointed-to numbers too, not just
 			// plain ones: {"b":"true","p":"5"}
 			switch ts {
@@ -1127,6 +1130,20 @@ func isTSIdent(s string) bool {
 		}
 	}
 	return true
+}
+
+// hasOpt reports whether a json tag's option list contains opt. Options are
+// compared whole, the way encoding/json splits them: ",omitemptyish" is an
+// unknown option to it, not omitempty.
+func hasOpt(opts, opt string) bool {
+	for opts != "" {
+		var o string
+		o, opts, _ = strings.Cut(opts, ",")
+		if o == opt {
+			return true
+		}
+	}
+	return false
 }
 
 func parseJSONTag(tag string) (name, opts string) {
