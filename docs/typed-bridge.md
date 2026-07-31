@@ -59,4 +59,6 @@ Struct fields follow `encoding/json` semantics — tags, `omitempty`, embedded s
 
 ## Honest limits
 
-The bridge is static analysis, no runtime reflection. What remains invisible to it: responses written through `json.NewEncoder` or helpers outside the `api` package, and dynamically chosen types (`borgo.JSON(w, s, any(x))` types as the static type of `x`). Those routes type as `unknown` — the escape hatch is visible, not silent.
+The bridge is static analysis, no runtime reflection. It follows helpers across packages within your module (depth-capped) and reads inline `json.NewEncoder(w).Encode(v)` calls; handlers with several 2xx shapes type as a union. What remains invisible: helpers outside your module, an encoder stored in a variable before use, and dynamically chosen types (`borgo.JSON(w, s, any(x))` types as the static type of `x`). Those routes type as `unknown` — the escape hatch is visible, not silent.
+
+One decoding subtlety worth knowing: Go's `encoding/json` matches field names case-insensitively and lets the last duplicate key win, so `{"Username":"a","username":"b"}` binds `b` and `{"USERNAME":…}` still matches. `borgo.Bind` inherits this (changing it would break the stdlib contract). The practical rule: never validate a JSON body in one layer and act on it in another — bind once, in the Go handler, and validate what *it* decoded.

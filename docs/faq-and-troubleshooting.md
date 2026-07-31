@@ -29,7 +29,10 @@ Yes, opt-in via the `--tailwind` CLI flag — never autodetected. New projects: 
 `borgo.Auth[U]` gives you login/logout/register handlers, PBKDF2 hashing and signed-cookie sessions on the stdlib only; the front server adds CSRF for form actions. See [auth and sessions](auth-and-sessions.md).
 
 **Does borgo run on Windows?**
-Yes, first-class — it is developed on one. The dev loop (binary swap, watcher, console glyphs) has Windows-specific handling throughout.
+Yes, first-class — it is developed on one. The dev loop (binary swap, watcher, console glyphs, orphan-process watchdog) has Windows-specific handling throughout.
+
+**Can a Go handler hijack the connection or use sendfile?**
+Partially. `http.ResponseController` (flush, deadlines) works through borgo's middleware via `Unwrap`, and that is what SSE uses. Direct `http.Hijacker` casts and `io.ReaderFrom` (sendfile) don't survive a compressing wrapper — an inherent trade-off, not an oversight. If a route truly needs a raw connection, register it on your own `http.Server` beside borgo's.
 
 ## Troubleshooting
 
