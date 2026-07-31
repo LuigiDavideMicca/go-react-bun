@@ -13,6 +13,7 @@ import {
   gzipStream,
   isCompressiblePath,
   isNotModified,
+  isRangeStale,
   jsonResponse,
   pickEncoding,
   type AssetInfo,
@@ -352,6 +353,14 @@ export async function serve({ dev = false } = {}) {
     // recomputes it from the file on a GET (and on a range), so a stale index
     // can only misreport the head, never mis-frame a body
     headers.set("Content-Length", String(variant.size));
+    // bun turns a Range into a 206 off a Bun.file body, and never consults
+    // If-Range while doing it. a stream body is how the refusal is spelled:
+    // bun ranges files, not streams, so a validator that no longer matches
+    // gets the whole representation as a plain 200 - still off the disk,
+    // never through memory.
+    if (isRangeStale(req, variant.etag, info.lastModified)) {
+      return new Response(Bun.file(variant.path).stream(), { headers });
+    }
     return new Response(Bun.file(variant.path), { headers });
   }
 

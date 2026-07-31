@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import {
+  isRangeStale,
   assetCacheControl,
   buildAssetIndex,
   documentStream,
@@ -439,5 +440,41 @@ describe("jsonResponse", () => {
   test("keeps the caller's status", () => {
     const res = jsonResponse(withEncoding("gzip"), { notFound: true }, { status: 404 });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("isRangeStale", () => {
+  const req = (headers: Record<string, string>) => new Request("http://x/a.css", { headers });
+  const ETAG = '"1ni-ms8ppm9r"';
+  const LM = "Wed, 30 Jul 2026 09:00:00 GMT";
+
+  test("no range, or no if-range, is never stale", () => {
+    expect(isRangeStale(req({}), ETAG, LM)).toBe(false);
+    expect(isRangeStale(req({ range: "bytes=0-9" }), ETAG, LM)).toBe(false);
+    // an if-range without a range means nothing at all
+    expect(isRangeStale(req({ "if-range": '"other"' }), ETAG, LM)).toBe(false);
+  });
+
+  test("a validator that still matches lets the range through", () => {
+    expect(isRangeStale(req({ range: "bytes=0-9", "if-range": ETAG }), ETAG, LM)).toBe(false);
+    expect(isRangeStale(req({ range: "bytes=0-9", "if-range": LM }), ETAG, LM)).toBe(false);
+    expect(isRangeStale(req({ range: "bytes=0-9", "if-range": ` ${ETAG} ` }), ETAG, LM)).toBe(false);
+  });
+
+  test("a validator that no longer matches refuses it", () => {
+    expect(isRangeStale(req({ range: "bytes=0-9", "if-range": '"deadbeef-0"' }), ETAG, LM)).toBe(true);
+    expect(isRangeStale(req({ range: "bytes=0-9", "if-range": "Mon, 01 Jan 2001 00:00:00 GMT" }), ETAG, LM)).toBe(true);
+  });
+
+  test("resuming across a change of encoding is a mismatch, not a range", () => {
+    // the prefix the client holds is brotli; this request negotiated identity.
+    // filling it from the identity file would hand back a spliced file
+    const brEtag = '"fc-ms8ppmnf-br"';
+    expect(isRangeStale(req({ range: "bytes=100-", "if-range": brEtag }), ETAG, LM)).toBe(true);
+    expect(isRangeStale(req({ range: "bytes=100-", "if-range": brEtag }), brEtag, LM)).toBe(false);
+  });
+
+  test("a weak validator can never authorise a range", () => {
+    expect(isRangeStale(req({ range: "bytes=0-9", "if-range": `W/${ETAG}` }), ETAG, LM)).toBe(true);
   });
 });

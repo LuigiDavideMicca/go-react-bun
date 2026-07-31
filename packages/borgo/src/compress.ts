@@ -159,6 +159,22 @@ export function isNotModified(req: Request, etag: string, mtimeMs: number): bool
   return !Number.isNaN(since) && Math.floor(mtimeMs / 1000) * 1000 <= since;
 }
 
+// rfc 9110 §13.1.5: If-Range makes a range request conditional on the client
+// still holding the representation it started downloading. if the validator
+// does not match, the range must be ignored and the whole representation sent
+// - otherwise the client splices new bytes onto an old prefix and calls the
+// result a file. the mismatch is not exotic here: the same url negotiates to
+// a different encoding on every Accept-Encoding, so a resume that arrives
+// without the accept-encoding the first request carried is asking for a range
+// of the brotli file to be filled from the identity one.
+// a weak validator (W/"...") can never authorise a range, so it never matches.
+export function isRangeStale(req: Request, etag: string, lastModified: string): boolean {
+  const ifRange = req.headers.get("if-range");
+  if (ifRange === null || !req.headers.has("range")) return false;
+  const given = ifRange.trim();
+  return given !== etag && given !== lastModified;
+}
+
 const encoder = new TextEncoder();
 
 // the ssr document: shell head, react's own stream, shell tail. pull-based on
