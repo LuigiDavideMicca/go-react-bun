@@ -79,6 +79,13 @@ func (g *gzipResponseWriter) Header() http.Header { return g.rw.Header() }
 func (g *gzipResponseWriter) Unwrap() http.ResponseWriter { return g.rw }
 
 func (g *gzipResponseWriter) WriteHeader(status int) {
+	// a 1xx is informational: net/http writes it out immediately and leaves
+	// the response uncommitted, so it has to reach the connection now - held
+	// back it would arrive after the body, which defeats early hints
+	if status >= 100 && status < 200 {
+		g.rw.WriteHeader(status)
+		return
+	}
 	if g.status != 0 {
 		// log like net/http would: forwarding to the underlying writer could
 		// commit the wrong status while the response is still buffered

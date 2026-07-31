@@ -187,6 +187,12 @@ type recoverWriter struct {
 }
 
 func (w *recoverWriter) WriteHeader(status int) {
+	// an informational 1xx leaves the response uncommitted: a handler that
+	// panics right after sending early hints must still get its 500
+	if status >= 100 && status < 200 {
+		w.ResponseWriter.WriteHeader(status)
+		return
+	}
 	w.wrote = true
 	w.ResponseWriter.WriteHeader(status)
 }

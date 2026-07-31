@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"net/textproto"
 	"os"
 	"strings"
 	"testing"
@@ -116,6 +118,97 @@ func TestSSEOutlivesWriteTimeout(t *testing.T) {
 	}
 	if events != 3 {
 		t.Fatalf("want 3 events through the write timeout, got %d", events)
+	}
+}
+
+// net/http lets a handler send 1xx informational responses before the real
+// one; held back by a wrapper they would arrive after the body, and early
+// hints exist precisely to arrive first
+func TestEarlyHintsReachTheClientBeforeTheBody(t *testing.T) {
+	body := make(chan struct{})
+	srv := httptest.NewServer(recoverMiddleware(gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Link", "</app.js>; rel=preload; as=script")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.Header().Del("Link")
+		select {
+		case <-body:
+		case <-time.After(5 * time.Second): // never wedge the server's Close
+		}
+		WriteJSON(w, http.StatusTeapot, map[string]string{"ok": "yes"})
+	}))))
+	defer srv.Close()
+
+	hints := make(chan string, 4)
+	trace := &httptrace.ClientTrace{Got1xxResponse: func(code int, h textproto.MIMEHeader) error {
+		if code == http.StatusEarlyHints {
+			hints <- h.Get("Link")
+		}
+		return nil
+	}}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *http.Response, 1)
+	go func() {
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Error(err)
+			close(done)
+			return
+		}
+		done <- res
+	}()
+
+	select {
+	case link := <-hints:
+		if !strings.Contains(link, "/app.js") {
+			t.Errorf("early hints arrived without their Link header: %q", link)
+		}
+	case <-time.After(3 * time.Second):
+		t.Error("no early hints before the handler wrote its body")
+	}
+	close(body)
+
+	res, ok := <-done
+	if !ok {
+		t.FailNow()
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusTeapot {
+		t.Fatalf("final status = %d, want the handler's 418", res.StatusCode)
+	}
+	if payload, _ := io.ReadAll(res.Body); !strings.Contains(string(payload), `"ok":"yes"`) {
+		t.Errorf("body = %q", payload)
+	}
+}
+
+// a panic after early hints: the response is not committed yet, so the
+// recovery still owns it
+func TestPanicAfterEarlyHintsIsStillA500(t *testing.T) {
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	// httptest.ResponseRecorder cannot model a 1xx, so this one needs a real
+	// connection
+	srv := httptest.NewServer(recoverMiddleware(gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusEarlyHints)
+		panic("after the hints")
+	}))))
+	defer srv.Close()
+
+	res, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", res.StatusCode)
+	}
+	var body map[string]string
+	payload, _ := io.ReadAll(res.Body)
+	if json.Unmarshal(payload, &body) != nil || body["error"] == "" {
+		t.Fatalf("body = %q, want a json error", payload)
 	}
 }
 
