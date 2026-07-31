@@ -213,7 +213,11 @@ func apiPackageName(root string) string {
 	}
 	fset := token.NewFileSet()
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || e.Name() == "borgo.gen.go" {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || e.Name() == "borgo.gen.go" ||
+			// an api/foo_test.go declaring package api_test would name the
+			// overlay stub after the external test package, and the retry
+			// that exists to recover from a stale mounting would itself fail
+			strings.HasSuffix(e.Name(), "_test.go") {
 			continue
 		}
 		f, err := parser.ParseFile(fset, filepath.Join(root, "api", e.Name()), nil, parser.PackageClauseOnly)

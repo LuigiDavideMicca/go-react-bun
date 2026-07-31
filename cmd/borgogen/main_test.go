@@ -176,6 +176,31 @@ func TestStaleGeneratedMountingRecovers(t *testing.T) {
 	}
 }
 
+// The stale-mounting retry names its overlay stub after the api package. An
+// api/aaa_test.go declaring package api_test used to win that lookup, so the
+// recovery path failed with "found packages api and api_test" and the user was
+// left deleting borgo.gen.go by hand.
+func TestStaleMountingRecoversAlongsideAnExternalTestPackage(t *testing.T) {
+	root := filepath.Join("testdata", "testpkg")
+	genPath := filepath.Join(root, "api", "borgo.gen.go")
+	good := read(t, genPath)
+	stale := strings.Replace(good, `borgo.Handle("GET /api/ping", Ping)`, `borgo.Handle("GET /api/gone", DeletedHandler)`, 1)
+	if stale == good {
+		t.Fatal("fixture does not contain the expected mounting line")
+	}
+	if err := os.WriteFile(genPath, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.WriteFile(genPath, []byte(good), 0o644) })
+
+	if err := run(root); err != nil {
+		t.Fatalf("stale borgo.gen.go must not fail the run: %v", err)
+	}
+	if read(t, genPath) != good {
+		t.Errorf("borgo.gen.go not regenerated:\n%s", read(t, genPath))
+	}
+}
+
 func TestGenericInstantiationsStayDistinct(t *testing.T) {
 	root := filepath.Join("testdata", "generics")
 	if err := run(root); err != nil {
