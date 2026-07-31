@@ -186,6 +186,29 @@ describe("shouldBufferBody", () => {
     expect(shouldBufferBody("GET", "100")).toBe(false);
     expect(shouldBufferBody("HEAD", "100")).toBe(false);
   });
+
+  test("a repeated content-length still buffers - and still retries", () => {
+    // rfc 9112 §6.3: repeating the header with the same value is legal and
+    // bun.serve accepts it; Headers joins the repeats, and Number("5, 5") is
+    // NaN, so a tiny body used to lose its connection-refused retry
+    expect(shouldBufferBody("POST", "5, 5")).toBe(true);
+    expect(shouldBufferBody("POST", "512,512, 512")).toBe(true);
+  });
+
+  test("repeats that disagree are not a length at all", () => {
+    expect(shouldBufferBody("POST", "5, 9")).toBe(false);
+    expect(shouldBufferBody("POST", "5,")).toBe(false);
+  });
+
+  test("only digits are a length: Number() takes far more than that", () => {
+    expect(shouldBufferBody("POST", "")).toBe(false);
+    expect(shouldBufferBody("POST", "0x10")).toBe(false);
+    expect(shouldBufferBody("POST", "1e3")).toBe(false);
+    expect(shouldBufferBody("POST", "+5")).toBe(false);
+    expect(shouldBufferBody("POST", "5.5")).toBe(false);
+    // whitespace around a value is the header's, not part of the number
+    expect(shouldBufferBody("POST", " 512 ")).toBe(true);
+  });
 });
 
 describe("headHtml", () => {

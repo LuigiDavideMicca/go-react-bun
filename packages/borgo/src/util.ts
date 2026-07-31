@@ -210,11 +210,30 @@ export function forwardableHeaders(headers: Headers): Headers {
 // large upload or a chunked stream passes through once, without retry
 export const PROXY_RETRY_MAX_BODY = 10 * 1024 * 1024;
 
+// rfc 9112 §6.3 allows a request to repeat Content-Length as long as every
+// value agrees, and bun.serve accepts one: `Headers` then joins the repeats
+// into "5, 5". Number() reads that as NaN, which used to mean "unbuffered" -
+// so a five byte body lost its retry, and the comma-joined header went on to
+// go verbatim. parse the list instead, and require the values to agree.
+// Number() is the wrong reader for a header value in general: it also takes
+// "", "0x10", "1e3" and " 5 " as numbers a length may never be.
+function parseContentLength(value: string): number | null {
+  let length: number | null = null;
+  for (const part of value.split(",")) {
+    const token = part.trim();
+    if (!/^\d+$/.test(token)) return null;
+    const n = Number(token);
+    if (length !== null && n !== length) return null;
+    length = n;
+  }
+  return length;
+}
+
 export function shouldBufferBody(method: string, contentLength: string | null): boolean {
   if (method === "GET" || method === "HEAD") return false;
   if (contentLength === null) return false;
-  const length = Number(contentLength);
-  return Number.isInteger(length) && length >= 0 && length <= PROXY_RETRY_MAX_BODY;
+  const length = parseContentLength(contentLength);
+  return length !== null && length <= PROXY_RETRY_MAX_BODY;
 }
 
 // regenerate .borgo/api-types.d.ts (and the route mounting) from the go api.
