@@ -1,6 +1,7 @@
 package borgo
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -190,10 +191,22 @@ func TestSessionConcurrentRoundTrips(t *testing.T) {
 
 func TestSessionSecretRequired(t *testing.T) {
 	t.Setenv("SESSION_SECRET", "")
-	defer func() {
-		if r := recover(); r == nil || !strings.Contains(r.(string), "SESSION_SECRET") {
-			t.Fatalf("want actionable panic, got %v", r)
-		}
-	}()
-	SetSession(httptest.NewRecorder(), testSession{}, time.Hour)
+	// an error, not a panic: the process is already serving requests
+	if err := SetSession(httptest.NewRecorder(), testSession{}, time.Hour); !errors.Is(err, ErrNoSessionSecret) {
+		t.Fatalf("want ErrNoSessionSecret, got %v", err)
+	}
+}
+
+func TestSetSessionWithoutSecretIsAnError(t *testing.T) {
+	t.Setenv("SESSION_SECRET", "")
+	w := httptest.NewRecorder()
+	// a missing secret must not panic: the app is already serving, and a
+	// login that answers 500 is recoverable where a dead handler is not
+	err := SetSession(w, map[string]string{"user": "ada"}, time.Hour)
+	if !errors.Is(err, ErrNoSessionSecret) {
+		t.Fatalf("want ErrNoSessionSecret, got %v", err)
+	}
+	if len(w.Result().Cookies()) != 0 {
+		t.Fatal("no cookie may be written without a secret")
+	}
 }

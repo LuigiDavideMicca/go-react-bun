@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -222,6 +223,7 @@ func (a *Auth[U]) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	principal := a.principal(user)
 	if err := SetSession(w, principal, a.maxAge()); err != nil {
+		log.Printf("borgo: session write failed: %v", err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "session write failed"})
 		return
 	}
@@ -256,6 +258,14 @@ func (a *Auth[U]) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "hashing failed"})
 		return
 	}
+	// refuse before writing to the user store: creating an account we then
+	// cannot issue a session for leaves the caller with a 500 and a username
+	// that answers "taken" on the retry
+	if sessionSecret() == "" {
+		log.Print("borgo: register refused: " + ErrNoSessionSecret.Error())
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "session write failed"})
+		return
+	}
 	user, err := a.Register(r.Context(), creds.Username, hash)
 	if errors.Is(err, ErrUserExists) {
 		WriteJSON(w, http.StatusConflict, map[string]string{"error": "username taken"})
@@ -267,6 +277,7 @@ func (a *Auth[U]) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	principal := a.principal(user)
 	if err := SetSession(w, principal, a.maxAge()); err != nil {
+		log.Printf("borgo: session write failed: %v", err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "session write failed"})
 		return
 	}

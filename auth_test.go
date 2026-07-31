@@ -312,3 +312,28 @@ func TestAuthed(t *testing.T) {
 		t.Fatalf("forged session: want 401, got %d", w.Code)
 	}
 }
+
+func TestRegisterRefusesBeforeTouchingTheStore(t *testing.T) {
+	t.Setenv("SESSION_SECRET", "")
+	created := false
+	auth := Auth[testUser]{
+		Lookup: func(context.Context, string) (testUser, string, error) { return testUser{}, "", errors.New("no user") },
+		Register: func(_ context.Context, username, hash string) (testUser, error) {
+			created = true
+			return testUser{Name: username}, nil
+		},
+	}
+	req := httptest.NewRequest("POST", "/api/register", strings.NewReader(`{"username":"ada","password":"hunter22"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	auth.RegisterHandler(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500, got %d", w.Code)
+	}
+	// the account must not exist: it could never be logged into, and the
+	// retry would answer "username taken"
+	if created {
+		t.Fatal("register wrote to the store despite having no session secret")
+	}
+}

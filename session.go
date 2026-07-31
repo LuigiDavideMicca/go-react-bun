@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"math"
@@ -37,13 +38,12 @@ type sessionEnvelope struct {
 	Data json.RawMessage `json:"data"`
 }
 
-func sessionSecret() string {
-	secret := os.Getenv("SESSION_SECRET")
-	if secret == "" {
-		panic("borgo: SESSION_SECRET must be set to use sessions (any long random string)")
-	}
-	return secret
-}
+// ErrNoSessionSecret is returned by SetSession when SESSION_SECRET is unset.
+// It is an error rather than a panic because the app is already serving: a
+// login that answers 500 is recoverable, a panicking handler is not.
+var ErrNoSessionSecret = errors.New("borgo: SESSION_SECRET must be set to use sessions (any long random string)")
+
+func sessionSecret() string { return os.Getenv("SESSION_SECRET") }
 
 // building an hmac is most of the cost of verifying a session, and every
 // guarded request verifies one. Pooled macs are rebuilt only when the secret
@@ -77,6 +77,9 @@ func sessionSign(payload string) string {
 // it. Set SESSION_SECURE=1 to add the Secure attribute behind https. A
 // maxAge of zero or less writes an already-expired session.
 func SetSession(w http.ResponseWriter, v any, maxAge time.Duration) error {
+	if sessionSecret() == "" {
+		return ErrNoSessionSecret
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
