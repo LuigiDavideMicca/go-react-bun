@@ -397,6 +397,24 @@ func TestDuplicateManualPatternIsDeclaredOnceAndWarns(t *testing.T) {
 	}
 }
 
+// A handler in a file the current build excludes is invisible to the loader,
+// so its route disappears from both outputs with nothing to explain the 404.
+func TestExcludedRouteFileWarns(t *testing.T) {
+	root := filepath.Join("testdata", "excluded")
+	out := captureStderr(t, func() {
+		if err := run(root); err != nil {
+			t.Error(err)
+		}
+	})
+	if !strings.Contains(out, "plan9.go:11") || !strings.Contains(out, "this build excludes") {
+		t.Errorf("want a warning pointing at the excluded directive, got:\n%s", out)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	if strings.Contains(types, "plan9") {
+		t.Errorf("the excluded route must not be typed:\n%s", types)
+	}
+}
+
 func TestLooseRouteCommentWarns(t *testing.T) {
 	out := captureStderr(t, func() {
 		if err := run(filepath.Join("testdata", "loose")); err != nil {

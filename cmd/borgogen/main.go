@@ -110,6 +110,7 @@ func run(root string) (err error) {
 	decls := funcDecls(pkg)
 	directives := collectDirectives(pkg, decls, routes)
 	warnLooseRouteComments(pkg, decls)
+	warnExcludedRouteFiles(root, pkg)
 	routes = append(routes, directives...)
 
 	sort.Slice(routes, func(i, j int) bool {
@@ -341,6 +342,43 @@ func warnLooseRouteComments(pkg *packages.Package, decls map[*types.Func]*ast.Fu
 				}
 				pos := pkg.Fset.Position(comment.Pos())
 				fmt.Fprintf(os.Stderr, "borgogen: warning: %s: comment looks like //borgo:route but is not attached to a handler; it was ignored\n", pos)
+			}
+		}
+	}
+}
+
+// warnExcludedRouteFiles flags //borgo:route directives sitting in api/*.go
+// files this build does not compile - a //go:build constraint, a _linux suffix,
+// a _test.go. The handler is invisible to the generator, so the route silently
+// disappears from both outputs and the browser 404s with nothing to explain it.
+func warnExcludedRouteFiles(root string, pkg *packages.Package) {
+	compiled := map[string]bool{}
+	for _, f := range pkg.GoFiles {
+		compiled[filepath.Base(f)] = true
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "api"))
+	if err != nil {
+		return
+	}
+	fset := token.NewFileSet()
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || compiled[name] ||
+			strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(fset, filepath.Join(root, "api", name), nil, parser.ParseComments|parser.SkipObjectResolution)
+		if parseErr != nil {
+			continue
+		}
+	scan:
+		for _, group := range file.Comments {
+			for _, comment := range group.List {
+				if !directiveRe.MatchString(comment.Text) {
+					continue
+				}
+				fmt.Fprintf(os.Stderr, "borgogen: warning: %s: //borgo:route in a file this build excludes; the route was not mounted and has no type\n", fset.Position(comment.Pos()))
+				break scan
 			}
 		}
 	}
