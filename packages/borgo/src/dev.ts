@@ -86,8 +86,12 @@ export async function dev() {
     const nextHash = String(Bun.hash(readFileSync(goNext)));
     if (nextHash === liveGoHash && goProc && goProc.exitCode === null) return;
     liveGoHash = nextHash;
-    goProc?.kill();
-    await goProc?.exited;
+    // dropping the reference before killing marks this exit as ours, so the
+    // watchdog below stays quiet about a restart we asked for
+    const previous = goProc;
+    goProc = null;
+    previous?.kill();
+    await previous?.exited;
     for (let attempt = 0; ; attempt++) {
       try {
         renameSync(goNext, goBin);
@@ -118,6 +122,16 @@ export async function dev() {
       },
     });
     goProc = proc;
+    // an api that dies on its own - a panic, a failed bind, someone killing it
+    // - is nobody's rebuild: without this the session keeps serving 502s and
+    // says nothing until the next .go edit happens to restart it
+    proc.exited.then((code) => {
+      if (goProc !== proc) return;
+      goProc = null;
+      console.error(
+        `  ${c.red(g.err)} the api exited on its own (${code}) - save a .go file to rebuild and restart it`,
+      );
+    });
     const ready = await apiReady(proc);
     if (!ready) console.error(`  ${c.red(g.err)} api is not answering on :${apiPort}`);
     if (reload && ready) await notifyFront("reload");
