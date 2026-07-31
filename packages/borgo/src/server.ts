@@ -27,6 +27,7 @@ import {
   freshCookieHeader,
   hasCookie,
   headHtml,
+  headResponse,
   proxyRequest,
   scriptJson,
 } from "./util";
@@ -658,12 +659,7 @@ export async function serve({ dev = false } = {}) {
       // heads render for real (status and headers must be honest), only the
       // body is dropped - and cancelled, or the ssr/gzip pipeline keeps
       // rendering into a stream nobody reads
-      const dropBody = (res: Response) => {
-        if (req.method !== "HEAD" || !res.body) return res;
-        const headless = new Response(null, { status: res.status, headers: res.headers });
-        void res.body.cancel().catch(() => {});
-        return headless;
-      };
+      const dropBody = (res: Response) => headResponse(req.method, res);
 
       // app websockets: /ws?topics=a,b subscribes the browser to topics.
       // browsers attach cookies to ws handshakes from any origin, so a

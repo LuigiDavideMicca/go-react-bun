@@ -236,6 +236,16 @@ export function shouldBufferBody(method: string, contentLength: string | null): 
   return length !== null && length <= PROXY_RETRY_MAX_BODY;
 }
 
+// a head renders for real - status and headers must be what a get would have
+// said - and only the body is dropped. cancelled, too: without that the
+// ssr/gzip pipeline behind it keeps rendering into a stream nobody reads.
+export function headResponse(method: string, res: Response): Response {
+  if (method !== "HEAD" || !res.body) return res;
+  const headless = new Response(null, { status: res.status, headers: res.headers });
+  void res.body.cancel().catch(() => {});
+  return headless;
+}
+
 // the seam, narrowed to what the proxy actually asks of fetch: a target and
 // an init in, a response out. the global satisfies it and so does a stub.
 export type ProxyFetch = (target: string, init: RequestInit) => Promise<Response>;
