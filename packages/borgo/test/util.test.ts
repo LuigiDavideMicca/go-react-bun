@@ -5,6 +5,8 @@ import {
   escapeHtml,
   freshCookieHeader,
   hasCookie,
+  HOP_BY_HOP,
+  forwardableHeaders,
   headHtml,
   PROXY_RETRY_MAX_BODY,
   scriptJson,
@@ -297,5 +299,58 @@ describe("createSecurity", () => {
     const plain = createSecurity(false, { csp: "default-src *" })!;
     expect(plain.needsNonce).toBe(false);
     expect(plain.apply(html()).headers.get("Content-Security-Policy")).toBe("default-src *");
+  });
+});
+
+describe("forwardableHeaders", () => {
+  test("the rfc 9110 hop-by-hop set never reaches the api", () => {
+    const out = forwardableHeaders(
+      new Headers({
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5, max=1000",
+        "te": "trailers",
+        "trailer": "X-Checksum",
+        "transfer-encoding": "chunked",
+        "upgrade": "websocket",
+        "proxy-authenticate": "Basic",
+        "proxy-authorization": "Basic Zm9v",
+        "proxy-connection": "keep-alive",
+        "cookie": "borgo_session=abc",
+        "content-type": "application/json",
+      }),
+    );
+    for (const name of HOP_BY_HOP) expect(out.has(name)).toBe(false);
+    // everything the app actually needs survives
+    expect(out.get("cookie")).toBe("borgo_session=abc");
+    expect(out.get("content-type")).toBe("application/json");
+  });
+
+  test("Connection names further headers as hop-scoped: they go too", () => {
+    // otherwise `Connection: X-Api-Key` is a way for the client to strip
+    // whatever the go api trusts, on a hop the client does not own
+    const out = forwardableHeaders(
+      new Headers({ connection: "keep-alive, X-Api-Key, X-Trace", "x-api-key": "k", "x-trace": "t", "x-keep": "y" }),
+    );
+    expect(out.has("x-api-key")).toBe(false);
+    expect(out.has("x-trace")).toBe(false);
+    expect(out.get("x-keep")).toBe("y");
+  });
+
+  test("a single-token Connection is still parsed - there is no comma to key on", () => {
+    const out = forwardableHeaders(new Headers({ connection: "X-Secret", "x-secret": "leak", "x-keep": "y" }));
+    expect(out.has("x-secret")).toBe(false);
+    expect(out.get("x-keep")).toBe("y");
+  });
+
+  test("content-length stays: bun reframes the body and go still wants the length", () => {
+    const out = forwardableHeaders(new Headers({ "content-length": "412", "transfer-encoding": "chunked" }));
+    expect(out.get("content-length")).toBe("412");
+    expect(out.has("transfer-encoding")).toBe(false);
+  });
+
+  test("the request's own headers are left alone", () => {
+    const req = new Headers({ connection: "keep-alive", cookie: "a=1" });
+    forwardableHeaders(req);
+    expect(req.get("connection")).toBe("keep-alive");
   });
 });

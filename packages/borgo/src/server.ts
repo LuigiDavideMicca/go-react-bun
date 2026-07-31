@@ -24,6 +24,7 @@ import { matchRoute, resolveHead, safeDecode, type Route } from "./router";
 import {
   createSecurity,
   envInt,
+  forwardableHeaders,
   freshCookieHeader,
   hasCookie,
   headHtml,
@@ -383,6 +384,9 @@ export async function serve({ dev = false } = {}) {
       const hasBody = req.method !== "GET" && req.method !== "HEAD";
       const buffered = shouldBufferBody(req.method, req.headers.get("content-length"));
       const body = hasBody ? (buffered ? await req.arrayBuffer() : req.body) : undefined;
+      // hop-by-hop headers belong to the browser -> borgo connection, not to
+      // this one; built once, outside the retry loop
+      const headers = forwardableHeaders(req.headers);
       // resendable unless a real body streamed through unbuffered - a
       // body-less delete/post (body null) is as safe to retry as a get
       const retriable = !hasBody || buffered || body == null;
@@ -404,7 +408,7 @@ export async function serve({ dev = false } = {}) {
           // included; bun would otherwise inflate it and resend identity
           const upstream = await fetch(target, {
             method: req.method,
-            headers: req.headers,
+            headers,
             ...(hasBody ? { body } : {}),
             decompress: false,
             signal: abort?.signal,

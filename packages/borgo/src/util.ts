@@ -161,6 +161,50 @@ export function envInt(value: string | undefined, fallback: number): number {
 
 export const goBinName = () => "api" + (process.platform === "win32" ? ".exe" : "");
 
+// rfc 9110 §7.6.1: these govern one connection and are meaningless - or
+// actively harmful - on the next hop. the browser -> borgo connection is not
+// the borgo -> go connection, so forwarding them verbatim hands the client
+// control of a hop that is not theirs:
+//   Connection also *names* further headers as hop-scoped, so `Connection:
+//     X-Api-Key` is a header-stripping primitive aimed at whatever go trusts;
+//   Upgrade invites go to answer 101 on a pooled keep-alive socket bun will
+//     reuse for the next /api request, desynchronised (the 101 guard in the
+//     proxy saves the client, not the socket);
+//   Proxy-Authorization / Proxy-Connection leak credentials meant for a
+//     forward proxy into application-visible headers;
+//   Transfer-Encoding is the client's framing of *its* request. bun frames the
+//     outbound request itself - chunked for a stream, content-length for a
+//     buffer, both derived from the bytes it actually writes - so passing the
+//     inbound framing on can only disagree with what goes on the wire.
+// measured on a 16-header browser request: ~0.9us, 0.1-0.5% of the proxy
+// handler's cpu under concurrency (2.5% of a 75us handler when fully serial).
+export const HOP_BY_HOP = [
+  "connection",
+  "keep-alive",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "proxy-connection",
+] as const;
+
+// content-length is deliberately kept: bun recomputes it for a buffered body
+// and the streamed path only ever carries the length bun's own server already
+// framed the request with, so go still sees an honest r.ContentLength.
+export function forwardableHeaders(headers: Headers): Headers {
+  const out = new Headers(headers);
+  // read Connection before deleting it; a single token carries no comma, so
+  // this cannot be shortcut on one
+  const connection = out.get("connection");
+  if (connection) {
+    for (const token of connection.split(",")) out.delete(token.trim());
+  }
+  for (const name of HOP_BY_HOP) out.delete(name);
+  return out;
+}
+
 // the /api proxy buffers request bodies so a refused connection (api mid-
 // restart) can be retried; only bodies of known, modest size qualify - a
 // large upload or a chunked stream passes through once, without retry
