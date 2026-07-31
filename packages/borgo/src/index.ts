@@ -170,8 +170,10 @@ type CsrfReact = {
 let csrfRuntime: { react: CsrfReact; context: Context<string> } | null = null;
 
 // react is injected (like islands) so this package never bundles its own copy
-export function registerCsrf(react: CsrfReact) {
-  csrfRuntime = { react, context: react.createContext("") };
+// null clears the registration: the server registers on every boot, so the
+// only caller that needs to unregister is a test asserting the bare path
+export function registerCsrf(react: CsrfReact | null) {
+  csrfRuntime = react ? { react, context: react.createContext("") } : null;
 }
 
 export function withCsrf(element: import("react").ReactNode, token: string) {

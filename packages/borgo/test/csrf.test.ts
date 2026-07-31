@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { makeApiClient } from "../src/api";
-import { CSRF_COOKIE, cookieValue, csrfCookieValue, withCsrf } from "../src/index";
+import { CSRF_COOKIE, cookieValue, csrfCookieValue, registerCsrf, withCsrf } from "../src/index";
 
 describe("cookieValue", () => {
   test("finds a cookie among several", () => {
@@ -51,6 +51,9 @@ describe("csrfCookieValue", () => {
 
 describe("withCsrf", () => {
   test("passes the element through when no react is registered", () => {
+    // the registry is module state and another suite in this process may have
+    // filled it: this test owns the empty case, so it clears it first
+    registerCsrf(null);
     const element = { marker: true };
     expect(withCsrf(element as never, "token")).toBe(element as never);
   });
