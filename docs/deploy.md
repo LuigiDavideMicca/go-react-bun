@@ -183,10 +183,40 @@ Route labels are the file-convention patterns (`/tasks/[id]`, not each concrete 
 | `SESSION_SECURE` | unset | `1` adds `Secure` to the session and csrf cookies |
 | `BORGO_CSRF` | unset | `0` disables csrf checks on form actions, `1` forces them in dev |
 | `METRICS` | unset | `1` exposes `/metrics` (Prometheus text) on the front server |
+| `BORGO_SECURITY_HEADERS` | unset | `0` drops the security headers *and* the CSP — see [security](security.md#changing-the-policy) |
+| `BORGO_CSP` | unset | `0` drops the CSP alone; any other value replaces the policy, with `{nonce}` substituted per request |
+| `BORGO_MAX_BODY` | `33554432` (32 MB) | front server: largest request body it will accept and buffer, in bytes |
+| `BORGO_API_TIMEOUT` | `30000` (30 s) | front server: milliseconds to wait for the api's response headers before answering `504`; `0` disables |
 | `BORGO_READ_HEADER_TIMEOUT` | `5s` | go server: cap on reading request headers (slow-header clients) |
 | `BORGO_IDLE_TIMEOUT` | `2m` | go server: idle keep-alive connections are reclaimed after this |
 | `BORGO_READ_TIMEOUT` | `0` (off) | go server: whole-request read deadline — leave off unless you have no streams |
 | `BORGO_WRITE_TIMEOUT` | `0` (off) | go server: whole-response write deadline — `borgo.SSE` streams exempt themselves |
+| `BORGO_SHUTDOWN_TIMEOUT` | `10s` | go server: grace period for in-flight requests on shutdown; `0` waits indefinitely |
 | `NO_COLOR` | unset | disable ANSI colors in logs |
 
-The timeout values are Go duration strings (`5s`, `2m`; `0` disables one) — a malformed value fails loudly at boot instead of silently defaulting. `DB_PATH` in the samples above is the app's own variable, not the framework's. Variables prefixed `BORGO_` but absent here (`BORGO_RELOAD`, `BORGO_CHANGED`) are internal, set by the CLI for its child processes.
+The Go timeouts are duration strings (`5s`, `2m`; `0` disables one) and a malformed value fails loudly at boot rather than silently defaulting; the front server's two are plain numbers. `DB_PATH` in the samples above is the app's own variable, not the framework's.
+
+Two more exist for the build, not the runtime: `BORGO_TAILWIND=1` is what `borgo build --tailwind` sets for its child processes (use the flag, not the variable — see [styling](dev-experience.md#styling)), and `BORGO_PARENT_PID` is how the CLI tells its children whose death to exit with. `BORGO_RELOAD` and `BORGO_CHANGED` are internal to the dev loop.
+
+## Shutdown and zero-downtime redeploys
+
+`borgo.Serve` traps `SIGINT` and `SIGTERM`. On either, it stops accepting new connections, lets in-flight requests finish, and ends every open SSE stream immediately through a shutdown hook — a long-lived stream does not hold the process hostage for the whole grace period. Anything still open when `BORGO_SHUTDOWN_TIMEOUT` expires is cut, so the process always exits and your supervisor never hangs.
+
+The front server exits with the API it supervises, and both exit if their launcher dies — a force-killed deploy script cannot leave a process holding port 3000.
+
+For a redeploy with no dropped requests, run two instances and switch the proxy between them:
+
+```bash
+# start the new version on a second port
+PORT=3001 API_PORT=3502 bun run start &
+# wait until it reports both halves healthy - /healthz is always HTTP 200,
+# so the readiness signal is in the body, not the status code
+until curl -fs http://localhost:3001/healthz | grep -q '"status":"ok"'; do sleep 0.5; done
+# point the proxy at :3001, reload it, then stop the old instance
+systemctl reload caddy
+kill -TERM "$OLD_PID"
+```
+
+That `grep` is not decoration: `/healthz` answers 200 even while the API is down, reporting `"status":"degraded"`. See [health and metrics](#health-and-metrics).
+
+With a single instance and a supervisor that restarts on exit, the window is the shutdown grace plus the boot time — usually under a second, but not zero. Docker's default `docker stop` grace is 10 seconds, which matches `BORGO_SHUTDOWN_TIMEOUT`'s default; lower one if you lower the other.
