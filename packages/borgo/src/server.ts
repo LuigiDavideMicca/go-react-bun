@@ -331,6 +331,12 @@ export async function serve({ dev = false } = {}) {
       headers.set("Content-Encoding", variant.encoding);
       headers.set("Content-Type", info.type);
     }
+    // a HEAD is answered from the headers alone, and dropping the body drops
+    // the length bun would have computed from the file: without this every
+    // HEAD claims Content-Length: 0 for a file a GET returns in full. bun
+    // recomputes it from the file on a GET (and on a range), so a stale index
+    // can only misreport the head, never mis-frame a body
+    headers.set("Content-Length", String(variant.size));
     return new Response(Bun.file(variant.path), { headers });
   }
 
@@ -339,7 +345,11 @@ export async function serve({ dev = false } = {}) {
     const headers: Record<string, string> = {};
     const cacheControl = assetCacheControl(path);
     if (cacheControl) headers["Cache-Control"] = cacheControl;
-    if (!isCompressiblePath(path)) return new Response(asset, { headers });
+    // same reason as in serveIndexed: a HEAD keeps the headers and loses the
+    // body bun would have measured
+    const served = (file: ReturnType<typeof Bun.file>) =>
+      new Response(file, { headers: { ...headers, "Content-Length": String(file.size) } });
+    if (!isCompressiblePath(path)) return served(asset);
     headers["Vary"] = "Accept-Encoding";
     if (!dev) {
       const encoding = pickEncoding(req.headers.get("accept-encoding"), ["br", "gzip"]);
@@ -348,11 +358,11 @@ export async function serve({ dev = false } = {}) {
         if (await sibling.exists()) {
           headers["Content-Encoding"] = encoding;
           headers["Content-Type"] = asset.type;
-          return new Response(sibling, { headers });
+          return served(sibling);
         }
       }
     }
-    return new Response(asset, { headers });
+    return served(asset);
   }
 
   const sendJson = (req: Request, value: unknown, init?: ResponseInit) =>

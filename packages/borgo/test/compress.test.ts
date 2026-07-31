@@ -127,6 +127,19 @@ describe("buildAssetIndex", () => {
     });
   });
 
+  test("every variant carries its own byte size, so a HEAD can be answered", async () => {
+    await withAssets(async (dir) => {
+      await Bun.write(join(dir, "assets/style.css"), "body{color:red}");
+      await Bun.write(join(dir, "assets/style.css.gz"), "gzipped-ish");
+      const css = buildAssetIndex(dir).get("/assets/style.css")!;
+      expect(css.identity.size).toBe("body{color:red}".length);
+      expect(css.variants[0].size).toBe("gzipped-ish".length);
+      // the compressed sibling must not inherit the identity length, or a
+      // HEAD would report the wrong size for the body a GET returns
+      expect(css.variants[0].size).not.toBe(css.identity.size);
+    });
+  });
+
   test("a missing directory is not fatal", () => {
     expect(buildAssetIndex(join(tmpdir(), "borgo-does-not-exist-" + Date.now())).size).toBe(0);
   });

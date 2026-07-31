@@ -57,7 +57,7 @@ export async function precompressAssets(dir: string) {
   }
 }
 
-export type AssetVariant = { path: string; encoding?: "br" | "gzip"; etag: string };
+export type AssetVariant = { path: string; encoding?: "br" | "gzip"; etag: string; size: number };
 
 export type AssetInfo = {
   identity: AssetVariant;
@@ -109,13 +109,19 @@ export function buildAssetIndex(dir: string): Map<string, AssetInfo> {
         ["br", ".br"],
         ["gzip", ".gz"],
       ] as const) {
-        if (files.has(path + ext)) {
-          variants.push({ path: path + ext, encoding, etag: tag(path + ext, `-${encoding}`) });
+        const sibling = files.get(path + ext);
+        if (sibling) {
+          variants.push({
+            path: path + ext,
+            encoding,
+            etag: tag(path + ext, `-${encoding}`),
+            size: sibling.size,
+          });
         }
       }
     }
     index.set(url, {
-      identity: { path, etag: tag(path, "") },
+      identity: { path, etag: tag(path, ""), size: file.size },
       variants,
       cacheControl: assetCacheControl(path),
       compressible,
