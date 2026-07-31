@@ -44,7 +44,15 @@ export async function precompressAssets(dir: string) {
   for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
     if (!entry.isFile() || !isCompressiblePath(entry.name)) continue;
     const path = join(entry.parentPath, entry.name);
-    const raw = Buffer.from(await Bun.file(path).arrayBuffer());
+    // the listing is a snapshot: a `borgo dev` rebuilding the same app
+    // deletes stale hashed chunks, and a file that vanished between the
+    // scan and the read is not a reason to fail the whole build
+    let raw: Buffer;
+    try {
+      raw = Buffer.from(await Bun.file(path).arrayBuffer());
+    } catch {
+      continue;
+    }
     const gz = gzipSync(raw, { level: constants.Z_BEST_COMPRESSION });
     if (gz.length < raw.length) await Bun.write(path + ".gz", gz);
     const br = brotliCompressSync(raw, {
