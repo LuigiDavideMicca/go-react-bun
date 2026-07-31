@@ -1,25 +1,41 @@
 # Dev experience
 
-The dev loop: fast refresh and its contract, styling (SCSS by default, Tailwind opt-in), the error overlay, `borgo doctor`, and the troubleshooting list.
+What `borgo dev` does while you work: what hot-applies and what reloads, how styling is compiled, what happens when a build breaks, and the diagnostics for when the machine — not the code — is the problem. The CLI reference is at the end.
 
 ## Fast refresh
 
-`borgo dev` keeps the browser hot over a WebSocket channel (`/__borgo/dev`):
+`borgo dev` runs both servers and keeps the browser hot over a WebSocket channel (`/__borgo/dev`). What that means concretely, in decreasing order of magic:
 
-- **Component, page and hook edits** apply through [react-refresh](https://www.npmjs.com/package/react-refresh) with the full babel transform (dev builds only) — the current route's new chunk is imported, loader props are refetched, and component state survives a body edit. Changing a component's *hooks* (add, remove, reorder, or a signature change inside a custom hook) remounts just that component, Next-style; the rest of the page keeps its state. Custom hook body edits hot-apply with dependent state intact.
-- **Style edits** recompile and swap the stylesheet in place, no reload, no state loss. The pipeline compiles the single root `style.scss` (plain CSS is valid SCSS — but the file watched and built is that one).
-- **Everything else falls back to a full reload**: layouts and error pages (they live in the entry chunk), `index.html`, and any Go change — the API binary is rebuilt while the old one keeps serving, swapped in, and the browser reloads only once the new API actually answers.
-- **A broken build doesn't take the port down**: the front server keeps serving the error overlay and the dev channel, and the page reloads itself when the next good save lands.
+- **Component, page and hook edits apply in place** through [react-refresh](https://www.npmjs.com/package/react-refresh) with the full Babel transform (dev builds only). The current route's new chunk is imported, loader props are refetched, and component state survives a body edit. Change a component's *hooks* — add, remove, reorder, or alter a custom hook's signature — and just that component remounts, Next-style; the rest of the page keeps its state. Editing a custom hook's body hot-applies with dependent state intact.
+- **Style edits swap the stylesheet in place** — no reload, no state loss.
+- **Everything else is a full reload**: layouts and error pages (they live in the shared entry chunk), `index.html`, and any Go change. On a Go edit the API binary is rebuilt while the old one keeps serving, swapped in, and the browser reloads exactly once — *after* the new API actually answers, so you never land on a dead backend.
+- **A broken build does not take the port down.** The front server keeps serving the error overlay and the dev channel, and the page reloads itself when the next good save lands.
 
-The mechanics, honestly: an edit restarts the front server for a clean server module graph; the browser never reloads — it reconnects and hot-applies the change from the boot greeting.
+The mechanics, honestly: an edit restarts the front server so the server module graph is clean. The browser never reloads for that — it reconnects and hot-applies the change from the boot greeting it receives.
+
+Two details you would otherwise discover the hard way. Identical content does not trigger a rebuild: the watcher hashes what it reads, so an editor that touches a file without changing it costs nothing. And the Go rebuild is deduplicated on its *output*, because Windows can deliver a change event while the file is still half-written — a torn read that fails to compile no longer queues a second pointless rebuild.
+
+## Nothing outlives the session
+
+Every process borgo starts watches the one that started it and exits with it. Kill the terminal, kill the task runner, kill `borgo dev` itself with a signal that runs no handlers — the front server and the Go API still go away, releasing their ports and the API binary.
+
+This is not a nicety. Before it existed, a force-killed session left an API process holding `.borgo/api.exe`, and the next `borgo dev` could not swap the binary in; you had to find the orphan in the task manager. If you see that symptom now, `borgo doctor` names the process for you.
 
 ## Styling
 
-The default pipeline compiles the single root `style.scss` to `public/assets/style.css` — expanded in dev, compressed in production. Plain CSS is valid SCSS, so no Sass knowledge is required.
+The default pipeline compiles the single root `style.scss` into `public/assets/style.css` — expanded in dev, compressed in production. Plain CSS is valid SCSS, so you do not need to know Sass to use it.
 
-### Tailwind (opt-in)
+### Tailwind, opt-in
 
-Tailwind v4 rides behind a CLI flag — never autodetection. New projects can skip the wiring entirely: `bunx create-borgo my-app --tailwind` (or answer the prompt) scaffolds everything below already done. For an existing app, three steps:
+Tailwind v4 rides behind a CLI flag, never autodetection: your CSS pipeline should not change because a package appeared in `node_modules`.
+
+New projects get it wired by the scaffolder:
+
+```bash
+bunx create-borgo my-app --tailwind
+```
+
+For an existing app, three steps. Install it:
 
 ```bash
 bun add tailwindcss @tailwindcss/cli
@@ -31,7 +47,7 @@ Create `style.css` in the app root:
 @import "tailwindcss";
 ```
 
-Then pass `--tailwind` to the commands in `package.json`:
+And pass the flag in `package.json`:
 
 ```json
 {
@@ -43,14 +59,52 @@ Then pass `--tailwind` to the commands in `package.json`:
 }
 ```
 
-With the flag, `@tailwindcss/cli` owns the stylesheet: it scans pages and islands for class names and rewrites `public/assets/style.css` (minified in production builds). Editing a page hot-applies new utilities through the normal refresh cycle, and editing `style.css` swaps the stylesheet in place. Without the flag, the SCSS pipeline stays in charge and `style.css` is ignored.
+With the flag, `@tailwindcss/cli` owns the stylesheet: it scans your pages and islands for class names and rewrites `public/assets/style.css`, minified in production builds. Editing a page hot-applies new utilities through the normal refresh cycle, and editing `style.css` swaps the stylesheet in place. Without the flag, the SCSS pipeline stays in charge and `style.css` is ignored.
 
-In dev, SSR errors render as a readable overlay page instead of the production 500 page, and the client runtime surfaces uncaught errors and unhandled rejections in-browser, with a dismissable overlay showing the stack.
+## The error overlay
+
+In dev, a server-side render error becomes a readable overlay page instead of the production 500. The client runtime also surfaces uncaught errors and unhandled rejections in the browser, in a dismissable overlay showing the stack.
+
+If the *build* is what broke, the fallback server keeps `/__borgo/dev` alive so the page can heal itself: fix the file, and the browser reloads on its own.
 
 ## borgo doctor
 
-`borgo doctor` diagnoses the environment: bun on `PATH` (including the npm-installed-shim trap), go and its version against your `go.mod`, both ports free — naming the process that holds one — a stale api process locking the dev binary swap, generated api types fresh against `api/*.go`, `node_modules` present, and the app's dependencies sane. Every failing check prints its one-line fix, and the exit code is 1 so it can gate scripts.
+`bunx borgo doctor` diagnoses the environment — the class of problem that is never in your code:
 
-## Troubleshooting
+| Check | What it catches |
+| --- | --- |
+| bun | not on `PATH`, or an npm-installed shim shadowing the real one |
+| go | missing, or older than your `go.mod` requires |
+| ports | `PORT` and `API_PORT` already in use — naming the process and its pid |
+| api binary | a stale API process holding `.borgo/api.exe` so dev cannot swap a new build in |
+| api types | `.borgo/api-types.d.ts` stale against your `api/*.go` |
+| node_modules | missing or not installed |
+| app deps | `borgo-framework`, `react` and `react-dom` present and consistent |
 
-Moved to its own page as it grew: [FAQ and troubleshooting](faq-and-troubleshooting.md). The short version: start with `bunx borgo doctor` — it diagnoses the common ones and prints the fix.
+Every failing check prints its one-line fix, and the exit code is 1 so you can gate a script on it. On Windows it reads `netstat` by row shape rather than by the English word `LISTENING`, so it still names the process holding a port on a localized system.
+
+## CLI reference
+
+Run these through Bun (`bun run dev`) or directly (`bunx borgo dev`).
+
+| Command | What it does |
+| --- | --- |
+| `borgo dev` | both servers, file watching, fast refresh, error overlay |
+| `borgo build` | generates types, builds client assets into `public/assets/`, compiles the Go binary into `dist/` |
+| `borgo start` | runs from the build output, supervising both processes |
+| `borgo export` | prerenders exportable pages into `dist/site/` — see [static export](deploy.md#static-export) |
+| `borgo deploy init <target>` | writes a deploy config: `caddy`, `nginx`, `systemd` or `compose` — see [deploy](deploy.md#borgo-deploy-init) |
+| `borgo doctor` | environment diagnosis, exit 1 on any failing check |
+
+Flags:
+
+| Flag | Applies to | Meaning |
+| --- | --- | --- |
+| `--tailwind` | `dev`, `build`, `start` | compile CSS with Tailwind instead of SCSS |
+| `--front-only` | `start` | run the front server alone, for split deployments where the API lives elsewhere (point `API_URL` at it) |
+| `--force` | `deploy init` | overwrite an existing config file |
+| `-h`, `--help`, `-v`, `--version` | — | print the banner and exit 0 |
+
+`borgo build` fails loudly rather than shipping something stale: if type generation fails, the build stops instead of leaving you with yesterday's types. And `borgo start` notices when `public/assets` was last written by `borgo dev` — a development bundle, unminified and uncompressed — and rebuilds it for production instead of serving it silently.
+
+When the problem is not the environment but the framework, [FAQ and troubleshooting](faq-and-troubleshooting.md) collects the symptoms with their fixes.
