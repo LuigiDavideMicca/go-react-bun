@@ -100,6 +100,46 @@ export const scriptJson = (value: unknown) =>
     .replaceAll("\u2028", "\\u2028")
     .replaceAll("\u2029", "\\u2029");
 
+// an action that logs in (or out) changes the jar mid-request: the loader that
+// runs right after must be handed the cookies as they are now, not as the
+// browser sent them. rebuilding that header means resolving duplicates, and
+// every layer that resolves them differently is a way to swap a session - go
+// rejects same-name cookies that disagree as ambiguous, so a jar rebuilt with
+// a last-wins winner would hand go a single unambiguous cookie it would
+// otherwise have refused. duplicates that disagree are dropped here too;
+// identical ones are one cookie, and a Set-Cookie the api just issued settles
+// the name whatever came in.
+export function freshCookieHeader(cookieHeader: string | null, setCookies: string[]): string {
+  const AMBIGUOUS = null;
+  const jar = new Map<string, string | null>();
+  for (const part of (cookieHeader ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    const name = part.slice(0, eq).trim();
+    const value = part.slice(eq + 1).trim();
+    if (jar.has(name)) {
+      if (jar.get(name) !== value) jar.set(name, AMBIGUOUS);
+    } else {
+      jar.set(name, value);
+    }
+  }
+  for (const sc of setCookies) {
+    const pair = sc.split(";")[0];
+    const eq = pair.indexOf("=");
+    if (eq === -1) continue;
+    const name = pair.slice(0, eq).trim();
+    // go writes Max-Age=0 for any non-positive MaxAge, so this covers the
+    // ClearSession(-1) that a logout action sends
+    if (/;\s*max-age=0\b/i.test(sc)) jar.delete(name);
+    else jar.set(name, pair.slice(eq + 1).trim());
+  }
+  const out: string[] = [];
+  for (const [name, value] of jar) {
+    if (value !== AMBIGUOUS) out.push(`${name}=${value}`);
+  }
+  return out.join("; ");
+}
+
 // "did we ever issue this browser a cookie of this name", regardless of what
 // the value reads as. a check that switches itself off when the value is
 // unusable is a check an attacker can switch off by making it unusable.

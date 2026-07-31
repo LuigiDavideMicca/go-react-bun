@@ -21,7 +21,15 @@ import { CSRF_COOKIE, CSRF_FIELD, csrfCookieValue, registerCsrf, registerIslands
 import { createMetrics } from "./metrics";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, safeDecode, type Route } from "./router";
-import { createSecurity, envInt, hasCookie, headHtml, scriptJson, shouldBufferBody } from "./util";
+import {
+  createSecurity,
+  envInt,
+  freshCookieHeader,
+  hasCookie,
+  headHtml,
+  scriptJson,
+  shouldBufferBody,
+} from "./util";
 
 const isConnRefused = (err: unknown) => {
   const e = err as { code?: string; message?: string };
@@ -161,25 +169,12 @@ export async function serve({ dev = false } = {}) {
 
   // an action that logs in (or out) changes the cookie jar mid-request: the
   // loader that runs right after must see the new session, not the one the
-  // browser sent before the action
+  // browser sent before the action. freshCookieHeader owns the duplicate
+  // semantics, which have to match what go would have made of the same jar
   const withFreshCookies = (req: Request, setCookies: string[]) => {
     if (!setCookies.length) return req;
-    const jar = new Map<string, string>();
-    for (const part of (req.headers.get("cookie") ?? "").split(";")) {
-      const eq = part.indexOf("=");
-      if (eq === -1) continue;
-      jar.set(part.slice(0, eq).trim(), part.slice(eq + 1).trim());
-    }
-    for (const sc of setCookies) {
-      const pair = sc.split(";")[0];
-      const eq = pair.indexOf("=");
-      if (eq === -1) continue;
-      const name = pair.slice(0, eq).trim();
-      if (/;\s*max-age=0\b/i.test(sc)) jar.delete(name);
-      else jar.set(name, pair.slice(eq + 1).trim());
-    }
     const headers = new Headers(req.headers);
-    const cookie = [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
+    const cookie = freshCookieHeader(req.headers.get("cookie"), setCookies);
     if (cookie) headers.set("cookie", cookie);
     else headers.delete("cookie");
     return new Request(req.url, { method: req.method, headers });

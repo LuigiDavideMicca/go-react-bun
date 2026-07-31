@@ -3,12 +3,99 @@ import {
   createSecurity,
   envInt,
   escapeHtml,
+  freshCookieHeader,
   hasCookie,
   headHtml,
   PROXY_RETRY_MAX_BODY,
   scriptJson,
   shouldBufferBody,
 } from "../src/util";
+
+describe("freshCookieHeader", () => {
+  const SESSION = "borgo_session";
+  const valid = "eyJleHAiOjF9.realsig";
+  const attacker = "eyJleHAiOjJ9.othersig";
+
+  test("the plain case: a set-cookie replaces what the browser sent", () => {
+    expect(freshCookieHeader("a=1; borgo_session=old", [`${SESSION}=new; Path=/; HttpOnly`])).toBe(
+      "a=1; borgo_session=new",
+    );
+  });
+
+  test("a logout clears the name instead of leaving the stale value", () => {
+    expect(freshCookieHeader("a=1; borgo_session=old", [`${SESSION}=; Path=/; Max-Age=0`])).toBe("a=1");
+    // go writes Max-Age=0 for ClearSession's MaxAge=-1, any attribute casing
+    expect(freshCookieHeader("borgo_session=old", [`${SESSION}=; Path=/; MAX-AGE=0; HttpOnly`])).toBe("");
+  });
+
+  test("junk + valid duplicates are ambiguous: neither reaches the loader", () => {
+    // last-wins used to hand go the junk alone, logging the victim out; go
+    // itself skips the junk and would have kept the session, so neither
+    // single winner is the answer - the pair is
+    const jar = freshCookieHeader(`${SESSION}=${valid}; ${SESSION}=!!junk!!`, ["other=1"]);
+    expect(jar).not.toContain(SESSION);
+    expect(jar).toBe("other=1");
+    const reversed = freshCookieHeader(`${SESSION}=!!junk!!; ${SESSION}=${valid}`, ["other=1"]);
+    expect(reversed).toBe("other=1");
+  });
+
+  test("valid + valid is the session swap go refuses, so the jar refuses it too", () => {
+    // cookie tossing: a sibling subdomain drops its own signed session in.
+    // rebuilding last-wins would hand go one unambiguous cookie - the
+    // attacker's - and the post-action page would render their account
+    const jar = freshCookieHeader(`${SESSION}=${valid}; a=1; ${SESSION}=${attacker}`, ["a=2"]);
+    expect(jar).not.toContain(valid);
+    expect(jar).not.toContain(attacker);
+    expect(jar).toBe("a=2");
+  });
+
+  test("identical duplicates are one cookie, not a conflict", () => {
+    expect(freshCookieHeader(`${SESSION}=${valid}; ${SESSION}=${valid}`, ["a=1"])).toBe(
+      `borgo_session=${valid}; a=1`,
+    );
+  });
+
+  test("refreshed by the action: a set-cookie settles a name the browser made ambiguous", () => {
+    // login through the tossed duplicates: go just issued this value, so it
+    // is authoritative and the ambiguity is over
+    expect(
+      freshCookieHeader(`${SESSION}=${valid}; ${SESSION}=${attacker}`, [
+        `${SESSION}=fresh.sig; Path=/; HttpOnly; SameSite=Lax`,
+      ]),
+    ).toBe("borgo_session=fresh.sig");
+  });
+
+  test("refreshed by the action: a logout clears an ambiguous name too", () => {
+    expect(
+      freshCookieHeader(`${SESSION}=${valid}; ${SESSION}=${attacker}; a=1`, [
+        `${SESSION}=; Path=/; Max-Age=0`,
+      ]),
+    ).toBe("a=1");
+  });
+
+  test("ambiguity is per name: the rest of the jar still reaches the loader", () => {
+    expect(
+      freshCookieHeader(`a=1; ${SESSION}=${valid}; b=2; ${SESSION}=${attacker}; c=3`, ["d=4"]),
+    ).toBe("a=1; b=2; c=3; d=4");
+  });
+
+  test("values keep their own = signs and the order of first appearance", () => {
+    expect(freshCookieHeader("s=a=b=c; z=1", ["y=2"])).toBe("s=a=b=c; z=1; y=2");
+  });
+
+  test("no cookies in, only what the action set out", () => {
+    expect(freshCookieHeader(null, [`${SESSION}=new; Path=/`])).toBe("borgo_session=new");
+    expect(freshCookieHeader("", [`${SESSION}=new`])).toBe("borgo_session=new");
+  });
+
+  test("a set-cookie with no = is skipped rather than poisoning the jar", () => {
+    expect(freshCookieHeader("a=1", ["garbage; Path=/"])).toBe("a=1");
+  });
+
+  test("everything cleared leaves an empty header, not a dangling separator", () => {
+    expect(freshCookieHeader("borgo_session=old", [`${SESSION}=; Max-Age=0`])).toBe("");
+  });
+});
 
 describe("hasCookie", () => {
   test("presence does not depend on the value being usable", () => {
