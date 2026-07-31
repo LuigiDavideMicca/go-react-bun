@@ -216,6 +216,24 @@ func TestSameNameStructsInDifferentPackagesStayDistinct(t *testing.T) {
 	}
 }
 
+// An api package declaring its own borgo used to produce a mounting that made
+// the whole package stop compiling: "borgo already declared through import".
+func TestMountingAvoidsAPackageLevelBorgo(t *testing.T) {
+	root := filepath.Join("testdata", "borgoname")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	gen := read(t, filepath.Join(root, "api", "borgo.gen.go"))
+	for _, want := range []string{
+		`import borgoPkg "github.com/LuigiDavideMicca/borgo"`,
+		`borgoPkg.Handle("GET /api/ping", Ping)`,
+	} {
+		if !strings.Contains(gen, want) {
+			t.Errorf("borgo.gen.go missing %q\n%s", want, gen)
+		}
+	}
+}
+
 func TestTextMarshalersAreStrings(t *testing.T) {
 	root := filepath.Join("testdata", "textmarshal")
 	if err := run(root); err != nil {
