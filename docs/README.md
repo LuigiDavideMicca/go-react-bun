@@ -1,6 +1,8 @@
 # borgo docs
 
-Deep dives for every convention the [README](../README.md) summarizes. Each page opens with what it covers; skim the index, read what you need.
+Start with [getting started](getting-started.md) if you have not built anything yet; everything else is a deep dive on one convention the [README](../README.md) summarizes. Each page opens with what it covers and ends with the honest limits of what it describes — skim the index, read what you need.
+
+Every TypeScript and Go example on these pages is compiled by CI against the real framework types. If a snippet appears here, it builds.
 
 | Page | One line |
 | --- | --- |

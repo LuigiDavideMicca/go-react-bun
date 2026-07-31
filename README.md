@@ -46,7 +46,7 @@ bun run dev
 
 Three templates: `base` (default — a tour of loaders, actions, islands and SSE), `minimal` (one page, one route) and `full` (notes CRUD + auth + typed WebSockets) — pick with `--template`, or let the interactive prompt ask.
 
-Open http://localhost:3000 — edit a page and watch fast refresh keep your state. When it's time to ship: `docker compose up -d` (the scaffold includes the Dockerfile), or see the [deploy guide](docs/deploy.md).
+Open http://localhost:3000 — edit a page and watch fast refresh keep your state. For a guided build instead of a tour, [getting started](docs/getting-started.md) takes you from here to a working feature in about twenty minutes. When it's time to ship: `docker compose up -d` (the scaffold includes the Dockerfile), or see the [deploy guide](docs/deploy.md).
 
 To poke at the full demo instead, clone this repo and run `bun install`, then `cd examples/tasks && bun run dev`.
 
@@ -137,6 +137,10 @@ func init() {
 
 `borgo dev` keeps the browser hot: component and hook edits apply through react-refresh with state intact, styles recompile and swap in place (`style.scss` by default, Tailwind v4 behind the opt-in `--tailwind` flag), Go changes rebuild the binary and reload once the new API answers, and a broken build keeps serving the error overlay instead of taking the port down. When something is off, `borgo doctor` diagnoses the environment — bun, go, ports, stale processes, generated types — with a one-line fix per failing check. Deep dive: [dev experience](docs/dev-experience.md); stuck? [FAQ and troubleshooting](docs/faq-and-troubleshooting.md).
 
+### Security
+
+A locked-down default posture, not a checklist you assemble: security headers and a strict Content-Security-Policy on every document — with the server-rendered props script nonced, so no `'unsafe-inline'` is needed in production — CSRF on form actions, signed `HttpOnly` session cookies, bounded request bodies, a slowloris-resistant timeout matrix, an `Origin` check on WebSocket upgrades, and duplicate cookies treated as no cookie at all. Everything is overridable by environment variable, and [the security page](docs/security.md) is equally explicit about what borgo deliberately leaves to you.
+
 ### Health checks and metrics
 
 The front server answers `/healthz` with `{status, uptime, api}` — probing the Go server's own `/healthz` (mounted automatically by `borgo.Serve`). Set `METRICS=1` and `/metrics` serves Prometheus text: request counts and a duration histogram by route pattern and status, hand-rolled, zero dependencies. Deep dive: [deploy guide](docs/deploy.md#health-and-metrics).
@@ -155,7 +159,8 @@ packages/create-borgo   npm: project scaffolder (three templates: base, minimal,
                         sse, websocket push, sessions, cache helpers (zero deps)
 cmd/borgogen            go: static analysis codegen for the typed bridge and route mounting (depends on x/tools)
 examples/tasks          demo app: tasks crud with gorm + sqlite, sse, websockets, islands, deferred hydration
-docs/                   deep dives: pages, typed bridge, client nav, realtime, auth, dev experience, pwa, deploy, faq
+docs/                   getting started, then deep dives: pages, typed bridge, client nav, realtime,
+                        auth, security, dev experience, pwa, deploy, faq
 ```
 
 Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo build` (client assets in `public/assets/`, Go binary in `dist/`), `borgo start` (run from build output, supervising both processes; `--front-only` for split deployments with `API_URL`), `borgo export` (static site in `dist/site/`), `borgo deploy init <caddy|nginx|systemd|compose>` (deploy configs), `borgo doctor` (environment diagnosis). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
@@ -194,6 +199,7 @@ Honest comparison with the frameworks a borgo adopter would otherwise pick. ✓ 
 | Static export | ✓ `borgo export` | ✓ | ✓ | ✓ |
 | Health endpoint + metrics | ✓ built-in, opt-in Prometheus | DIY | DIY | DIY |
 | Sessions/auth | ✓ signed cookie, hashing, login helpers, CSRF | libraries | modules | libraries |
+| Security headers + CSP by default | ✓ nonced, overridable | DIY | modules | DIY |
 | Fast refresh | ✓ full transform | ✓ full transform | ✓ | ✓ |
 | React Server Components | — | ✓ | n/a | n/a |
 | ISR / edge / serverless targets | — | ✓ | ✓ | ✓ |
