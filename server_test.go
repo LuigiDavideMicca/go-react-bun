@@ -281,6 +281,32 @@ func TestRecoverMiddleware(t *testing.T) {
 		}
 	})
 
+	t.Run("the abandoned response's headers do not ride on the 500", func(t *testing.T) {
+		t.Setenv("SESSION_SECRET", "a-secret-that-is-at-least-32-bytes")
+		rec := httptest.NewRecorder()
+		recoverMiddleware(gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Cache(w, time.Hour)
+			w.Header().Set("Etag", `"v1"`)
+			if err := SetSession(w, map[string]string{"user": "luigi"}, time.Hour); err != nil {
+				t.Fatal(err)
+			}
+			panic("after the headers")
+		}))).ServeHTTP(rec, gzipRequest())
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", rec.Code)
+		}
+		for _, header := range []string{"Cache-Control", "Etag", "Set-Cookie"} {
+			// a cached 500, or a session handed out by a request that failed
+			if got := rec.Header().Get(header); got != "" {
+				t.Errorf("500 carries %s: %q", header, got)
+			}
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", ct)
+		}
+	})
+
 	t.Run("ErrAbortHandler stays a panic", func(t *testing.T) {
 		defer func() {
 			if r := recover(); r != http.ErrAbortHandler {

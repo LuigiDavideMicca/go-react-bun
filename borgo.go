@@ -174,6 +174,11 @@ func recoverMiddleware(next http.Handler) http.Handler {
 			}
 			log.Printf("borgo: panic serving %s %s: %v\n%s", r.Method, r.URL.Path, v, debug.Stack())
 			if !rw.wrote {
+				// the headers staged for the abandoned response belong to it,
+				// not to this error: a Cache-Control from borgo.Cache would
+				// have a cdn hold the 500 for everyone, and a session cookie
+				// would hand out a login the request never completed
+				clear(rw.Header())
 				WriteJSON(rw, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 			}
 		}()
