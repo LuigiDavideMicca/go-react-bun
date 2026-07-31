@@ -138,7 +138,6 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
 
   const initial = matchRoute(location.pathname, routes);
   const initialRoute = initial?.route ?? notFound;
-  if (!initialRoute) return;
 
   const container = document.getElementById("root")!;
   let root: Root;
@@ -155,6 +154,10 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   }
 
   if (window.__BORGO_DEV__) attachDevChannel();
+
+  // a page with no matching route (and no _404) has nothing to hydrate, but
+  // it still edits like any other page: the dev channel above reloads it
+  if (!initialRoute) return;
 
   if (initialRoute.hydrate === "visible") {
     const target = document.querySelector("[data-borgo-visible]") ?? container;
