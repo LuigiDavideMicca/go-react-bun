@@ -236,6 +236,10 @@ export function shouldBufferBody(method: string, contentLength: string | null): 
   return length !== null && length <= PROXY_RETRY_MAX_BODY;
 }
 
+// the seam, narrowed to what the proxy actually asks of fetch: a target and
+// an init in, a response out. the global satisfies it and so does a stub.
+export type ProxyFetch = (target: string, init: RequestInit) => Promise<Response>;
+
 export type ProxyOptions = {
   // absolute upstream url, query included
   target: string;
@@ -244,8 +248,8 @@ export type ProxyOptions = {
   // connection-refused retries (the api restarting), 0 to never retry
   retries: number;
   retryDelayMs?: number;
-  // injectable for tests; production passes neither
-  fetchImpl?: typeof globalThis.fetch;
+  // injectable for tests; production passes none of these
+  fetchImpl?: ProxyFetch;
   sleep?: (ms: number) => Promise<void>;
   onError?: (value: unknown) => void;
 };
