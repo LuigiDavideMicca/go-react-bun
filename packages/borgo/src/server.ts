@@ -811,20 +811,30 @@ export async function serve({ dev = false } = {}) {
       try {
         response = await handle(req, url, label);
       } catch (error) {
-        console.error(error);
-        if (dev) {
-          response = new Response(overlayHtml(error), {
-            status: 500,
-            headers: { "Content-Type": "text/html; charset=utf-8" },
-          });
-        } else if (serverError) {
-          try {
-            response = await renderPage(req, serverError, {}, 500);
-          } catch {
+        // the client is already gone: an abandoned upload aborts the body read
+        // and lands here. there is no socket left to write to, so building the
+        // 500 document - the error page's loader, its api round trip, a full
+        // render - is work for nobody, and a client that declares a long body
+        // and hangs up would buy one of those per packet. 499 is nginx's
+        // "client closed request": nothing ships, but the counter stays honest.
+        if (req.signal.aborted) {
+          response = new Response(null, { status: 499 });
+        } else {
+          console.error(error);
+          if (dev) {
+            response = new Response(overlayHtml(error), {
+              status: 500,
+              headers: { "Content-Type": "text/html; charset=utf-8" },
+            });
+          } else if (serverError) {
+            try {
+              response = await renderPage(req, serverError, {}, 500);
+            } catch {
+              response = new Response("internal server error", { status: 500 });
+            }
+          } else {
             response = new Response("internal server error", { status: 500 });
           }
-        } else {
-          response = new Response("internal server error", { status: 500 });
         }
       }
       response = dropBody(response);
