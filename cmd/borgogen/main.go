@@ -880,6 +880,15 @@ func (g *tsGen) interfaceFor(t *types.Named, s *types.Struct) string {
 // fields follows encoding/json: exported fields only, json tags for naming,
 // omitempty marks the field optional, embedded structs are flattened.
 func (g *tsGen) fields(s *types.Struct) []string {
+	return g.structFields(s, map[*types.Struct]bool{s: true})
+}
+
+// structFields flattens embedded structs the way encoding/json promotes them.
+// expanded holds the struct types already flattened on this path: a type that
+// embeds itself (type Node struct{ *Node }) would otherwise recurse forever,
+// and encoding/json stops at the same point - the promoted copy is shadowed by
+// the shallower one anyway.
+func (g *tsGen) structFields(s *types.Struct, expanded map[*types.Struct]bool) []string {
 	var out []string
 	for i := 0; i < s.NumFields(); i++ {
 		f := s.Field(i)
@@ -897,7 +906,12 @@ func (g *tsGen) fields(s *types.Struct) []string {
 			}
 			if named, ok := et.(*types.Named); ok && !hasCustomMarshal(named) {
 				if es, ok := named.Underlying().(*types.Struct); ok {
-					out = append(out, g.fields(es)...)
+					if expanded[es] {
+						continue
+					}
+					expanded[es] = true
+					out = append(out, g.structFields(es, expanded)...)
+					delete(expanded, es)
 					continue
 				}
 			}

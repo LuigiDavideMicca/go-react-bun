@@ -216,6 +216,20 @@ func TestSameNameStructsInDifferentPackagesStayDistinct(t *testing.T) {
 	}
 }
 
+// A struct that embeds a pointer to itself used to recurse until the stack
+// blew up - a fatal error, not a recoverable one, on every save in dev.
+func TestSelfEmbeddingStructTerminates(t *testing.T) {
+	root := filepath.Join("testdata", "selfembed")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	// json.Marshal(Node{nil, 5}) is {"x":5}: the promoted copy never shows up
+	if want := "export interface Node {\n  x: number;\n}"; !strings.Contains(types, want) {
+		t.Errorf("want %q\n%s", want, types)
+	}
+}
+
 func TestLooseRouteCommentWarns(t *testing.T) {
 	old := os.Stderr
 	r, w, err := os.Pipe()
