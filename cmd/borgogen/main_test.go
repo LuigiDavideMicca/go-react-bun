@@ -374,6 +374,8 @@ func TestNonIdentifierJSONNamesAreQuoted(t *testing.T) {
 		`"1st": string`,
 		"città: string",    // unicode letters are identifiers in ts
 		"plain_$1: string", // $ and a non-leading digit are too
+		// ,string quotes booleans and pointed-to numbers, not only plain ones
+		"export interface Quoted {\n  b: string;\n  i: string;\n  f: string;\n  st: string;\n  p: string | null;\n}",
 	} {
 		if !strings.Contains(types, want) {
 			t.Errorf("api-types.d.ts missing %q\n%s", want, types)

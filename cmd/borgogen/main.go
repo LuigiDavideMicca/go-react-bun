@@ -1088,8 +1088,15 @@ func (g *tsGen) collectFields(s *types.Struct, depth int, expanded map[*types.St
 			optional = "?"
 		}
 		ts := g.tsType(f.Type())
-		if strings.Contains(opts, "string") && ts == "number" {
-			ts = "string"
+		if strings.Contains(opts, "string") {
+			// ,string quotes booleans and pointed-to numbers too, not just
+			// plain ones: {"b":"true","p":"5"}
+			switch ts {
+			case "number", "boolean":
+				ts = "string"
+			case "number | null", "boolean | null":
+				ts = "string | null"
+			}
 		}
 		*out = append(*out, jsonField{name: name, optional: optional, ts: ts, depth: depth, tagged: tagged})
 	}
