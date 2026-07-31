@@ -43,29 +43,38 @@ func gzipMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// acceptsGzip reports whether the client will take a gzip response. "*" speaks
+// only for codings the header did not name (RFC 9110 12.5.3), so an explicit
+// gzip entry decides on its own: "gzip;q=0, *" is a refusal, and compressing it
+// would ship bytes the client just said it cannot decode.
 func acceptsGzip(acceptEncoding string) bool {
+	wildcard := false
 	for _, part := range strings.Split(acceptEncoding, ",") {
 		params := strings.Split(part, ";")
 		name := strings.TrimSpace(params[0])
 		// coding names are case-insensitive (RFC 9110): "GZIP" must compress too
-		if !strings.EqualFold(name, "gzip") && name != "*" {
+		gzipNamed := strings.EqualFold(name, "gzip")
+		if !gzipNamed && name != "*" {
 			continue
 		}
-		refused := false
-		for _, param := range params[1:] {
-			// any spelling of a zero quality (q=0, q=0.0, q=0.00) is a refusal
-			value, ok := strings.CutPrefix(strings.TrimSpace(param), "q=")
-			if !ok {
-				continue
-			}
-			if q, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil && q <= 0 {
-				refused = true
-			}
-			break
+		if gzipNamed {
+			return !refusesCoding(params[1:])
 		}
-		if !refused {
-			return true
+		wildcard = !refusesCoding(params[1:])
+	}
+	return wildcard
+}
+
+// refusesCoding reports whether a coding's parameters carry a zero quality;
+// any spelling of it (q=0, q=0.0, q=0.00) is a refusal.
+func refusesCoding(params []string) bool {
+	for _, param := range params {
+		value, ok := strings.CutPrefix(strings.TrimSpace(param), "q=")
+		if !ok {
+			continue
 		}
+		q, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		return err == nil && q <= 0
 	}
 	return false
 }

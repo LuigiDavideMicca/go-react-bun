@@ -32,6 +32,15 @@ func TestAcceptsGzip(t *testing.T) {
 		{"br", false},
 		{"*", true},
 		{"identity", false},
+		// "*" covers only the codings the header did not name, so an explicit
+		// gzip refusal wins wherever it sits in the list
+		{"gzip;q=0, *", false},
+		{"*, gzip;q=0", false},
+		{"gzip;q=0, *;q=1", false},
+		{"identity, *;q=0", false},
+		// and an explicit acceptance beats a wildcard refusal
+		{"*;q=0, gzip", true},
+		{"gzip;q=0.001", true},
 	}
 	for _, c := range cases {
 		if got := acceptsGzip(c.header); got != c.want {
@@ -99,7 +108,7 @@ func TestGzipMiddlewareLeavesSmallResponsesIdentity(t *testing.T) {
 
 func TestGzipMiddlewareRespectsClient(t *testing.T) {
 	big := strings.Repeat("data ", 1000)
-	for _, header := range []string{"", "gzip;q=0", "br"} {
+	for _, header := range []string{"", "gzip;q=0", "br", "gzip;q=0, *", "*, gzip;q=0"} {
 		rec := serveGzip(t, header, func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(big))
 		})
