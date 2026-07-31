@@ -1,6 +1,6 @@
 {
   "name": "create-borgo",
-  "version": "0.11.0",
+  "version": "0.20.0",
   "description": "Scaffold a new borgo app: the self-hosted React framework - React SSR on Bun, API routes in Go, typed end to end.",
   "type": "module",
   "bin": {

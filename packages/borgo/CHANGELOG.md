@@ -1,5 +1,93 @@
 # Changelog
 
+## [0.20.0](https://github.com/LuigiDavideMicca/borgo/compare/v0.11.0...v0.20.0) (2026-07-31)
+
+
+### Features
+
+* api client accepts an opt-in per-call timeout ([d514e2b](https://github.com/LuigiDavideMicca/borgo/commit/d514e2b96f117ff0d9fe89485a16b36e79408f3e))
+* enhanced form actions submit over fetch and keep the scroll position ([df38c43](https://github.com/LuigiDavideMicca/borgo/commit/df38c43b5e30b9224907ecd14ed2569baa511382))
+* opt-in tailwind v4 pipeline behind the --tailwind flag ([2d2f725](https://github.com/LuigiDavideMicca/borgo/commit/2d2f7253136eaeffb990325b042dbcb304ed0dc1))
+* pwa mechanics - precache manifest, no-cache service worker, guarded registration helper ([061b155](https://github.com/LuigiDavideMicca/borgo/commit/061b15526ad020ce588eae58e272807994ce495c))
+* ship production security headers, csp included ([2c7ce07](https://github.com/LuigiDavideMicca/borgo/commit/2c7ce070d1a11a4bcc79c352ddabefbcec2bd9fa))
+
+
+### Bug Fixes
+
+* a channel closed during its reconnect backoff stays closed ([015899a](https://github.com/LuigiDavideMicca/borgo/commit/015899aedb9a77ff5c97f451d1ad85be03152462))
+* a client that hangs up mid-body no longer buys a 500 render ([425d740](https://github.com/LuigiDavideMicca/borgo/commit/425d7402de87bb04165eb44d75363bd34c17e818))
+* a connection header the client malformed no longer answers /api with a document ([2b6dd02](https://github.com/LuigiDavideMicca/borgo/commit/2b6dd02467904f2cec118648138fd1334b80772d))
+* a deadline that fires under arriving headers answers 504, not an empty 200 ([16238ee](https://github.com/LuigiDavideMicca/borgo/commit/16238eeb05fc3f0fd5837383093740eb21b73f42))
+* a document typed TEXT/HTML is still a document to the csp and to the runtime ([9ec71bb](https://github.com/LuigiDavideMicca/borgo/commit/9ec71bb9540840d991a8bd3015cc8dfdae97c15d))
+* a dot-segment prerender param no longer writes the page outside dist/site ([5d4cd0e](https://github.com/LuigiDavideMicca/borgo/commit/5d4cd0e6414f5071fd906d675cee07c3a95c9d68))
+* a failed prefetch import no longer surfaces as an unhandled rejection ([649da0b](https://github.com/LuigiDavideMicca/borgo/commit/649da0b15e25a460efb58d43ee358f15d7434a1a))
+* a form with a submit in flight swallows re-entrant submits ([2cfbecf](https://github.com/LuigiDavideMicca/borgo/commit/2cfbecfb94712265eaeda796e20d3aef3010d63c))
+* a head no longer answers content-length zero for a body it never measured ([1162f80](https://github.com/LuigiDavideMicca/borgo/commit/1162f8074f026c2ee86143334f55a1e8acf6a649))
+* a head on an asset reports the length a get would return, not zero ([11b5465](https://github.com/LuigiDavideMicca/borgo/commit/11b54650403210bfcc09d0416f29d042742d8806))
+* a link to the current page replaces its history entry instead of doubling it ([27414be](https://github.com/LuigiDavideMicca/borgo/commit/27414be927e83a824f9101faa0434e0a3ed4e95b))
+* a missing pages/ dir fails with a framework message instead of a bare enoent ([03fa5b1](https://github.com/LuigiDavideMicca/borgo/commit/03fa5b1e924a668e388f4869f669619cc1b61fc2))
+* a range whose validator no longer matches gets the whole file, not a splice ([10235a4](https://github.com/LuigiDavideMicca/borgo/commit/10235a40647a22d67e69d932d6bda75b55621677))
+* a repeated content-length no longer costs the proxy its retry ([8334bfa](https://github.com/LuigiDavideMicca/borgo/commit/8334bfa63cf9edc59708c8fa89782392aa48bdd4))
+* a stale if-range answer states the content type its stream cannot carry ([270347f](https://github.com/LuigiDavideMicca/borgo/commit/270347fb6dc061fdd7be26aba77c627015a95691))
+* a torn watcher read no longer double-builds and double-reloads the api ([b4c3798](https://github.com/LuigiDavideMicca/borgo/commit/b4c379806b66def38ea703c234a921ae4209bdd7))
+* a tossed duplicate cookie cannot survive the post-action jar rebuild ([6e3692a](https://github.com/LuigiDavideMicca/borgo/commit/6e3692a5adb135dd55f9c67288451bc4ce153a08))
+* an asset whose precompressed sibling vanished degrades instead of failing ([8a074ee](https://github.com/LuigiDavideMicca/borgo/commit/8a074ee3334ec9eebf2d888e0be73a8fd32f573c))
+* an upstream 101 becomes a 502 instead of a desynchronised client ([890369e](https://github.com/LuigiDavideMicca/borgo/commit/890369efd4caf35d724f17d2ce7a38602db80682))
+* api client caps error bodies, drops empty query values, names the route on bad json ([3847050](https://github.com/LuigiDavideMicca/borgo/commit/3847050343a10513cee35fc9f1bd7fd0909c6b86))
+* api client rejects a route key with no method ([54fc8e2](https://github.com/LuigiDavideMicca/borgo/commit/54fc8e262a6e8f63c8d1a5071f776af97859134e))
+* attach the dev channel before the no-route bail so unrouted pages hot-reload ([62952b7](https://github.com/LuigiDavideMicca/borgo/commit/62952b7de531bef3154441f79954d04853a03502))
+* block ntfs stream aliases on windows asset paths, allow header on the json 405 ([3a9aca0](https://github.com/LuigiDavideMicca/borgo/commit/3a9aca00439ab59ed535dbc86c464447abeca092))
+* borgo start propagates the api's real exit code and stops cleanly on sigint/sigterm ([9bbaf89](https://github.com/LuigiDavideMicca/borgo/commit/9bbaf89f67065ec87c9410e2ebc5b7a8b513e55c))
+* bound the runtime's long-lived state - link observer, props cache, socket retries ([bcf9904](https://github.com/LuigiDavideMicca/borgo/commit/bcf99044342ee7b2fcefba993287c4ab8d9dfb5e))
+* build and export fail hard when borgogen fails instead of shipping stale types ([f6e797b](https://github.com/LuigiDavideMicca/borgo/commit/f6e797b1eae916b35dd9d5cd1898009baa0f0b0e))
+* builds stamp their mode so borgo start rebuilds a dev-built asset tree for production ([88b1946](https://github.com/LuigiDavideMicca/borgo/commit/88b19468a20b4b78a63e9c1d3181ce8a9817c601))
+* cap websocket topic subscriptions and message payloads ([16c36f5](https://github.com/LuigiDavideMicca/borgo/commit/16c36f505f1f63179de9a9fa24ebdc3ddb560bc7))
+* claim the history entry a fragment link creates so scroll keys stay distinct ([aa3ad32](https://github.com/LuigiDavideMicca/borgo/commit/aa3ad328261e5182a59befa0cbcc9a7b3ebd12e4))
+* compressing a document no longer undoes its backpressure ([5276302](https://github.com/LuigiDavideMicca/borgo/commit/5276302dd7e339349f87ee4b6165dddfc2c2fe66))
+* dev fallback server reports a busy port instead of rethrowing unhandled ([d68056d](https://github.com/LuigiDavideMicca/borgo/commit/d68056d01b1351a401cc20724af338655864449d))
+* dev handles sigterm, tells the truth when the binary swap gives up, ignores nested node_modules ([2729ed7](https://github.com/LuigiDavideMicca/borgo/commit/2729ed78095a07f4b2a6749e3c6761489506a608))
+* dev says so when the api dies on its own instead of quietly serving 502s ([a0407ab](https://github.com/LuigiDavideMicca/borgo/commit/a0407abd385896e60fff245311dec67512e62731))
+* dev watcher forgets the content hash of a deleted file ([0d76b89](https://github.com/LuigiDavideMicca/borgo/commit/0d76b89979540ee226ad5de645ed6645511a4d07))
+* doctor reads localized netstat by row shape and skips the write-lock probe off windows ([fc60ebe](https://github.com/LuigiDavideMicca/borgo/commit/fc60ebe0741ddfeeda686fb3aa8dbbce65fbb882))
+* doubled slashes no longer alias the single-slash route ([c9af8d9](https://github.com/LuigiDavideMicca/borgo/commit/c9af8d9e2fa0c68fe3f5be99a7197911d1a52a07))
+* drop a raw action document that lands after a popstate ([b042c63](https://github.com/LuigiDavideMicca/borgo/commit/b042c63df69378582afade95561cb4314025e435))
+* duplicate csrf cookies with differing values read as no token ([d65f4e3](https://github.com/LuigiDavideMicca/borgo/commit/d65f4e3ca8906e89be600a5b35a865fea933fc59))
+* enhanced posts surface errors and redirects faithfully, csrf covers anonymous actions, ws checks origin ([bb9f4be](https://github.com/LuigiDavideMicca/borgo/commit/bb9f4be89ebc44299ea1744f806970eeb19fefdb))
+* enhanced submits echo the live csrf cookie, not a stale field ([c3e7f42](https://github.com/LuigiDavideMicca/borgo/commit/c3e7f42f4f75c78aa3d7e5dd9d91b5ad0d4218ca))
+* enhanced submits keep native form encoding semantics ([e06d2be](https://github.com/LuigiDavideMicca/borgo/commit/e06d2bebb29e6bfa9818e5837b7b37c29443860e))
+* export picks distinct ephemeral ports and ignores a shell API_URL ([c1264f5](https://github.com/LuigiDavideMicca/borgo/commit/c1264f5d1e9d39fdcdbebe548b47f0a0b908c43c))
+* export writes decoded directory names so non-ascii params resolve behind static servers ([6f6308e](https://github.com/LuigiDavideMicca/borgo/commit/6f6308e0a06c708f7884b842b35cc7ee32e9a438))
+* fragment history entries stop refetching, hover prefetch waits for real intent ([4b18f43](https://github.com/LuigiDavideMicca/borgo/commit/4b18f43a45b193b652bab54161c2a6d7e021168e))
+* head requests drop the body on every path, healthz and error pages included ([39f9ed4](https://github.com/LuigiDavideMicca/borgo/commit/39f9ed4fca2e8d7ca7806676dedab225d6e9353d))
+* help and version exit 0, overlay reconnects over wss on https, deploy init reports an unwritable file ([ad73c02](https://github.com/LuigiDavideMicca/borgo/commit/ad73c021af12b450677e8b7145ddf0e0b702deb5))
+* hop-by-hop request headers stop at the proxy instead of reaching go ([37097e9](https://github.com/LuigiDavideMicca/borgo/commit/37097e9b3de6daa3788d76c94ea6f39ef8786571))
+* inline script json escapes u+2028/u+2029 alongside the angle bracket ([1316ebd](https://github.com/LuigiDavideMicca/borgo/commit/1316ebdefa6e9ebd0c81d0d6b741874f63e9f25e))
+* precompression survives a file that vanished between the scan and the read ([26471c6](https://github.com/LuigiDavideMicca/borgo/commit/26471c6bca088fc052752f967173203c5df3c0df))
+* production limits on the front server - api header deadline with 504, bounded request bodies, csrf reject before body parse, 405 carries allow, healthz probe memoized ([ee4f7c0](https://github.com/LuigiDavideMicca/borgo/commit/ee4f7c09073e5e0640b1676d3ae9a7b4a9d13c87))
+* replay the saved scroll position on a back/forward full load ([ac6228e](https://github.com/LuigiDavideMicca/borgo/commit/ac6228e857df126070694b321fa6bbd2320e6158))
+* runtime rejects script-scheme redirects and survives malformed action payloads ([761bec1](https://github.com/LuigiDavideMicca/borgo/commit/761bec1a385af25cf62166f8d2e0b18deb655b4a))
+* ssr streams with backpressure, stops when the client goes away ([8c2b8f8](https://github.com/LuigiDavideMicca/borgo/commit/8c2b8f836640ca9b86da814814989cf3b98131b0))
+* the browser's host stops deciding what go reads as its own ([16ec3a1](https://github.com/LuigiDavideMicca/borgo/commit/16ec3a1568c6d0a88fecd75d66aab318d1d226f7))
+* the csrf registry can be cleared, so its bare-path test owns its state ([3698e89](https://github.com/LuigiDavideMicca/borgo/commit/3698e89253e354a69323fbae074eacd0523ec912))
+* the port probe binds the wildcard, so a port the go api holds reads busy ([f7a0fb1](https://github.com/LuigiDavideMicca/borgo/commit/f7a0fb1ddcccd46acfec2fb1031d9357b3d867a6))
+* the precache stamp folds in the bytes of the assets whose names never move ([ab334e8](https://github.com/LuigiDavideMicca/borgo/commit/ab334e8370bf2e7cf4e010c517179b844097f5c9))
+* the server reads the csrf token like the browser does, ambiguity and all ([ab3c76f](https://github.com/LuigiDavideMicca/borgo/commit/ab3c76f551095cc23df0bd590a4deff5be6454ee))
+* the whole dev and start tree dies with its parent, no more stale processes ([03a1fd5](https://github.com/LuigiDavideMicca/borgo/commit/03a1fd5b24600bc6eaef56b3e214bf4d2570c646))
+* the ws and push endpoints answer with the security headers too ([272f749](https://github.com/LuigiDavideMicca/borgo/commit/272f749ab8df40ae3be90cd8542b10f35fff1cfe))
+* unserializable props fail before the render, not after it ([81998d1](https://github.com/LuigiDavideMicca/borgo/commit/81998d1298ce6d28f6c4afb4c15ac3b43866b492))
+
+
+### Performance Improvements
+
+* hoist the ssr hot path's per-request string and route work to boot ([5e00b7c](https://github.com/LuigiDavideMicca/borgo/commit/5e00b7c2cb9fc79cc85433e6e92cd35d23124f72))
+* index public/ at boot, serve assets with etags and 304s ([aa2a817](https://github.com/LuigiDavideMicca/borgo/commit/aa2a817abc98cf49903e00f745e6557e15229db9))
+* scriptJson chains replaceAll instead of a regex callback pass ([3bb5156](https://github.com/LuigiDavideMicca/borgo/commit/3bb5156324aa07642c9a51c3997092ac7623fffe))
+
+
+### Miscellaneous Chores
+
+* cut the 0.20 release ([cd2503d](https://github.com/LuigiDavideMicca/borgo/commit/cd2503dd0ea7850f2f95c1b6cb4abdf0513a9b5f))
+
 ## [0.11.0](https://github.com/LuigiDavideMicca/borgo/compare/v0.10.1...v0.11.0) (2026-07-30)
 
 
