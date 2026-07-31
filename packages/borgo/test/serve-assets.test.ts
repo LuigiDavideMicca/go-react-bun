@@ -191,6 +191,9 @@ describe("serveIndexed: over a real socket (range, if-range, head)", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe(RAW_CSS);
     expect(res.headers.get("Content-Range")).toBeNull();
+    // the stream body cannot tell bun the type the file would have: it must
+    // be stated, or nosniff makes the browser refuse the stylesheet
+    expect(res.headers.get("Content-Type")).toContain("text/css");
   });
 
   test("if-range accepts the last-modified date as a validator too", async () => {

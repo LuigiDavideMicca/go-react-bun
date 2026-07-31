@@ -206,6 +206,10 @@ export function serveIndexed(req: Request, info: AssetInfo): Response {
   // gets the whole representation as a plain 200 - still off the disk,
   // never through memory.
   if (isRangeStale(req, variant.etag, info.lastModified)) {
+    // a stream body also loses the content type bun derives from a file, and
+    // under the global nosniff a typeless stylesheet is a refused stylesheet;
+    // for an encoded variant this re-sets the same value as above
+    headers.set("Content-Type", info.type);
     return new Response(Bun.file(variant.path).stream(), { headers });
   }
   return new Response(Bun.file(variant.path), { headers });
