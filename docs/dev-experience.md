@@ -61,6 +61,8 @@ And pass the flag in `package.json`:
 
 With the flag, `@tailwindcss/cli` owns the stylesheet: it scans your pages and islands for class names and rewrites `public/assets/style.css`, minified in production builds. Editing a page hot-applies new utilities through the normal refresh cycle, and editing `style.css` swaps the stylesheet in place. Without the flag, the SCSS pipeline stays in charge and `style.css` is ignored.
 
+`bun install` will report `Blocked 1 postinstall` — Tailwind's CLI depends on a native file watcher that wants to compile itself from source. borgo does its own watching and only ever asks the Tailwind CLI for a one-shot compile, so leave that script blocked: everything works with it off.
+
 ## The error overlay
 
 In dev, a server-side render error becomes a readable overlay page instead of the production 500. The client runtime also surfaces uncaught errors and unhandled rejections in the browser, in a dismissable overlay showing the stack.
