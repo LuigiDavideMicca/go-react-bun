@@ -402,13 +402,23 @@ export async function serve({ dev = false } = {}) {
         try {
           // decompress: false passes go's response through untouched, encoding
           // included; bun would otherwise inflate it and resend identity
-          return await fetch(target, {
+          const upstream = await fetch(target, {
             method: req.method,
             headers: req.headers,
             ...(hasBody ? { body } : {}),
             decompress: false,
             signal: abort?.signal,
           } as RequestInit);
+          // an upgrade is hop-by-hop and this proxy has no tunnel to hand
+          // over: relaying the 101 would leave the client speaking a switched
+          // protocol into a socket that is still framing http, and every byte
+          // after it desynchronised. app sockets belong on /ws.
+          if (upstream.status === 101) {
+            void upstream.body?.cancel().catch(() => {});
+            console.error(`${url.pathname} answered 101; /api cannot tunnel an upgrade`);
+            return new Response("api upgrade not supported", { status: 502 });
+          }
+          return upstream;
         } catch (err) {
           if (timedOut) return new Response("api timeout", { status: 504 });
           if (retriable && attempt < apiRetries && isConnRefused(err)) {
