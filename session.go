@@ -100,18 +100,8 @@ func SetSession(w http.ResponseWriter, v any, maxAge time.Duration) error {
 // expired session.
 func GetSession[T any](r *http.Request) (T, bool) {
 	var zero T
-	cookie, err := r.Cookie(sessionCookie)
-	// nothing this server issued is over the limit, so an oversized value is
-	// junk: reject it before hashing it
-	if err != nil || len(cookie.Value) > sessionCookieMaxLen {
-		return zero, false
-	}
-	dot := strings.LastIndexByte(cookie.Value, '.')
-	if dot < 0 {
-		return zero, false
-	}
-	payload, sig := cookie.Value[:dot], cookie.Value[dot+1:]
-	if !hmac.Equal([]byte(sessionSign(payload)), []byte(sig)) {
+	payload, ok := sessionPayload(r)
+	if !ok {
 		return zero, false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(payload)
@@ -127,6 +117,37 @@ func GetSession[T any](r *http.Request) (T, bool) {
 		return zero, false
 	}
 	return v, true
+}
+
+// sessionPayload returns the signed payload of the request's session cookie.
+// A request can carry several cookies of the same name - a sibling subdomain
+// or a http-only-less path can toss one in - and net/http hands back the first
+// one, which is enough for an attacker to swap the victim's session for one of
+// their own without ever touching the signature. Junk duplicates are skipped
+// and a second cookie that also verifies is treated as ambiguous: no session.
+func sessionPayload(r *http.Request) (string, bool) {
+	var found string
+	var valid int
+	for _, cookie := range r.CookiesNamed(sessionCookie) {
+		// nothing this server issued is over the limit, so an oversized value
+		// is junk: reject it before hashing it
+		if len(cookie.Value) > sessionCookieMaxLen {
+			continue
+		}
+		dot := strings.LastIndexByte(cookie.Value, '.')
+		if dot < 0 {
+			continue
+		}
+		payload, sig := cookie.Value[:dot], cookie.Value[dot+1:]
+		if !hmac.Equal([]byte(sessionSign(payload)), []byte(sig)) {
+			continue
+		}
+		if valid++; valid > 1 {
+			return "", false
+		}
+		found = payload
+	}
+	return found, valid == 1
 }
 
 // ClearSession deletes the session cookie.

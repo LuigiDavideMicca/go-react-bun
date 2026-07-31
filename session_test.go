@@ -85,6 +85,46 @@ func TestSessionRejects(t *testing.T) {
 	}
 }
 
+// cookie tossing: a request can carry more than one borgo_session, and
+// net/http hands back the first one
+func TestSessionDuplicateCookies(t *testing.T) {
+	t.Setenv("SESSION_SECRET", "a-secret-that-is-at-least-32-bytes")
+	mine := setAndExtract(t, testSession{User: "victim"}, time.Hour)
+	attacker := setAndExtract(t, testSession{User: "attacker"}, time.Hour)
+
+	request := func(values ...string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		for _, v := range values {
+			r.AddCookie(&http.Cookie{Name: sessionCookie, Value: v})
+		}
+		return r
+	}
+
+	t.Run("a tossed valid session must not take over", func(t *testing.T) {
+		for _, order := range [][]string{{attacker.Value, mine.Value}, {mine.Value, attacker.Value}} {
+			got, ok := GetSession[testSession](request(order...))
+			if ok {
+				t.Fatalf("two signed sessions are ambiguous, got %+v", got)
+			}
+		}
+	})
+
+	t.Run("junk duplicates do not shadow the real session", func(t *testing.T) {
+		for _, order := range [][]string{{"junk", mine.Value}, {mine.Value, "junk"}, {"a.b", mine.Value, "nodot"}} {
+			got, ok := GetSession[testSession](request(order...))
+			if !ok || got.User != "victim" {
+				t.Fatalf("cookies %v: got %+v ok=%v, want the signed session", order, got, ok)
+			}
+		}
+	})
+
+	t.Run("an empty payload cookie is not a session", func(t *testing.T) {
+		if _, ok := GetSession[testSession](request("." + sessionSign(""))); ok {
+			t.Fatal("a signed empty payload must not pass as a session")
+		}
+	})
+}
+
 func TestClearSession(t *testing.T) {
 	w := httptest.NewRecorder()
 	ClearSession(w)
