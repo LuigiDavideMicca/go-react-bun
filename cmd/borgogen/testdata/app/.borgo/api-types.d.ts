@@ -21,10 +21,6 @@ export interface FullHealth {
   uptime: number;
 }
 
-export interface Deleted {
-  ok: boolean;
-}
-
 export interface Widget {
   created: string;
   id: number;
@@ -36,6 +32,10 @@ export interface Widget {
   raw: unknown;
   counts: Record<string, string>;
   flags: unknown;
+}
+
+export interface Deleted {
+  ok: boolean;
 }
 
 export interface WidgetList {
@@ -53,6 +53,7 @@ declare module "borgo-framework" {
     "GET /api/health": { response: Health };
     "GET /api/health/full": { response: FullHealth };
     "GET /api/manual": { response: string };
+    "GET /api/mixed": { response: Widget | Deleted };
     "GET /api/secret": { response: Deleted };
     "GET /api/widgets": { response: WidgetList };
     "POST /api/widgets": { response: Widget; request: WidgetCreate };

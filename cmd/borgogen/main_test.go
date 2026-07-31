@@ -43,6 +43,7 @@ func TestGenerateFixture(t *testing.T) {
 		"status: string",
 		"detail?: string",
 		`"GET /api/export": { response: Export };`,
+		`"GET /api/mixed": { response: Widget | Deleted };`,
 		`"GET /api/widgets": { response: WidgetList };`,
 		`"POST /api/widgets": { response: Widget; request: WidgetCreate };`,
 		`"DELETE /api/widgets/{id}": { response: Deleted };`,
