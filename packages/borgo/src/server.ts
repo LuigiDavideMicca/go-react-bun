@@ -421,6 +421,16 @@ export async function serve({ dev = false } = {}) {
             decompress: false,
             signal: abort?.signal,
           } as RequestInit);
+          // the deadline can fire while these headers are still in flight:
+          // the abort has already torn the connection down, but fetch still
+          // resolves, with a body that ends at zero bytes. returning it would
+          // hand the browser a 200 it cannot tell from a genuinely empty
+          // answer - and, on sse, a stream that is dead on arrival. the
+          // timeout already decided; say so.
+          if (timedOut) {
+            void upstream.body?.cancel().catch(() => {});
+            return new Response("api timeout", { status: 504 });
+          }
           // an upgrade is hop-by-hop and this proxy has no tunnel to hand
           // over: relaying the 101 would leave the client speaking a switched
           // protocol into a socket that is still framing http, and every byte
