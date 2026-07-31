@@ -55,6 +55,14 @@ func TestGenerateFixture(t *testing.T) {
 		"price: string",
 		"notes: string | null",
 		"attrs: Record<string, number>",
+		"raw: unknown",
+		"counts: Record<string, string>",
+		"flags: unknown",
+		`"GET /api/categories": { response: Array<Category> };`,
+		"children?: Array<Category>",
+		"parent: Category | null",
+		`"GET /api/health/full": { response: FullHealth };`,
+		"uptime: number",
 		"interface WsEvents {",
 		`"widgets/created": Widget;`,
 		`"widgets/deleted": number | string;`,
@@ -180,6 +188,26 @@ func TestGenericInstantiationsStayDistinct(t *testing.T) {
 		"items: Array<Post>",
 		`"GET /api/widgets": { response: PageWidget };`,
 		`"GET /api/posts": { response: PagePost };`,
+	} {
+		if !strings.Contains(types, want) {
+			t.Errorf("api-types.d.ts missing %q\n%s", want, types)
+		}
+	}
+}
+
+func TestSameNameStructsInDifferentPackagesStayDistinct(t *testing.T) {
+	root := filepath.Join("testdata", "collide")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	for _, want := range []string{
+		"export interface Status {",
+		"export interface LibStatus {",
+		"ok: boolean",
+		"ready: boolean",
+		`"GET /api/local": { response: Status };`,
+		`"GET /api/remote": { response: LibStatus };`,
 	} {
 		if !strings.Contains(types, want) {
 			t.Errorf("api-types.d.ts missing %q\n%s", want, types)

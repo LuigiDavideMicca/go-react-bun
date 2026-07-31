@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -25,9 +26,12 @@ type Widget struct {
 	Name   string         `json:"name"`
 	Tags   []string       `json:"tags,omitempty"`
 	Price  Money          `json:"price"`
-	Notes  *string        `json:"notes"`
-	Attrs  map[string]int `json:"attrs"`
-	Secret string         `json:"-"`
+	Notes  *string         `json:"notes"`
+	Attrs  map[string]int  `json:"attrs"`
+	Raw    json.RawMessage `json:"raw"`
+	Counts map[int]string  `json:"counts"`
+	Flags  map[bool]int    `json:"flags"`
+	Secret string          `json:"-"`
 	hidden bool
 }
 
