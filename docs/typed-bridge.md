@@ -55,7 +55,27 @@ A type borgogen can't see through — anything with a custom `MarshalJSON` — m
 //borgo:type gorm.io/gorm.DeletedAt string | null
 ```
 
-Struct fields follow `encoding/json` semantics — tags, `omitempty`, embedded structs flattened.
+Struct fields follow `encoding/json` semantics — tags, `omitempty`, embedded structs flattened (conflicting names resolved by depth, as the stdlib does), pointers as `T | null`, `[]byte` as the base64 `string` it really is, and any type with a `MarshalText` method as `string`. Field names that are not valid TypeScript identifiers (`json:"user-name"`) are emitted in quoted form, so a hyphen in a tag cannot break your typecheck.
+
+## The nil slice trap
+
+One place where Go's own JSON semantics can surprise you, and the bridge deliberately does not paper over it:
+
+```go
+var tasks []Task            // nil, not empty
+db.Find(&tasks)             // still nil if there are no rows
+borgo.JSON(w, 200, TaskList{Tasks: tasks})
+```
+
+A **nil** slice or map marshals to `null`, not `[]` — so the client receives `{"tasks": null}` while the generated type says `Array<Task>`, and `tasks.map(...)` throws. The bridge types the *intent*, because `Array<Task> | null` on every collection would push a null check into every consumer for a case your handler controls.
+
+The fix belongs in Go, and it is one line:
+
+```go
+tasks := []Task{}           // empty, marshals to []
+```
+
+Make it a habit in any handler that returns a collection.
 
 ## Honest limits
 

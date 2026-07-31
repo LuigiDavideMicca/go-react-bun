@@ -46,7 +46,9 @@ func respondTask(w http.ResponseWriter, status int, task Task) {
 
 //borgo:route GET /api/tasks
 func ListTasks(w http.ResponseWriter, r *http.Request) {
-	var tasks []Task
+	// empty, not nil: a nil slice marshals to null and the client's Array<Task>
+	// would be a lie the first time the list is empty
+	tasks := []Task{}
 	if err := db.DB.Order("created_at desc").Find(&tasks).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
