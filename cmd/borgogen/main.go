@@ -792,7 +792,10 @@ func (g *tsGen) tsType(t types.Type) string {
 	case *types.Pointer:
 		return g.tsType(t.Elem()) + " | null"
 	case *types.Slice:
-		if b, ok := t.Elem().(*types.Basic); ok && b.Kind() == types.Byte {
+		// encoding/json base64s a slice of any byte-kinded element, named or
+		// aliased, not just of the predeclared byte
+		if b, ok := types.Unalias(t.Elem()).Underlying().(*types.Basic); ok &&
+			b.Kind() == types.Uint8 && !hasCustomMarshal(t.Elem()) {
 			return "string"
 		}
 		return "Array<" + g.tsType(t.Elem()) + ">"

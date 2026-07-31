@@ -216,6 +216,18 @@ func TestSameNameStructsInDifferentPackagesStayDistinct(t *testing.T) {
 	}
 }
 
+func TestByteSlicesAreBase64Strings(t *testing.T) {
+	root := filepath.Join("testdata", "bytes")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	want := "export interface Blob {\n  raw: string;\n  alias: string;\n  defined: string;\n  arr: Array<number>;\n}"
+	if !strings.Contains(types, want) {
+		t.Errorf("api-types.d.ts missing:\n%s\ngot:\n%s", want, types)
+	}
+}
+
 // Promoted fields follow encoding/json's rules, so the interfaces below match
 // what json.Marshal of a zero value actually writes (each case is spelled out
 // in testdata/embed/api/embed.go).
