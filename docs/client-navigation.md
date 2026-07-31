@@ -10,13 +10,21 @@ The build emits one lazy chunk per route; React, the runtime and layouts live in
 
 The same applies to `<form method="post">`: submits run the page action over `fetch` and re-render in place, keeping the scroll position — see [form actions](pages-and-routing.md#form-actions).
 
+A link to the page you are already on refreshes it and replaces the current history entry rather than pushing a duplicate, the way the browser does — otherwise leaving the page would take two presses of the back button. A link to a `#fragment` on the current page is left entirely to the browser.
+
+Nothing is ever taken over that the user asked for explicitly: a middle click, `Ctrl`/`Cmd`-click, `target`, `download`, and any anchor whose click handler called `preventDefault` all behave natively.
+
 ## Prefetching
 
-Links scrolled into the viewport get their route chunk prefetched; hovering (or focusing, or touching) a link additionally prefetches its loader props, kept for ten seconds and consumed by the navigation — so a hover-then-click usually renders with zero waiting. By design, props arrive as one JSON payload fetched in parallel with the chunk; loader data is not streamed on client navigations.
+Links scrolled into the viewport get their route chunk prefetched. Hovering, focusing or touching a link additionally prefetches its loader props — hovering waits a beat first, so sweeping the pointer across a list of fifty links does not fire fifty requests at your server; focus and touch are immediate, because both are deliberate.
+
+Prefetched props are kept for ten seconds, consumed by the navigation that follows, and dropped whenever a form action mutates something — so a hover-then-click usually renders with zero waiting, and never renders data the mutation just invalidated. The cache is bounded, and anything evicted has its response body cancelled rather than left dangling.
+
+By design, props arrive as one JSON payload fetched in parallel with the chunk: loader data is not streamed on client navigations. Streaming applies to the initial server render, where it matters most.
 
 ## Scroll restoration
 
-Every history entry gets a key; scroll positions are saved per entry (in `sessionStorage`, surviving reloads) and restored on back/forward. New navigations scroll to top, or to the `#fragment` target if the URL has one.
+Every history entry gets a key; scroll positions are saved per entry in `sessionStorage`, so they survive a reload and a cross-document round trip. Back and forward restore the saved position, a new navigation goes to the top or to the `#fragment` target, and an action that redirects back to the page you were on leaves you exactly where you were.
 
 ## Partial hydration
 
@@ -49,4 +57,20 @@ export default function Guide() {
 
 On a `hydrate = false` page each island hydrates independently — through a small dedicated entry that touches only the island markers — so a content page can carry a search box without hydrating anything else. `client="visible"` waits until the island scrolls into view. On normally hydrated pages `<Island>` renders inline as part of the page tree.
 
-The tradeoff, stated: island modules are registered eagerly, so their code rides with the client entry (and the islands entry loads React). `client="visible"` defers the hydration *work*, not the download. Props must be JSON-serializable — they are inlined into the island's HTML marker.
+The tradeoff, stated: island modules are registered eagerly, so their code rides with the client entry (and the islands entry loads React). `client="visible"` defers the hydration *work*, not the download. Props must be JSON-serializable — they are inlined into the island's HTML marker, and one island with an unreadable marker is skipped without stopping the others on the page.
+
+## When the client cannot cope
+
+Every failure mode falls back to something that works rather than to a broken page:
+
+| Situation | What happens |
+| --- | --- |
+| Route chunk fails to load (a deploy changed the hashes) | full navigation to the destination |
+| Loader props fetch fails | full navigation |
+| The destination is not a known route | full navigation |
+| A loader redirects to another origin | the browser navigates there |
+| A redirect chain exceeds ten hops | full navigation, rather than looping forever |
+| A redirect with a `javascript:` or `data:` scheme | refused, then a reload |
+| The server answers a submit with something unparseable | reload, so the page reflects whatever the mutation did |
+
+The runtime never leaves a mutation in an unknown state silently: if it cannot interpret the answer, it goes and asks the server again.
