@@ -69,6 +69,7 @@ export async function dev() {
 
   // build to a scratch name while the old api keeps serving, swap only once
   // the binary is ready; windows can hold the old file briefly after exit
+  let liveGoHash = "";
   const startGo = async () => {
     await runBorgogen();
     const build = Bun.spawn(["go", "build", "-o", goNext, "."], {
@@ -79,6 +80,12 @@ export async function dev() {
       console.error(`  ${c.red(g.err)} go build failed, the previous api keeps serving...`);
       return;
     }
+    // dedup on the build output: a torn read at event time poisons the
+    // source-hash dedup and queues a second identical build - go builds are
+    // deterministic, so an unchanged binary means no swap and no reload
+    const nextHash = String(Bun.hash(readFileSync(goNext)));
+    if (nextHash === liveGoHash && goProc && goProc.exitCode === null) return;
+    liveGoHash = nextHash;
     goProc?.kill();
     await goProc?.exited;
     for (let attempt = 0; ; attempt++) {
