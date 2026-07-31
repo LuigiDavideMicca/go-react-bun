@@ -252,6 +252,17 @@ export const HOP_BY_HOP = [
   "proxy-connection",
 ] as const;
 
+// tchar, rfc 9110 §5.6.2. the Connection value is the client's, and not every
+// comma-separated piece of it is a field name: `keep-alive,` leaves an empty
+// token, `,` leaves two, a quoted string leaves quotes. Headers.delete throws
+// on any of them - and it throws from *outside* proxyRequest's try, so the 502
+// the proxy answers its own failures with never runs. the request lands in
+// serve()'s catch instead and /api answers a rendered 500 document: html on an
+// api path, a fresh csrf cookie, a full ssr render bought with one malformed
+// header. tokens are judged one at a time, so a junk token cannot smuggle a
+// real one - `Connection: X-Api-Key, "junk"` still strips X-Api-Key.
+const TCHAR = /^[!#$%&'*+.^_`|~\w-]+$/;
+
 // content-length is deliberately kept: bun recomputes it for a buffered body
 // and the streamed path only ever carries the length bun's own server already
 // framed the request with, so go still sees an honest r.ContentLength.
@@ -261,7 +272,10 @@ export function forwardableHeaders(headers: Headers): Headers {
   // this cannot be shortcut on one
   const connection = out.get("connection");
   if (connection) {
-    for (const token of connection.split(",")) out.delete(token.trim());
+    for (const token of connection.split(",")) {
+      const name = token.trim();
+      if (TCHAR.test(name)) out.delete(name);
+    }
   }
   for (const name of HOP_BY_HOP) out.delete(name);
   return out;

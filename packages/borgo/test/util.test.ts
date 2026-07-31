@@ -377,6 +377,25 @@ describe("forwardableHeaders", () => {
     forwardableHeaders(req);
     expect(req.get("connection")).toBe("keep-alive");
   });
+
+  // bun hands these through verbatim: `Connection: keep-alive,` arrives as
+  // "keep-alive,". Headers.delete("") throws, and it throws before the proxy's
+  // own try, so /api answered a rendered 500 document instead of proxying
+  test("a Connection token that is not a field name is ignored, not thrown on", () => {
+    for (const connection of ["keep-alive,", ",", ", ,", '"foo"', "@bad", "a b", "()", ";", "  "]) {
+      const out = forwardableHeaders(new Headers({ connection, cookie: "a=1" }));
+      expect(out.has("connection")).toBe(false);
+      expect(out.get("cookie")).toBe("a=1");
+    }
+  });
+
+  test("a junk token cannot shield a real one from the same list", () => {
+    const out = forwardableHeaders(
+      new Headers({ connection: '"junk", X-Api-Key, , keep-alive', "x-api-key": "k", "x-keep": "y" }),
+    );
+    expect(out.has("x-api-key")).toBe(false);
+    expect(out.get("x-keep")).toBe("y");
+  });
 });
 
 describe("headResponse", () => {

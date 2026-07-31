@@ -653,4 +653,46 @@ describe("proxyRequest: over a real socket", () => {
     expect(res.status).toBe(504);
     up.stop();
   });
+
+  // a hand-built Request cannot carry `Connection: keep-alive,` - only bun's
+  // own parser hands a value like that to a handler. the proxy used to throw
+  // on it, from outside its own try, so serve() answered /api with a rendered
+  // 500 document. the whole point of this hop is that it fails as an api.
+  test("a malformed Connection value is proxied, not thrown on", async () => {
+    const up = await upstream(
+      (r) => new Response(r.headers.has("x-api-key") ? "leaked" : "clean", { headers: { "Content-Type": "text/plain" } }),
+    );
+    const front = Bun.serve({
+      port: 0,
+      fetch: (r) => proxyRequest(r, opts({ target: `${up.url}/api/x` })),
+    });
+    const wire = async (connection: string) => {
+      const chunks: Uint8Array[] = [];
+      const sock = await Bun.connect({
+        hostname: "127.0.0.1",
+        port: Number(front.port),
+        socket: { data: (_s, d) => void chunks.push(d) },
+      });
+      sock.write(
+        `GET /api/x HTTP/1.1\r\nHost: app.test\r\nConnection: ${connection}\r\nX-Api-Key: k\r\n\r\n`,
+      );
+      await Bun.sleep(120);
+      sock.end();
+      return Buffer.concat(chunks).toString("latin1");
+    };
+    // a value that names nothing forwards X-Api-Key, as it should - the
+    // failure being pinned here is the throw, which never reached the api
+    for (const connection of ["keep-alive,", ",", '"foo"', "@bad"]) {
+      const answer = await wire(connection);
+      expect(answer).toContain("200 OK");
+      expect(answer).not.toContain("500 Internal Server Error");
+      expect(answer.endsWith("leaked")).toBe(true);
+    }
+    // a junk token in the list does not shield the real one beside it
+    for (const connection of ["keep-alive, X-Api-Key", 'X-Api-Key, "junk"', ", X-Api-Key, ,"]) {
+      expect(await wire(connection)).toEndWith("clean");
+    }
+    front.stop(true);
+    up.stop();
+  });
 });
