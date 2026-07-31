@@ -138,8 +138,133 @@ if (snippets.length) {
   }
 }
 
+// go snippets get the same treatment: each becomes one file in a scratch
+// package inside the example app's module, so "github.com/LuigiDavideMicca/borgo"
+// resolves as it does from a real api/ file, and one `go build` checks them
+// all. a block that is a fragment (no package-level declaration to hang the
+// imports off) marks itself no-check, like its typescript siblings
+const goScratch = join(appDir, "docsnippets");
+const goSnippets: Snippet[] = [];
+rmSync(goScratch, { recursive: true, force: true });
+mkdirSync(goScratch, { recursive: true });
+
+// go imports are file-scoped, so every snippet file carries the block; the
+// blank bindings keep an unused import from failing the build and can be
+// repeated across files because the blank identifier never collides
+const GO_IMPORTS = `import (
+	"context"
+	"errors"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/LuigiDavideMicca/borgo"
+)
+
+var (
+	_ = context.Background
+	_ = errors.New
+	_ = http.StatusOK
+	_ = sync.Mutex{}
+	_ = time.Now
+	_ = borgo.Serve
+)
+`;
+
+// the domain the docs write about. a page gets only the ones it does not
+// declare itself, so an example is free to define its own Task
+const GO_DOMAIN: Record<string, string> = {
+  Task: "type Task struct {\n\tID    int    `json:\"id\"`\n\tTitle string `json:\"title\"`\n\tBody  string `json:\"body\"`\n}",
+  TaskList: "type TaskList struct {\n\tTasks []Task `json:\"tasks\"`\n}",
+  TaskCreate: "type TaskCreate struct {\n\tTitle string `json:\"title\"`\n\tBody  string `json:\"body\"`\n}",
+  User: "type User struct {\n\tUsername string `json:\"username\"`\n\tHash     string `json:\"-\"`\n}",
+  Me: "type Me struct {\n\tUsername string `json:\"username\"`\n}",
+};
+
+// the app-side pieces docs legitimately elide - a store, a handler, the data
+// itself. stubbed so an example that names one still compiles
+const GO_STUBS = `var tasks []Task
+
+func lookupUser(ctx context.Context, username string) (User, string, error) { return User{}, "", nil }
+
+func createUser(ctx context.Context, username, hash string) (User, error) { return User{}, nil }
+
+func currentUser(w http.ResponseWriter, r *http.Request) {}
+`;
+
+for (const source of sources) {
+  if (!existsSync(source)) continue;
+  const lines = readFileSync(source, "utf8").split(/\r?\n/);
+  const blocks: Array<{ text: string; fenceLine: number }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const fence = lines[i].match(/^```go\b(.*)$/);
+    if (!fence) continue;
+    const start = i;
+    const body: string[] = [];
+    while (++i < lines.length && !/^```\s*$/.test(lines[i])) body.push(lines[i]);
+    if (fence[1].includes("no-check")) continue;
+    const text = body.join("\n");
+    // only whole declarations compile on their own; a bare statement or an
+    // expression is a fragment the reader will paste into a function
+    if (!/^\s*(func|type|var|const)\b/m.test(text)) continue;
+    blocks.push({ text, fenceLine: start + 1 });
+  }
+  if (!blocks.length) continue;
+
+  // one package per page, one file per block: a page's blocks are written to
+  // be read in order, so a type declared in an earlier one is in scope for
+  // the later ones - exactly as it is for the reader
+  const pkg = `p${sources.indexOf(source)}`;
+  const dir = join(goScratch, pkg);
+  mkdirSync(dir, { recursive: true });
+  const declared = new Set<string>();
+  for (const b of blocks) for (const m of b.text.matchAll(/^type (\w+)/gm)) declared.add(m[1]);
+  for (const b of blocks) for (const m of b.text.matchAll(/^(?:func|var) (\w+)/gm)) declared.add(m[1]);
+  const domain = Object.entries(GO_DOMAIN)
+    .filter(([name]) => !declared.has(name))
+    .map(([, decl]) => decl)
+    .join("\n\n");
+  const stubs = GO_STUBS.split("\n\n")
+    .filter((decl) => {
+      const name = decl.match(/^(?:func|var) (\w+)/)?.[1];
+      return name && !declared.has(name);
+    })
+    .join("\n\n");
+  writeFileSync(join(dir, "domain.go"), `package ${pkg}\n\n${GO_IMPORTS}\n${domain}\n\n${stubs}\n`);
+  for (const b of blocks) {
+    const n = goSnippets.length;
+    writeFileSync(join(dir, `s${n}.go`), `package ${pkg}\n\n${GO_IMPORTS}\n${b.text}\n`);
+    goSnippets.push({ file: `${pkg}/s${n}`, source, fenceLine: b.fenceLine });
+  }
+}
+
+if (goSnippets.length) {
+  const build = Bun.spawnSync(["go", "build", "./docsnippets/..."], {
+    cwd: appDir,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (build.exitCode !== 0) {
+    const out = build.stdout.toString() + build.stderr.toString();
+    const before = failures;
+    for (const line of out.split(/\r?\n/)) {
+      const m = line.match(/s(\d+)[\\/]snippet\.go:(\d+):(\d+):(.*)$/);
+      if (!m) continue;
+      const s = goSnippets[Number(m[1])];
+      // the generated file prepends a package clause and the import block
+      const offset = GO_IMPORTS.split("\n").length + 2;
+      fail(`${s.source}:${s.fenceLine + Number(m[2]) - offset}:${m[4]}`);
+    }
+    if (failures === before) fail(`go snippet build failed:\n${out}`);
+  } else {
+    rmSync(goScratch, { recursive: true, force: true });
+  }
+}
+
 if (failures) {
   console.error(`\n${failures} doc problem(s)`);
   process.exit(1);
 }
-console.log(`docs ok (${sources.length} files, ${snippets.length} snippets typechecked)`);
+console.log(
+  `docs ok (${sources.length} files, ${snippets.length} ts + ${goSnippets.length} go snippets compiled)`,
+);

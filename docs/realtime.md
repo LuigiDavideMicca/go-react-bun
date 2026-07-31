@@ -6,7 +6,7 @@ Live updates in both directions: server-sent events for one-way feeds, WebSocket
 
 `borgo.SSE(w, r)` turns any handler into an event stream — it returns the stream, with `Send(event, data)` (data JSON-encoded), `Ping()` to keep idle proxies from closing it, and `Done()` for the client's disconnect:
 
-```go
+```go no-check
 //borgo:route GET /api/ticker
 func Ticker(w http.ResponseWriter, r *http.Request) {
     stream, err := borgo.SSE(w, r)

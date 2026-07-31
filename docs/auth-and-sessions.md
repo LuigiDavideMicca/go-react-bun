@@ -8,7 +8,7 @@ The complete flow — register, login, protected page, logout — is wired in `e
 
 Sessions are a JSON payload HMAC-signed with `SESSION_SECRET`, stored in an http-only cookie — no server-side storage, expiry signed in (set `SESSION_SECURE=1` behind https):
 
-```go
+```go no-check
 type Session struct{ User string `json:"user"` }
 
 borgo.SetSession(w, Session{User: user}, 24*time.Hour)
@@ -36,7 +36,7 @@ Set `Auth.Hasher` to your own implementation and nothing else changes. Hashes em
 
 `borgo.Auth[U]` turns a user provider into handlers. You supply `Lookup` (and optionally `Register`); the framework does the verification, the hashing, and the session:
 
-```go
+```go no-check
 var auth = borgo.Auth[User]{
     // username -> user + stored password hash. any error answers 401.
     Lookup: func(ctx context.Context, username string) (User, string, error) {
@@ -77,7 +77,7 @@ Without a valid session the request is answered `401 {"error": "unauthenticated"
 
 For anything beyond a boolean gate (roles, ownership), write the three-line wrapper yourself — handlers are ordinary `http.HandlerFunc`s:
 
-```go
+```go no-check
 func admin(h http.HandlerFunc) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         if s, ok := borgo.GetSession[Me](r); !ok || s.Role != "admin" {

@@ -4,6 +4,7 @@ Deep dives for every convention the [README](../README.md) summarizes. Each page
 
 | Page | One line |
 | --- | --- |
+| [Getting started](getting-started.md) | build a small app end to end: a page, a Go route, a loader, a form action, an island |
 | [Pages and routing](pages-and-routing.md) | pages and loaders, layouts, `<head>` management, streaming SSR, form actions, error pages |
 | [The typed bridge](typed-bridge.md) | Go API routes, borgogen, typed request bodies, type overrides, honest limits |
 | [Client navigation and hydration](client-navigation.md) | client-side transitions, prefetching, scroll restoration, code splitting, hydration modes, islands |
@@ -17,7 +18,7 @@ Deep dives for every convention the [README](../README.md) summarizes. Each page
 
 ## Where to start
 
-**Building your first app** — read in this order; each page builds on the one before:
+**Building your first app** — start with [getting started](getting-started.md), which takes you from `bunx create-borgo` to a working feature in about twenty minutes. Then read in this order; each page builds on the one before:
 
 1. [Pages and routing](pages-and-routing.md) — the page model everything else hangs off
 2. [The typed bridge](typed-bridge.md) — how Go handlers become typed TypeScript calls

@@ -28,7 +28,7 @@ It also collects `borgo.PushT` calls into a typed WebSocket event map — see [r
 
 Decode with `borgo.Bind[T](r)` and borgogen types the route's request too — the api client then *requires* a matching `body`, so `api("POST /api/tasks", { body })` is checked end to end and a wrong body fails `tsc` (CI proves this with a deliberate wrong-body file):
 
-```go
+```go no-check
 type TaskCreate struct {
     Title string `json:"title"`
     Body  string `json:"body"`
@@ -61,7 +61,7 @@ Struct fields follow `encoding/json` semantics — tags, `omitempty`, embedded s
 
 One place where Go's own JSON semantics can surprise you, and the bridge deliberately does not paper over it:
 
-```go
+```go no-check
 var tasks []Task            // nil, not empty
 db.Find(&tasks)             // still nil if there are no rows
 borgo.JSON(w, 200, TaskList{Tasks: tasks})
