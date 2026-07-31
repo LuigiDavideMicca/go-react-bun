@@ -109,6 +109,16 @@ describe("fillPattern", () => {
     expect(() => fillPattern("/posts/:slug", { slug: "a/b" })).toThrow("path separator");
     expect(() => fillPattern("/posts/:slug", { slug: "a\\b" })).toThrow("path separator");
   });
+
+  // each segment becomes a directory under dist/site, so ".." would write the
+  // page a level above the export root instead of inside it
+  test("dot segments throw instead of climbing out of the output dir", () => {
+    expect(() => fillPattern("/posts/:slug", { slug: ".." })).toThrow("dot segment");
+    expect(() => fillPattern("/posts/:slug", { slug: "." })).toThrow("dot segment");
+    expect(() => fillPattern("/a/:x/:y", { x: "..", y: ".." })).toThrow("dot segment");
+    expect(fillPattern("/posts/:slug", { slug: "...." })).toBe("/posts/....");
+    expect(fillPattern("/posts/:slug", { slug: "a.b" })).toBe("/posts/a.b");
+  });
 });
 
 describe("freePorts", () => {

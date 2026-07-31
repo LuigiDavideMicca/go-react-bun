@@ -64,6 +64,11 @@ export function fillPattern(pattern: string, params: Record<string, string | num
     if (/[\\/]/.test(raw)) {
       throw new Error(`prerenderPaths for ${pattern}: param "${name}" contains a path separator`);
     }
+    // outputPath turns each segment into a directory, so a dot segment would
+    // climb out of dist/site and write an index.html somewhere else entirely
+    if (raw === "." || raw === "..") {
+      throw new Error(`prerenderPaths for ${pattern}: param "${name}" is the dot segment "${raw}"`);
+    }
     return encodeURIComponent(raw);
   });
 }
