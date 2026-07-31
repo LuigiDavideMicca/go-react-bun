@@ -1085,7 +1085,7 @@ func (g *tsGen) collectFields(s *types.Struct, depth int, expanded map[*types.St
 			name = f.Name()
 		}
 		optional := ""
-		if hasOpt(opts, "omitempty") || hasOpt(opts, "omitzero") {
+		if hasOpt(opts, "omitzero") || (hasOpt(opts, "omitempty") && canBeEmpty(f.Type())) {
 			// omitzero drops the field whenever the value is the zero of its
 			// type - or its IsZero() says so - which omitempty never does for
 			// a struct: a `json:"t,omitzero"` time.Time is routinely absent
@@ -1130,6 +1130,25 @@ func isTSIdent(s string) bool {
 		}
 	}
 	return true
+}
+
+// canBeEmpty reports whether omitempty can ever drop a field of type t, which
+// is encoding/json's isEmptyValue: false, 0, "", a nil pointer or interface,
+// and a slice, map or array of length zero. A struct is never empty to it - a
+// `json:"meta,omitempty"` struct, a time.Time above all, is on the wire every
+// time - and neither is an array with elements in it. The Go kind decides,
+// not the marshaled shape: a MarshalJSON that writes "" does not make the
+// field disappear.
+func canBeEmpty(t types.Type) bool {
+	switch u := types.Unalias(t).Underlying().(type) {
+	case *types.Basic:
+		return u.Info()&(types.IsBoolean|types.IsNumeric|types.IsString) != 0
+	case *types.Slice, *types.Map, *types.Pointer, *types.Interface:
+		return true
+	case *types.Array:
+		return u.Len() == 0
+	}
+	return false
 }
 
 // hasOpt reports whether a json tag's option list contains opt. Options are

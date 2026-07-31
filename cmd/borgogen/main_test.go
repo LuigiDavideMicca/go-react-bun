@@ -387,7 +387,7 @@ func TestNonIdentifierJSONNamesAreQuoted(t *testing.T) {
 // is exactly the case omitempty does not cover for structs and time.Time. A
 // required property for a field the wire routinely omits is the dangerous
 // direction: the browser reads undefined off a type that promised a value.
-func TestOmitzeroFieldsAreOptional(t *testing.T) {
+func TestOptionalFieldsMatchEncodingJSON(t *testing.T) {
 	root := filepath.Join("testdata", "optional")
 	if err := run(root); err != nil {
 		t.Fatal(err)
@@ -399,6 +399,21 @@ func TestOmitzeroFieldsAreOptional(t *testing.T) {
 		"zerotime?: string",
 		// an option encoding/json does not recognize is not omitempty either
 		"typo: number",
+		// omitempty on a kind isEmptyValue never calls empty: the field is on
+		// the wire every time, so promising it may be missing is a lie too
+		"a2: Array<number>",
+		"st: Inner",
+		"t: string",
+		"m: Inner",
+		// and the kinds it does drop stay optional
+		"bool?: boolean",
+		"num?: number",
+		"str?: string",
+		"slice?: Array<number>",
+		"map?: Record<string, number>",
+		"ptr?: number | null",
+		"iface?: unknown",
+		"a0?: Array<number>",
 	} {
 		if !strings.Contains(types, want) {
 			t.Errorf("api-types.d.ts missing %q\n%s", want, types)

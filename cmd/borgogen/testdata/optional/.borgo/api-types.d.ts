@@ -13,10 +13,10 @@ export interface Optional {
   ptr?: number | null;
   iface?: unknown;
   a0?: Array<number>;
-  a2?: Array<number>;
-  st?: Inner;
-  t?: string;
-  m?: Inner;
+  a2: Array<number>;
+  st: Inner;
+  t: string;
+  m: Inner;
   zerost?: Inner;
   zeronum?: number;
   zerotime?: string;
