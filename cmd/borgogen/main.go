@@ -1000,8 +1000,9 @@ func (g *tsGen) interfaceFor(t *types.Named, s *types.Struct) string {
 	return name
 }
 
-// fields follows encoding/json: exported fields only, json tags for naming,
-// omitempty marks the field optional, embedded structs are flattened.
+// fields returns the interface members of a struct as encoding/json would
+// write it: json tags for naming, omitempty for optionality, embedded structs
+// flattened, and the name conflicts that flattening creates resolved.
 func (g *tsGen) fields(s *types.Struct) []string {
 	var found []jsonField
 	g.collectFields(s, 0, map[*types.Struct]bool{s: true}, &found)
