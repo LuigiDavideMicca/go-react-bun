@@ -1054,7 +1054,7 @@ type jsonField struct {
 func (g *tsGen) collectFields(s *types.Struct, depth int, expanded map[*types.Struct]bool, out *[]jsonField) {
 	for i := 0; i < s.NumFields(); i++ {
 		f := s.Field(i)
-		name, opts := parseJSONTag(s.Tag(i))
+		name, opts, skip := parseJSONTag(s.Tag(i))
 		et := f.Type()
 		if p, ok := types.Unalias(et).(*types.Pointer); ok {
 			et = p.Elem()
@@ -1068,7 +1068,7 @@ func (g *tsGen) collectFields(s *types.Struct, depth int, expanded map[*types.St
 		if !f.Exported() && !(f.Embedded() && embeddedStruct != nil) {
 			continue
 		}
-		if name == "-" {
+		if skip {
 			continue
 		}
 		if f.Embedded() && name == "" && embeddedStruct != nil && !hasCustomMarshal(named) {
@@ -1165,15 +1165,22 @@ func hasOpt(opts, opt string) bool {
 	return false
 }
 
-func parseJSONTag(tag string) (name, opts string) {
+// parseJSONTag splits a json struct tag into its name and its options. skip
+// carries encoding/json's whole-tag rule: `json:"-"` drops the field, while
+// `json:"-,"` is the documented way to put a field on the wire under the name
+// "-" - only the first of the two is an exclusion.
+func parseJSONTag(tag string) (name, opts string, skip bool) {
 	value, ok := lookupTag(tag, "json")
 	if !ok {
-		return "", ""
+		return "", "", false
+	}
+	if value == "-" {
+		return "", "", true
 	}
 	if i := strings.Index(value, ","); i >= 0 {
-		return value[:i], value[i+1:]
+		return value[:i], value[i+1:], false
 	}
-	return value, ""
+	return value, "", false
 }
 
 func lookupTag(tag, key string) (string, bool) {

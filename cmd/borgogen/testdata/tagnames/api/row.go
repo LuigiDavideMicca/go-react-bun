@@ -33,3 +33,16 @@ func Rows(w http.ResponseWriter, r *http.Request) {
 func Quotes(w http.ResponseWriter, r *http.Request) {
 	borgo.JSON(w, http.StatusOK, Quoted{})
 }
+
+// json.Marshal(Dashes{}) writes {"-":0,"keep":0}: only a tag that is exactly
+// "-" excludes a field, and `json:"-,"` is the documented way to name one "-".
+type Dashes struct {
+	Named   int `json:"-,"`
+	Dropped int `json:"-"`
+	Keep    int `json:"keep"`
+}
+
+//borgo:route GET /api/dashes
+func GetDashes(w http.ResponseWriter, r *http.Request) {
+	borgo.JSON(w, http.StatusOK, Dashes{})
+}
