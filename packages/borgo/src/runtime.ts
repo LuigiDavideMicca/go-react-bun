@@ -287,7 +287,9 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   // keepScroll: an action redirecting back to the page it came from must
   // refresh the data in place, not jump to the top like a real navigation.
   // hops caps loader-redirect chains, which have no native browser limit.
-  async function navigate(to: URL, push: boolean, keepScroll = false, hops = 0) {
+  // push: true adds a history entry, "replace" rewrites the current one (a
+  // link to the page you are already on), false is a back/forward render
+  async function navigate(to: URL, push: boolean | "replace", keepScroll = false, hops = 0) {
     const seq = ++navSeq;
     const matched = matchRoute(to.pathname, routes);
     if (!matched) {
@@ -334,10 +336,12 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       return;
     }
 
-    if (push) {
+    if (push === true) {
       saveScroll();
       entryKey = newKey();
       history.pushState({ __borgo: entryKey }, "", to.pathname + to.search + to.hash);
+    } else if (push === "replace") {
+      history.replaceState({ __borgo: entryKey }, "", to.pathname + to.search + to.hash);
     }
     currentRoute = matched.route;
     renderedUrl = to.pathname + to.search;
@@ -643,10 +647,14 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
       const anchor = (event.target as Element).closest("a");
       const to = linkTarget(anchor);
       if (!to) return;
-      if (to.pathname === location.pathname && to.search === location.search && to.hash) return;
+      const samePage = to.pathname === location.pathname && to.search === location.search;
+      if (samePage && to.hash) return;
 
       event.preventDefault();
-      navigate(to, true);
+      // a link to the page you are already on refreshes it and goes to the
+      // top, the way the browser does: pushing an entry identical to the
+      // current one only means back has to be pressed twice to leave
+      navigate(to, samePage ? "replace" : true);
     });
 
     // a same-page fragment link is left to the browser, which pushes an entry
