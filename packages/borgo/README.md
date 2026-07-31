@@ -17,7 +17,7 @@ bunx create-borgo my-app
 - `borgo deploy init <caddy|nginx|systemd|compose>` — writes the deploy guide's config for the project
 - `borgo doctor` — diagnoses the environment, one actionable fix per failing check
 
-Run the CLI through Bun (`bun run dev` in an app). If you hit `error: bun is not installed in %PATH%`, the bin shim was spawned without Bun on `PATH` (e.g. by `npm run`) — see the [troubleshooting section](https://github.com/LuigiDavideMicca/borgo/blob/main/docs/dev-experience.md#troubleshooting).
+Run the CLI through Bun (`bun run dev` in an app). If you hit `error: bun is not installed in %PATH%`, the bin shim was spawned without Bun on `PATH` (e.g. by `npm run`) — see the [troubleshooting section](https://github.com/LuigiDavideMicca/borgo/blob/main/docs/faq-and-troubleshooting.md).
 
 ## Exports
 
