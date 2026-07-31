@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.1](https://github.com/LuigiDavideMicca/borgo/compare/create-borgo-v0.20.0...create-borgo-v0.20.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* the full template sets a development session secret so login works day zero ([13d50fb](https://github.com/LuigiDavideMicca/borgo/commit/13d50fbb05c7270b15e3d96b4d6cff42efc08840))
+* the scaffolder lets go of the terminal instead of hanging after its summary ([d51edfc](https://github.com/LuigiDavideMicca/borgo/commit/d51edfcd712a738c581651b8319487c4091bf68b))
+
 ## [0.20.0](https://github.com/LuigiDavideMicca/borgo/compare/create-borgo-v0.11.0...create-borgo-v0.20.0) (2026-07-31)
 
 
