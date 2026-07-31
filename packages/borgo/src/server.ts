@@ -222,6 +222,17 @@ export async function serve({ dev = false } = {}) {
     // no token to compare against: reject without buffering and parsing the
     // body, which the action below would parse a second time anyway
     if (!expected) return true;
+    // the clone looks like it buffers the body a second time, ahead of the
+    // action's own formData(). it does not: bun's clone shares the body
+    // store, and holding two clones of a 40mb request costs the same 40mb as
+    // holding one (measured). what a single-parse rewrite would cost instead
+    // is +40mb per 40mb request - arrayBuffer() materialises one copy and
+    // every Request built over that buffer copies it again - plus the action
+    // losing the real request's abort signal. the parse itself is the only
+    // extra, and it is transient. read the token the same way the action
+    // will: one parser, one answer. a cheaper hand-rolled scan of the raw
+    // bytes would be a second parser disagreeing with the first about
+    // percent-encoding, in the middle of a security check.
     let given = "";
     try {
       const form = await req.clone().formData();
