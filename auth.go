@@ -31,6 +31,14 @@ const (
 	pbkdf2Iterations = 600_000
 	pbkdf2SaltLen    = 16
 	pbkdf2KeyLen     = 32
+	// Verify derives with the parameters the stored hash asks for, so a row
+	// carrying a 32 KB key costs 106 s of cpu per attempt here (x1140 a real
+	// verify) while holding one of the few hash slots, and an iteration count
+	// with enough digits never returns at all. Nothing borgo writes comes
+	// near these bounds; past them the stored hash is junk, not a credential.
+	pbkdf2MaxIterations = 10_000_000
+	pbkdf2MinKeyLen     = 16
+	pbkdf2MaxKeyLen     = 64
 )
 
 type pbkdf2Hasher struct{}
@@ -59,7 +67,7 @@ func (pbkdf2Hasher) Verify(password, hash string) bool {
 		return false
 	}
 	iterations, err := strconv.Atoi(parts[1])
-	if err != nil || iterations < 1 {
+	if err != nil || iterations < 1 || iterations > pbkdf2MaxIterations {
 		return false
 	}
 	enc := base64.RawURLEncoding
@@ -68,7 +76,8 @@ func (pbkdf2Hasher) Verify(password, hash string) bool {
 		return false
 	}
 	want, err := enc.DecodeString(parts[3])
-	if err != nil {
+	// the key length drives the cost, and a truncated key is not a credential
+	if err != nil || len(want) < pbkdf2MinKeyLen || len(want) > pbkdf2MaxKeyLen {
 		return false
 	}
 	got, err := pbkdf2.Key(sha256.New, password, salt, iterations, len(want))

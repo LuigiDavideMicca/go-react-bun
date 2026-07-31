@@ -2,8 +2,10 @@ package borgo
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -75,6 +77,39 @@ func TestHasherRejectsMalformed(t *testing.T) {
 		if DefaultHasher.Verify("anything", hash) {
 			t.Errorf("malformed hash %q verified", hash)
 		}
+	}
+}
+
+// a stored hash chooses the work Verify does, so a planted row must not be
+// able to turn one login attempt into minutes of cpu on a hash slot
+func TestHasherRejectsAbsurdParameters(t *testing.T) {
+	enc := base64.RawURLEncoding
+	salt := make([]byte, pbkdf2SaltLen)
+	key := make([]byte, 32*1024)
+	crafted := map[string]string{
+		"32 KB key":           fmt.Sprintf("pbkdf2$%d$%s$%s", pbkdf2Iterations, enc.EncodeToString(salt), enc.EncodeToString(key)),
+		"a billion rounds":    fmt.Sprintf("pbkdf2$%d$%s$%s", 1_000_000_000, enc.EncodeToString(salt), enc.EncodeToString(key[:pbkdf2KeyLen])),
+		"one-byte key":        fmt.Sprintf("pbkdf2$%d$%s$%s", pbkdf2Iterations, enc.EncodeToString(salt), enc.EncodeToString(key[:1])),
+		"more digits than go": fmt.Sprintf("pbkdf2$%s$%s$%s", strings.Repeat("9", 30), enc.EncodeToString(salt), enc.EncodeToString(key[:pbkdf2KeyLen])),
+	}
+	for name, hash := range crafted {
+		start := time.Now()
+		if DefaultHasher.Verify("anything", hash) {
+			t.Errorf("%s: crafted hash verified", name)
+		}
+		// a real verify is ~100 ms; anything in this ballpark means the
+		// crafted parameters were honoured
+		if elapsed := time.Since(start); elapsed > 20*time.Millisecond {
+			t.Errorf("%s: rejected only after %v of work", name, elapsed)
+		}
+	}
+	// the parameters borgo itself writes keep verifying
+	hash, err := DefaultHasher.Hash("hunter22")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !DefaultHasher.Verify("hunter22", hash) {
+		t.Error("a hash from the default hasher must still verify")
 	}
 }
 
