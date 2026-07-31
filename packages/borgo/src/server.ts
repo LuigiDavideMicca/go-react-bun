@@ -24,18 +24,12 @@ import { matchRoute, resolveHead, safeDecode, type Route } from "./router";
 import {
   createSecurity,
   envInt,
-  forwardableHeaders,
   freshCookieHeader,
   hasCookie,
   headHtml,
+  proxyRequest,
   scriptJson,
-  shouldBufferBody,
 } from "./util";
-
-const isConnRefused = (err: unknown) => {
-  const e = err as { code?: string; message?: string };
-  return e?.code === "ConnectionRefused" || e?.code === "ECONNREFUSED" || /unable to connect|refused/i.test(e?.message ?? "");
-};
 
 const keysEqual = (given: string, expected: string) => {
   const a = Buffer.from(given);
@@ -384,77 +378,11 @@ export async function serve({ dev = false } = {}) {
   async function handle(req: Request, url: URL, label: Label): Promise<Response> {
     if (url.pathname.startsWith("/api/")) {
       label.route = "/api/*";
-      // the go api restarts on every .go edit in dev: a refused connection
-      // never reached it, so retrying briefly is safe even for mutations.
-      // small bodies are buffered once so the request can be re-sent; large
-      // or unsized bodies stream through, at the price of no retry.
-      const target = api + url.pathname + url.search;
-      const hasBody = req.method !== "GET" && req.method !== "HEAD";
-      const buffered = shouldBufferBody(req.method, req.headers.get("content-length"));
-      const body = hasBody ? (buffered ? await req.arrayBuffer() : req.body) : undefined;
-      // hop-by-hop headers belong to the browser -> borgo connection, not to
-      // this one; built once, outside the retry loop
-      const headers = forwardableHeaders(req.headers);
-      // resendable unless a real body streamed through unbuffered - a
-      // body-less delete/post (body null) is as safe to retry as a get
-      const retriable = !hasBody || buffered || body == null;
-      for (let attempt = 0; ; attempt++) {
-        // an api that accepts the connection and then never answers would
-        // otherwise pin this request forever: the deadline covers the wait for
-        // response headers only and is dropped once they arrive, so a stream
-        // (sse) still runs for as long as it wants
-        const abort = apiTimeout > 0 ? new AbortController() : null;
-        let timedOut = false;
-        const deadline = abort
-          ? setTimeout(() => {
-              timedOut = true;
-              abort.abort();
-            }, apiTimeout)
-          : undefined;
-        try {
-          // decompress: false passes go's response through untouched, encoding
-          // included; bun would otherwise inflate it and resend identity
-          const upstream = await fetch(target, {
-            method: req.method,
-            headers,
-            ...(hasBody ? { body } : {}),
-            decompress: false,
-            signal: abort?.signal,
-          } as RequestInit);
-          // the deadline can fire while these headers are still in flight:
-          // the abort has already torn the connection down, but fetch still
-          // resolves, with a body that ends at zero bytes. returning it would
-          // hand the browser a 200 it cannot tell from a genuinely empty
-          // answer - and, on sse, a stream that is dead on arrival. the
-          // timeout already decided; say so.
-          if (timedOut) {
-            void upstream.body?.cancel().catch(() => {});
-            return new Response("api timeout", { status: 504 });
-          }
-          // an upgrade is hop-by-hop and this proxy has no tunnel to hand
-          // over: relaying the 101 would leave the client speaking a switched
-          // protocol into a socket that is still framing http, and every byte
-          // after it desynchronised. app sockets belong on /ws.
-          if (upstream.status === 101) {
-            void upstream.body?.cancel().catch(() => {});
-            console.error(`${url.pathname} answered 101; /api cannot tunnel an upgrade`);
-            return new Response("api upgrade not supported", { status: 502 });
-          }
-          return upstream;
-        } catch (err) {
-          if (timedOut) return new Response("api timeout", { status: 504 });
-          if (retriable && attempt < apiRetries && isConnRefused(err)) {
-            await Bun.sleep(250);
-            continue;
-          }
-          // an api endpoint must fail as an api: a bad gateway status, not
-          // the rendered 500 page (or the dev overlay) meant for documents
-          console.error(err);
-          return new Response("api unreachable", { status: 502 });
-        } finally {
-          clearTimeout(deadline);
-        }
-      }
+      return proxyRequest(req, {
+        target: api + url.pathname + url.search,
+        deadlineMs: apiTimeout,
+        retries: apiRetries,
+      });
     }
 
     // decode before serving so files with spaces or unicode names resolve;
