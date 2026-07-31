@@ -1,8 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { c, g } from "./colors";
-import { CSRF_COOKIE, CSRF_FIELD, csrfCookieValue } from "./index";
-import type { Head } from "./router";
+import { documentStream, gzipStream, pickEncoding } from "./compress";
+import { CSRF_COOKIE, CSRF_FIELD, csrfCookieValue, withCsrf } from "./index";
+import { resolveHead, type Head, type Route } from "./router";
 
 // constant-time on the value, honest about the length: a comparison that
 // leaks how many prefix bytes matched is a comparison an attacker can walk
@@ -323,6 +324,196 @@ const emptyStream = () =>
       controller.close();
     },
   });
+
+// set-cookie headers collected from the api ride out on whatever response the
+// request ends with; a response that gathered none passes through untouched
+export function withCookies(res: Response, cookies: string[]): Response {
+  if (!cookies.length) return res;
+  const headers = new Headers(res.headers);
+  for (const c of cookies) headers.append("Set-Cookie", c);
+  return new Response(res.body, { status: res.status, headers });
+}
+
+// in dev a tiny inline client keeps a zero-js page live: css swaps in
+// place, anything else is a full reload
+export const DEV_INLINE_CLIENT =
+  "<script>(()=>{const c=()=>{const w=new WebSocket(`ws://${location.host}/__borgo/dev`);" +
+  'w.onmessage=(e)=>{const m=JSON.parse(e.data);if(m.type==="css"){for(const l of document.querySelectorAll(\'link[rel="stylesheet"]\'))l.href=l.href.split("?")[0]+"?t="+Date.now();}' +
+  'else if(!m.stamp||(m.stamp>performance.timeOrigin&&Number(sessionStorage.getItem("borgo:devstamp")||0)<m.stamp)){if(m.stamp)sessionStorage.setItem("borgo:devstamp",String(m.stamp));location.reload();}};' +
+  "w.onclose=()=>setTimeout(c,300);};c();})()</script>";
+
+export type ShellParts = {
+  // everything before <!--app-->, untouched
+  start: string;
+  // start split at </head>, with and without its <title>
+  head: [string, string];
+  headNoTitle: [string, string];
+  // everything after <!--app-->, split at the props slot
+  endProps: [string, string];
+  // the tail of a hydrate=false page: no props, no client script - or the
+  // islands entry, which hydrates only those
+  zeroJsEnd: { plain: string; islands: string };
+  // closes the props script: the shell title for the client-side router,
+  // and the dev flag
+  stateTail: string;
+};
+
+// the shell is scanned once at boot so a render only concatenates strings:
+// injecting <head> content is a per-request rewrite of the whole shell head,
+// and the props slot and client script tag are resolved here, not per page
+export function prepareShell(shell: string, dev: boolean): ShellParts {
+  const [start, end = ""] = shell.split("<!--app-->");
+  const title = shell.match(/<title>(.*?)<\/title>/s)?.[1] ?? "";
+  const splitAtHead = (html: string): [string, string] => {
+    const at = html.indexOf("</head>");
+    return at === -1 ? [html, ""] : [html.slice(0, at), html.slice(at)];
+  };
+  const PROPS_SLOT = "<!--props-->";
+  const splitAtProps = (html: string): [string, string] => {
+    const at = html.indexOf(PROPS_SLOT);
+    return at === -1 ? [html, ""] : [html.slice(0, at), html.slice(at + PROPS_SLOT.length)];
+  };
+  // tolerate any attribute order/extras on the client script tag; a shell
+  // where it cannot be found would otherwise hydrate the wrong page over a
+  // zero-js document
+  const clientScriptRe = /[ \t]*<script\b[^>]*src="\/assets\/client\.js"[^>]*><\/script>\r?\n?/;
+  const zeroJsTail = (islands: boolean) =>
+    end
+      .replace(PROPS_SLOT, dev ? DEV_INLINE_CLIENT : "")
+      .replace(
+        clientScriptRe,
+        islands ? '<script type="module" src="/assets/islands-client.js"></script>' : "",
+      );
+  return {
+    start,
+    head: splitAtHead(start),
+    headNoTitle: splitAtHead(start.replace(/<title>.*?<\/title>/s, "")),
+    endProps: splitAtProps(end),
+    zeroJsEnd: { plain: zeroJsTail(false), islands: zeroJsTail(true) },
+    stateTail: `;window.__BORGO_TITLE__=${scriptJson(title)}${dev ? ";window.__BORGO_DEV__=1" : ""}</script>`,
+  };
+}
+
+export type LoaderResult = Record<string, unknown> | Response;
+
+export type RenderPageOptions = {
+  dev: boolean;
+  shell: ShellParts;
+  security: Security | null;
+  // attributes minted onto a fresh csrf cookie (path, samesite, secure)
+  csrfCookieAttrs: string;
+  // the page's loader wired to the api client; collects set-cookie headers
+  runLoader: (
+    req: Request,
+    route: Route,
+    params: Record<string, string>,
+    onSetCookie: (cookies: string[]) => void,
+  ) => Promise<LoaderResult>;
+  // the page component wrapped in its layouts - serve() owns react
+  compose: (route: Route, props: Record<string, unknown>) => import("react").ReactNode;
+  // react-dom's renderToReadableStream, narrowed to what the render asks
+  renderToStream: (
+    element: import("react").ReactNode,
+    init: { nonce?: string; onError: (error: unknown) => void },
+  ) => Promise<AsyncIterable<Uint8Array>>;
+  // injectable for tests; production passes none of these
+  randomToken?: () => string;
+  onError?: (value: unknown) => void;
+};
+
+export async function renderPage(
+  req: Request,
+  route: Route,
+  params: Record<string, string>,
+  status: number,
+  options: RenderPageOptions,
+  extraProps?: Record<string, unknown>,
+  extraCookies: string[] = [],
+): Promise<Response> {
+  const {
+    dev,
+    shell,
+    security,
+    csrfCookieAttrs,
+    runLoader,
+    compose,
+    renderToStream,
+    randomToken = () => crypto.randomUUID().replaceAll("-", ""),
+    onError = console.error,
+  } = options;
+
+  const apiCookies = [...extraCookies];
+  const loaded = await runLoader(req, route, params, (c) => apiCookies.push(...c));
+  // a loader may short-circuit with a response, e.g. redirect() as a guard
+  if (loaded instanceof Response) return withCookies(loaded, apiCookies);
+  const props = extraProps ? { ...loaded, ...extraProps } : loaded;
+
+  // the same token rides in the cookie and in every <CsrfField />; a
+  // browser without one gets it minted alongside this page
+  const cookieToken = csrfCookieValue(req.headers.get("cookie"));
+  const csrfToken = cookieToken || randomToken();
+  if (!cookieToken) apiCookies.push(`${CSRF_COOKIE}=${csrfToken}; ${csrfCookieAttrs}`);
+
+  // react emits inline scripts of its own to reveal streamed suspense
+  // boundaries: they need the same nonce as the props script, so it is
+  // minted before the render and not when the document tail is built
+  const nonce = security?.needsNonce ? randomToken() : "";
+
+  // props are serialized before the render, not while the document tail is
+  // built: a loader that hands back something json cannot carry (a bigint, a
+  // cycle, a toJSON that throws) makes this throw, and a render already in
+  // flight would then be abandoned unread - react has no consumer to end it
+  // through, so the whole component tree is walked for a document that can
+  // never ship, and the request object stays resident. failing first costs
+  // nothing and keeps the waste at zero.
+  const propsJson = route.module.hydrate === false ? "" : scriptJson(props);
+
+  const head = resolveHead(route.module, props);
+  const stream = await renderToStream(withCsrf(compose(route, props), csrfToken), {
+    nonce: nonce || undefined,
+    onError(error) {
+      onError(error);
+    },
+  });
+
+  let start = shell.start;
+  const injected = headHtml(head);
+  if (injected) {
+    const [before, after] = head.title ? shell.headNoTitle : shell.head;
+    start = before + injected + after;
+  }
+
+  let end: string;
+  if (route.module.hydrate === false) {
+    // the page opted out of hydration: ship no props and no client script.
+    // pages with islands get the islands entry, which hydrates only those.
+    end = route.islands ? shell.zeroJsEnd.islands : shell.zeroJsEnd.plain;
+  } else {
+    const tag = nonce ? `<script nonce="${nonce}">` : "<script>";
+    end = `${shell.endProps[0]}${tag}window.__PROPS__=${propsJson}${shell.stateTail}${shell.endProps[1]}`;
+  }
+
+  // react-dom's bun build misbehaves under a manual reader pump; async
+  // iteration is the reliable way to drain it
+  const body = documentStream(start, stream, end);
+
+  const headers = new Headers({
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "private, no-store",
+    Vary: "Accept-Encoding",
+  });
+  if (nonce) headers.set("Content-Security-Policy", security!.cspFor(nonce));
+  for (const c of apiCookies) headers.append("Set-Cookie", c);
+  // gzip only: brotli is too slow for dynamic responses. no size threshold
+  // here - a rendered document is virtually always past it, and the length
+  // of a stream is unknown up front. the per-chunk sync flush in gzipStream
+  // keeps streamed suspense content progressive.
+  if (!dev && pickEncoding(req.headers.get("accept-encoding"), ["gzip"])) {
+    headers.set("Content-Encoding", "gzip");
+    return new Response(gzipStream(body), { status, headers });
+  }
+  return new Response(body, { status, headers });
+}
 
 // the seam, narrowed to what the proxy actually asks of fetch: a target and
 // an init in, a response out. the global satisfies it and so does a stub.
