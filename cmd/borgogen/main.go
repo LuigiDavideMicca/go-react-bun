@@ -880,43 +880,84 @@ func (g *tsGen) interfaceFor(t *types.Named, s *types.Struct) string {
 // fields follows encoding/json: exported fields only, json tags for naming,
 // omitempty marks the field optional, embedded structs are flattened.
 func (g *tsGen) fields(s *types.Struct) []string {
-	return g.structFields(s, map[*types.Struct]bool{s: true})
-}
+	var found []jsonField
+	g.collectFields(s, 0, map[*types.Struct]bool{s: true}, &found)
 
-// structFields flattens embedded structs the way encoding/json promotes them.
-// expanded holds the struct types already flattened on this path: a type that
-// embeds itself (type Node struct{ *Node }) would otherwise recurse forever,
-// and encoding/json stops at the same point - the promoted copy is shadowed by
-// the shallower one anyway.
-func (g *tsGen) structFields(s *types.Struct, expanded map[*types.Struct]bool) []string {
+	// encoding/json's promotion rule: of the fields that would marshal under
+	// the same name, the shallowest wins; at equal depth exactly one tagged
+	// field wins, and any other tie drops the name from the wire entirely.
+	winner := map[string]int{}
+	tied := map[string]bool{}
+	for i, f := range found {
+		j, seen := winner[f.name]
+		switch {
+		case !seen, f.depth < found[j].depth, f.depth == found[j].depth && f.tagged && !found[j].tagged:
+			winner[f.name], tied[f.name] = i, false
+		case f.depth > found[j].depth, f.tagged != found[j].tagged:
+			// shadowed by the field already held
+		default:
+			tied[f.name] = true
+		}
+	}
+
 	var out []string
-	for i := 0; i < s.NumFields(); i++ {
-		f := s.Field(i)
-		if !f.Exported() {
+	for i, f := range found {
+		if tied[f.name] || winner[f.name] != i {
 			continue
 		}
+		out = append(out, fmt.Sprintf("%s%s: %s", tsPropName(f.name), f.optional, f.ts))
+	}
+	if len(out) == 0 {
+		return []string{"[key: string]: unknown"}
+	}
+	return out
+}
+
+type jsonField struct {
+	name     string
+	optional string
+	ts       string
+	depth    int  // embedding hops from the outermost struct
+	tagged   bool // named by a json tag rather than by the field name
+}
+
+// collectFields walks a struct the way encoding/json's typeFields does,
+// flattening embedded structs - including embedded unexported struct types,
+// whose exported fields do reach the wire. expanded holds the struct types
+// already flattened on this path: a type that embeds itself (type Node struct{
+// *Node }) would otherwise recurse forever, and encoding/json stops at the same
+// point since the promoted copy is shadowed by the shallower one anyway.
+func (g *tsGen) collectFields(s *types.Struct, depth int, expanded map[*types.Struct]bool, out *[]jsonField) {
+	for i := 0; i < s.NumFields(); i++ {
+		f := s.Field(i)
 		name, opts := parseJSONTag(s.Tag(i))
+		et := f.Type()
+		if p, ok := types.Unalias(et).(*types.Pointer); ok {
+			et = p.Elem()
+		}
+		named, _ := types.Unalias(et).(*types.Named)
+		var embeddedStruct *types.Struct
+		if named != nil {
+			embeddedStruct, _ = named.Underlying().(*types.Struct)
+		}
+
+		if !f.Exported() && !(f.Embedded() && embeddedStruct != nil) {
+			continue
+		}
 		if name == "-" {
 			continue
 		}
-		if f.Embedded() && name == "" {
-			et := f.Type()
-			if p, ok := et.(*types.Pointer); ok {
-				et = p.Elem()
+		if f.Embedded() && name == "" && embeddedStruct != nil && !hasCustomMarshal(named) {
+			if expanded[embeddedStruct] {
+				continue
 			}
-			if named, ok := et.(*types.Named); ok && !hasCustomMarshal(named) {
-				if es, ok := named.Underlying().(*types.Struct); ok {
-					if expanded[es] {
-						continue
-					}
-					expanded[es] = true
-					out = append(out, g.structFields(es, expanded)...)
-					delete(expanded, es)
-					continue
-				}
-			}
+			expanded[embeddedStruct] = true
+			g.collectFields(embeddedStruct, depth+1, expanded, out)
+			delete(expanded, embeddedStruct)
+			continue
 		}
-		if name == "" {
+		tagged := name != ""
+		if !tagged {
 			name = f.Name()
 		}
 		optional := ""
@@ -927,12 +968,8 @@ func (g *tsGen) structFields(s *types.Struct, expanded map[*types.Struct]bool) [
 		if strings.Contains(opts, "string") && ts == "number" {
 			ts = "string"
 		}
-		out = append(out, fmt.Sprintf("%s%s: %s", tsPropName(name), optional, ts))
+		*out = append(*out, jsonField{name: name, optional: optional, ts: ts, depth: depth, tagged: tagged})
 	}
-	if len(out) == 0 {
-		return []string{"[key: string]: unknown"}
-	}
-	return out
 }
 
 // tsPropName quotes a JSON name that is not a bare TypeScript identifier.

@@ -216,6 +216,31 @@ func TestSameNameStructsInDifferentPackagesStayDistinct(t *testing.T) {
 	}
 }
 
+// Promoted fields follow encoding/json's rules, so the interfaces below match
+// what json.Marshal of a zero value actually writes (each case is spelled out
+// in testdata/embed/api/embed.go).
+func TestEmbeddedFieldPromotion(t *testing.T) {
+	root := filepath.Join("testdata", "embed")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	for _, want := range []string{
+		// exported fields of an embedded unexported struct type do reach the wire
+		"export interface Doc {\n  id: number;\n  name: string;\n  title: string;\n}",
+		// the outer id shadows the promoted one instead of duplicating it
+		"export interface Child {\n  name: string;\n  id: number;\n}",
+		// two tagged fields at the same depth cancel out
+		"export interface Tie {\n  y: number;\n}",
+		// and so do two reached through different embedded branches
+		"export interface Diamond {\n  a1: number;\n  b1: number;\n}",
+	} {
+		if !strings.Contains(types, want) {
+			t.Errorf("api-types.d.ts missing:\n%s\ngot:\n%s", want, types)
+		}
+	}
+}
+
 // One `json:"user-name"` used to be written unquoted, which is a syntax error
 // that costs the whole project its types, not just that route's.
 func TestNonIdentifierJSONNamesAreQuoted(t *testing.T) {
