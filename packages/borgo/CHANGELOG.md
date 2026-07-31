@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.1](https://github.com/LuigiDavideMicca/borgo/compare/v0.20.0...v0.20.1) (2026-07-31)
+
+
+### Features
+
+* borgo pwa init writes the manifest and service worker instead of describing them ([88e9464](https://github.com/LuigiDavideMicca/borgo/commit/88e946491cf3c81f1b673f7d995d2eb29b22fb15))
+
+
+### Bug Fixes
+
+* an unnameable chunk gets a url-safe filename instead of literal brackets ([5d5590d](https://github.com/LuigiDavideMicca/borgo/commit/5d5590d8b263475afd0533fdd803e6c1e7f2e416))
+
 ## [0.20.0](https://github.com/LuigiDavideMicca/borgo/compare/v0.11.0...v0.20.0) (2026-07-31)
 
 
