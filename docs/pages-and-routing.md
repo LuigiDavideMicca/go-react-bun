@@ -1,16 +1,24 @@
 # Pages and routing
 
-React pages in `pages/`, routed by file name, with server data through loaders and mutations through form actions. This page covers pages and loaders, layouts, `<head>` management, streaming SSR, form actions and the error pages.
+The page model everything else hangs off: how files become routes, how a page gets its data, how layouts nest, what `<head>` you control, how forms mutate, and what happens when something goes wrong.
 
-## Pages and loaders
+## Files are routes
 
-Pages are React components in `pages/`, routed by file name:
+React components in `pages/`, routed by file name. There is no route configuration file to keep in sync:
 
-- `pages/index.tsx` → `/`
-- `pages/about.tsx` → `/about`
-- `pages/tasks/[id].tsx` → `/tasks/:id`
+| File | Route |
+| --- | --- |
+| `pages/index.tsx` | `/` |
+| `pages/about.tsx` | `/about` |
+| `pages/tasks/index.tsx` | `/tasks` |
+| `pages/tasks/[id].tsx` | `/tasks/:id` |
+| `pages/orgs/[org]/members/[id].tsx` | `/orgs/:org/members/:id` |
 
-A page may export a `loader` that runs on the server before rendering; its result becomes the component's props, both for SSR and after hydration. The `api` argument is a typed client over the Go routes — pattern, path params and response shape are all checked by `tsc` (see [the typed bridge](typed-bridge.md)):
+A `[param]` segment matches exactly one path segment; there are no catch-all or optional segments. Trailing slashes are ignored when matching, so `/tasks/` and `/tasks` are the same route. Four names are special and never become routes of their own: `_layout.tsx`, `_404.tsx`, `_500.tsx`, and anything else starting with `_` is still routed — only those three are reserved, so name a shared component directory `components/` rather than `pages/_components/`.
+
+## Loaders
+
+A page may export a `loader` that runs on the server before rendering. Whatever it returns becomes the component's props:
 
 ```tsx
 import type { LoaderContext } from "borgo-framework";
@@ -21,60 +29,119 @@ export async function loader({ params, api }: LoaderContext) {
   return { task };
 }
 
-export default function TaskDetail({ task }: { task: Task }) { /* ... */ }
+export default function TaskDetail({ task }: { task: Task }) {
+  return (
+    <main>
+      <h1>{task.title}</h1>
+      <p>{task.body}</p>
+    </main>
+  );
+}
 ```
 
-The client throws `ApiError` (with `.status`) on non-2xx responses; `apiUrl` is the raw base URL for anything the client doesn't cover. Loader and action code is stripped from client bundles at build time, so server-only imports and secrets used there never reach the browser (CI greps the built assets for a sentinel to keep this honest).
+The loader receives `{ request, params, api, apiUrl }`. `params` is `Record<string, string>` — every value is a string, decoded, exactly as it appeared in the URL. `api` is the [typed client](typed-bridge.md#the-generated-client); `apiUrl` is the raw base URL for anything it does not model.
 
-A loader may also return a `Response` to short-circuit rendering — `redirect()` makes it an auth guard, honored on full loads and client navigations alike. See [auth and sessions](auth-and-sessions.md) for the pattern.
+Loader code is stripped from client bundles at build time, so server-only imports, database handles and secrets used there never reach the browser.
+
+The loader runs on the initial server render *and* on client-side navigations to that page — in the second case the client fetches its result as JSON rather than re-rendering the document. You do not write anything different for the two cases.
+
+### A loader can answer instead of returning props
+
+Return a `Response` and rendering is skipped. `redirect(to, status = 303)` makes that an auth guard:
+
+```tsx
+import { ApiError, redirect, type LoaderContext } from "borgo-framework";
+
+export async function loader({ api }: LoaderContext) {
+  try {
+    return { me: await api("GET /api/me") };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return redirect("/login");
+    throw error;
+  }
+}
+```
+
+This works identically on a full page load and on a client-side navigation: the runtime receives the redirect as data and follows it as a client navigation, so the guard cannot be bypassed by arriving through a link. See [auth and sessions](auth-and-sessions.md) for the full pattern.
 
 ## Layouts
 
-A `_layout.tsx` in any `pages/` directory wraps every page below it. Layouts nest — outermost directory first — and receive only `children`:
+A `_layout.tsx` in any `pages/` directory wraps every page below it. Layouts nest, outermost first, and receive only `children`:
 
 ```tsx
 import type { ReactNode } from "react";
 
 export default function RootLayout({ children }: { children: ReactNode }) {
-  return <div className="app"><nav>{/* ... */}</nav>{children}</div>;
+  return (
+    <div className="app">
+      <header>
+        <a href="/">Tasks</a>
+        <a href="/about">About</a>
+      </header>
+      {children}
+      <footer>built with borgo</footer>
+    </div>
+  );
 }
 ```
 
-Layouts have no loaders of their own; data belongs to pages.
+`pages/_layout.tsx` wraps everything; `pages/admin/_layout.tsx` additionally wraps everything under `/admin`. Layouts live in the shared entry chunk rather than per-route chunks, which is why editing one triggers a full reload in dev instead of a hot update.
 
-## Head management
+Layouts do not have loaders. A layout that needs data fetches it client-side, or every page under it returns what the layout needs — deliberate, because a loader per layout level means a waterfall or a coordination protocol, and neither is worth the weight here.
 
-A page may export `head`: either a `Head` object or a function of the page's props.
+## The page head
 
-```tsx
-export const head = { title: "Tasks · borgo", meta: [{ name: "description", content: "..." }] };
-```
-
-Or, as a function of the page's props (typed wide on purpose — see below):
+Export `head` as an object, or as a function of the page's props:
 
 ```tsx
 import type { Head } from "borgo-framework";
-import type { Task } from "../.borgo/api-types";
 
-export const head = (props: Record<string, unknown>): Head => ({
-  title: `${(props.task as Task).title} · borgo`,
+export const head = {
+  title: "Tasks",
+  meta: [{ name: "description", content: "Everything still to do" }],
+};
+```
+
+```tsx no-check
+export const head = (props: { task: Task }): Head => ({
+  title: `${props.task.title} · Tasks`,
+  meta: [{ property: "og:title", content: props.task.title }],
 });
 ```
 
-The function form receives `Record<string, unknown>`, not your page's props type — the runtime calls every page's `head` through one signature, so a narrower parameter would not be assignable under `strictFunctionTypes`. Cast inside, as above.
-
-During SSR the title replaces the shell's `<title>` and metas are injected into `<head>`; after hydration the runtime owns both, updating them on every client-side navigation (and restoring the shell title on pages without a `head`).
+During server rendering the title replaces the shell's `<title>` and the metas are injected into `<head>`. After hydration the runtime owns both, updating them on every client-side navigation and restoring the shell's title on a page that exports no `head`. Meta entries are arbitrary attribute maps, so `property`, `name`, `httpEquiv` and the rest all work.
 
 ## Streaming SSR
 
-Pages render through `renderToReadableStream`, so a `<Suspense>` boundary that suspends on the server sends the rest of the page immediately and streams the slow part in when it resolves. See `examples/tasks/pages/slow.tsx`.
+Pages render through `renderToReadableStream`, so a `<Suspense>` boundary that suspends on the server sends the rest of the document immediately and streams the slow part in when it resolves:
+
+```tsx
+import { Suspense, use } from "react";
+
+function SlowPanel({ stats }: { stats: Promise<{ total: number }> }) {
+  return <p>{use(stats).total} tasks all time</p>;
+}
+
+export default function Dashboard({ stats }: { stats: Promise<{ total: number }> }) {
+  return (
+    <main>
+      <h1>Dashboard</h1>
+      <Suspense fallback={<p className="fallback">Counting…</p>}>
+        <SlowPanel stats={stats} />
+      </Suspense>
+    </main>
+  );
+}
+```
+
+The stream is pull-based: React is asked for the next chunk only when the client has room for it, so a slow connection throttles the render instead of letting a whole document pile up in server memory, and a client that goes away ends the render rather than paying for a page nobody will read.
 
 ## Form actions
 
-A page may export an `action`; the front server runs it for `POST` requests to that page's URL — classic form posts work without any client JavaScript:
+A page may export an `action`; the front server runs it for `POST` requests to that page's URL:
 
 ```tsx
-import { redirect, type ActionContext } from "borgo-framework";
+import { CsrfField, redirect, type ActionContext } from "borgo-framework";
 
 export async function action({ request, api }: ActionContext) {
   const form = await request.formData();
@@ -83,26 +150,56 @@ export async function action({ request, api }: ActionContext) {
   await api("POST /api/tasks", { body: { title, body: String(form.get("body") ?? "") } });
   return redirect("/");
 }
+
+export default function Home({ actionData }: { actionData?: { error?: string } }) {
+  return (
+    <main>
+      <form method="post">
+        <CsrfField />
+        <input name="title" placeholder="Title" />
+        <button>Add</button>
+      </form>
+      {actionData?.error && <p className="error">{actionData.error}</p>}
+    </main>
+  );
+}
 ```
 
-Return a `Response` and it is sent as-is — `redirect(to, status = 303)` gives you post/redirect/get. Return any other object and the page re-renders with it as the `actionData` prop, merged over the loader's props.
+What the action returns decides what happens next:
 
-On hydrated pages the runtime enhances `<form method="post">` automatically: the action runs over `fetch`, the page re-renders in place with fresh loader props and the scroll position stays put — no full reload, no jump to the top. A redirect back to the same page refreshes it in place; a redirect elsewhere becomes a client-side navigation. Without JavaScript (or on `hydrate = false` pages) the same form falls back to the classic post cycle, so both paths stay correct.
+- **A `Response`** is sent as-is. `redirect(to)` gives you post/redirect/get, which is what you want after a successful mutation.
+- **Any other object** re-renders the page with that object as the `actionData` prop, merged over the loader's props — the loader runs again first, so the page sees fresh data *and* the action's result. Validation errors belong here.
 
-Forms whose response the runtime cannot re-render — a file download, a post to `/api/...`, a cross-origin target — are left native. To force the classic full-page submit on any form, add `data-borgo-native`:
+On hydrated pages the runtime enhances the form: the action runs over `fetch` and the page re-renders in place, keeping your scroll position. A redirect back to the same page refreshes it where you are; a redirect elsewhere becomes a client-side navigation. Without JavaScript — or on a `hydrate = false` page — the identical form falls back to the classic post cycle. Both paths are real, and both are tested.
+
+Forms the runtime cannot re-render in place stay native: a `GET` form, a cross-origin target, a post to `/api/...`. To force the classic full-page submit on any form, add `data-borgo-native`:
 
 ```tsx
 <form method="post" action="/report.csv" data-borgo-native>
-  <button>download</button>
+  <button>Download</button>
 </form>;
 ```
 
-In production, actions of authenticated users are protected against cross-site request forgery by a double-submit token — see [CSRF protection](auth-and-sessions.md#csrf-protection-for-actions).
+`<CsrfField />` is required inside every `<form method="post">` — see [CSRF protection](security.md#csrf-protection) for what it defends against.
+
+One limit worth stating: an action that returns its **own HTML document** (rather than props or a redirect) is swapped into the page by the runtime, and because that reuses the current browsing context, inline scripts in that document are blocked by the page's existing Content-Security-Policy and the page's hydration does not re-run. It is the right behavior for the error documents this path actually serves; if you need to send a custom HTML page from an action, redirect to a route that renders it instead.
+
+## Hydration control
+
+A page controls how much JavaScript it ships:
+
+```tsx no-check
+export const hydrate = false;      // no page bundle at all
+export const hydrate = "visible";  // hydrate when the marked section scrolls into view
+```
+
+`hydrate = false` pages are pure server-rendered HTML; individual interactive pieces can still be `<Island>` components. See [client navigation and hydration](client-navigation.md#partial-hydration).
 
 ## Error pages
 
 - `pages/_404.tsx` renders unmatched routes with status 404.
 - `pages/_500.tsx` renders server errors in production with status 500, without leaking the error.
-- In dev, SSR errors render as a readable overlay page instead, and the client runtime surfaces uncaught errors and unhandled rejections in-browser (see [dev experience](dev-experience.md)).
 
-Both special pages go through the normal layout chain. On the Go side, `borgo.Handle` panics with an actionable message on malformed or duplicate patterns instead of failing silently.
+Both go through the normal layout chain, and both may have loaders. In development an SSR error renders as a readable overlay instead of `_500`, and the client runtime surfaces uncaught errors and unhandled rejections in the browser. If `_500` itself throws, the response degrades to a plain text 500 rather than a loop.
+
+On the Go side, `borgo.Handle` panics with an actionable message on a malformed or duplicate pattern rather than failing silently at request time, and a handler that panics answers a JSON 500 instead of dropping the connection.
