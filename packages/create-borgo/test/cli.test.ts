@@ -233,3 +233,31 @@ describe("what the user is told", () => {
     expect(out.split("create-borgo").length - 1).toBe(1);
   });
 });
+
+describe("the process ends", () => {
+  test("an interactive run exits on its own once both questions are answered", async () => {
+    // a tty never sends EOF: if the prompt iterator is left open the summary
+    // prints and the process just sits there until the user interrupts it.
+    // stdin here is a pipe that stays open, which is the same trap.
+    const proc = Bun.spawn(["bun", cli, "app"], {
+      cwd,
+      env: { ...process.env, BORGO_FORCE_PROMPT: "1" },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    proc.stdin.write("2\ny\n");
+    proc.stdin.flush();
+
+    const exited = await Promise.race([
+      proc.exited,
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 15_000)),
+    ]);
+    if (exited === "timeout") {
+      proc.kill();
+      throw new Error("the cli did not exit while stdin was still open");
+    }
+    expect(exited).toBe(0);
+    expect(existsSync(join(cwd, "app"))).toBe(true);
+  }, 20_000);
+});

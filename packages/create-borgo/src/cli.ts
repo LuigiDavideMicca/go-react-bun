@@ -86,16 +86,28 @@ if (!/^[a-z0-9][a-z0-9._-]*$/.test(name)) {
 }
 
 const isTemplate = (t: string): t is TemplateName => TEMPLATES.some((k) => k.name === t);
-const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+// BORGO_FORCE_PROMPT exists so the question path can be exercised without a
+// pseudo-terminal: a pipe is never a tty, and the bug this guards against
+// only appears once something is actually read from stdin
+const interactive =
+  process.env.BORGO_FORCE_PROMPT === "1" ||
+  (process.stdin.isTTY === true && process.stdout.isTTY === true);
 
-// one shared iterator: sequential questions must not each grab stdin anew
-const stdinLines = console[Symbol.asyncIterator]();
+// one shared iterator, opened only if something is actually asked: a pending
+// read keeps the event loop alive, so an unasked run must never open stdin
+// and an asked one must let go of it before the summary prints
+let stdinLines: AsyncIterator<string> | null = null;
 const ask = async (prompt: string): Promise<string> => {
+  stdinLines ??= console[Symbol.asyncIterator]();
   process.stdout.write(prompt);
   const { value } = await stdinLines.next();
   return String(value ?? "")
     .trim()
     .toLowerCase();
+};
+const doneAsking = async () => {
+  await stdinLines?.return?.();
+  stdinLines = null;
 };
 
 const banner = `  ${terracotta(home)} ${bold("create-borgo")} ${dim(`v${version}`)}`;
@@ -135,6 +147,10 @@ if (tailwind === undefined) {
     tailwind = false;
   }
 }
+
+// every question is answered: let go of the terminal, or the process sits
+// there after printing its summary and the user has to interrupt it
+await doneAsking();
 
 const target = join(process.cwd(), name);
 if (existsSync(target) && readdirSync(target).length > 0) {
