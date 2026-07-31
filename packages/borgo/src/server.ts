@@ -260,6 +260,15 @@ export async function serve({ dev = false } = {}) {
     // minted before the render and not when the document tail is built
     const nonce = security?.needsNonce ? crypto.randomUUID().replaceAll("-", "") : "";
 
+    // props are serialized before the render, not while the document tail is
+    // built: a loader that hands back something json cannot carry (a bigint, a
+    // cycle, a toJSON that throws) makes this throw, and a render already in
+    // flight would then be abandoned unread - react has no consumer to end it
+    // through, so the whole component tree is walked for a document that can
+    // never ship, and the request object stays resident. failing first costs
+    // nothing and keeps the waste at zero.
+    const propsJson = route.module.hydrate === false ? "" : scriptJson(props);
+
     const head = resolveHead(route.module, props);
     const stream = await renderToReadableStream(withCsrf(composeElement(route, props), csrfToken), {
       nonce: nonce || undefined,
@@ -281,7 +290,6 @@ export async function serve({ dev = false } = {}) {
       // pages with islands get the islands entry, which hydrates only those.
       end = route.islands ? zeroJsEnd.islands : zeroJsEnd.plain;
     } else {
-      const propsJson = scriptJson(props);
       const tag = nonce ? `<script nonce="${nonce}">` : "<script>";
       end = `${shellEndProps[0]}${tag}window.__PROPS__=${propsJson}${stateTail}${shellEndProps[1]}`;
     }
