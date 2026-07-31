@@ -19,6 +19,13 @@ borgo.ClearSession(w)                       // logout
 
 The front server forwards the browser's cookies on every api call a loader or action makes, so Go sees the session during SSR — and forwards `Set-Cookie` headers coming back from Go to the browser, so an action that calls a login route actually logs the browser in.
 
+Four behaviors worth knowing before you design around them:
+
+- **`SESSION_SECRET` is checked at startup.** Missing, and the server refuses to boot; under 32 bytes, and it warns. It used to fail per request instead, which meant a green health check next to a broken login.
+- **The principal rides in the cookie**, so keep it small — a username, an id, a role. `SetSession` returns an error rather than writing a cookie the browser would silently drop for exceeding 4 KB, and that error is worth surfacing: a dropped cookie looks exactly like a successful login that did not stick.
+- **Logging in replaces any existing session**, so a session fixed on a victim before login cannot survive it.
+- **Two `borgo_session` cookies with different values are treated as none.** A sibling subdomain can plant a duplicate; guessing which one to trust is how an attacker chooses your session for you. See [security](security.md#duplicate-cookies-are-treated-as-no-cookie).
+
 ## Password hashing
 
 `borgo.DefaultHasher` is PBKDF2-HMAC-SHA256 with OWASP parameters (600,000 iterations, 16-byte random salt), from the standard library's `crypto/pbkdf2`. The choice, honestly: argon2id is the state of the art, but it lives in `golang.org/x/crypto`, and the Go runtime's zero-dependency guarantee is part of what borgo is. PBKDF2 at these parameters is an OWASP-recommended configuration and FIPS-approved; if your threat model wants argon2id, the hasher is one small interface away:
@@ -30,7 +37,9 @@ type PasswordHasher interface {
 }
 ```
 
-Set `Auth.Hasher` to your own implementation and nothing else changes. Hashes embed their parameters (`pbkdf2$600000$<salt>$<key>`), so stored passwords keep verifying if defaults evolve.
+Set `Auth.Hasher` to your own implementation and nothing else changes. Hashes embed their parameters (`pbkdf2$600000$<salt>$<key>`), so stored passwords keep verifying if defaults evolve — within bounds: a stored hash asking for parameters far beyond the defaults is rejected outright, because deriving the key it demands is minutes of CPU per attempt.
+
+Hashing is deliberately expensive, which makes it a resource to protect. `LoginHandler` runs at most `GOMAXPROCS/2` verifications at once and sheds the rest with `503` and a `Retry-After` after five seconds of queueing, so a burst of login attempts cannot starve every other route on the server. A failed lookup still runs a verification against a dummy hash — one built with *your* hasher, so swapping in argon2id does not reintroduce a timing oracle — which keeps "no such user" and "wrong password" indistinguishable in both the response and the clock.
 
 ## borgo.Auth: login, logout, register
 
@@ -133,27 +142,36 @@ Go sets the session cookie on the api response; the front server forwards it on 
 
 ## CSRF protection for actions
 
-Form actions are session-cookie-authenticated POSTs, so in production borgo protects them with a double-submit token:
-
-- The front server issues a `borgo_csrf` cookie alongside every rendered page.
-- `<CsrfField />` (from `borgo-framework`) renders a hidden input carrying the same token — put it inside every `<form method="post">`:
+Every `<form method="post">` needs `<CsrfField />` inside it:
 
 ```tsx
 import { CsrfField } from "borgo-framework";
 
-<form method="post">
-  <CsrfField />
-  <input name="title" />
-  <button>Add</button>
-</form>
+export default function NewTask() {
+  return (
+    <form method="post">
+      <CsrfField />
+      <input name="title" />
+      <button>Add</button>
+    </form>
+  );
+}
 ```
 
-- On a POST to a page action, if the request carries a session cookie, the front server requires the form field to match the cookie (compared in constant time). A cross-site form post cannot read the cookie to echo it, so a forged request is answered `403 invalid csrf token` before the action runs.
+That is the whole obligation. The front server issues a `borgo_csrf` cookie with the page, the field carries the same token back, and a mismatch is answered `403` before the action runs — a cross-site form cannot read the cookie, so it cannot produce the field. The check arms for any browser that holds the token, which is what closes login-CSRF; cookie-less clients are unaffected. [Security](security.md#csrf-protection) has the mechanics and the environment overrides.
 
-The rules, precisely: enforcement is **on by default in production**, applies only to page actions (api routes under `/api/*` are yours to protect — `borgo.Bind` answers non-JSON content types with `415`, so a cross-site form post, `text/plain` included, never reaches a handler as JSON), and only when the request carries a session cookie — anonymous forms keep working without the field. Client-side navigation, PRG redirects and no-JS classic posts all pass through unchanged: the token is server-rendered into the form, and the hydrated page reads the same value from the cookie.
+## What the framework protects, and what you still owe
 
-Escape hatches, clearly: `BORGO_CSRF=0` disables the check entirely (e.g. you terminate CSRF elsewhere); `BORGO_CSRF=1` forces it in dev, where it is otherwise off so quick experiments don't need the field.
+borgo gives you the mechanics. These remain your decisions, and none of them are hard — but nothing here will do them for you:
+
+- **Password policy.** Nothing enforces a minimum length or checks a breach list. `DefaultHasher` makes a weak password expensive to crack, not safe.
+- **Rate limiting and lockout.** The login handler caps concurrent hashing and sheds excess with `503`, which protects the *server*; it does not slow an attacker down per account. Count failures yourself, or rate-limit `/login` at the proxy.
+- **Registration abuse.** No email verification, no captcha, no duplicate-signup throttling. `RegisterHandler` answers `409` on a taken username, which is an existence oracle you accept in exchange for a usable signup form — mask it if your threat model cannot.
+- **Password reset, email change, 2FA, OAuth, SSO.** All absent by design. They are product decisions with wildly different answers per app, and each needs a channel (email, TOTP, an identity provider) that borgo has no business owning.
+- **Session revocation.** Sessions are self-contained signed cookies, so there is no server-side list to delete from: a stolen cookie is valid until it expires. If you need instant revocation, keep a token version in your user row, put it in the principal, and check it in the guard — or rotate `SESSION_SECRET`, which logs everyone out at once.
+
+The trade that buys: no session store, no lookup per request, and a server that can be restarted or replicated without anybody being logged out.
 
 ## Caching
 
-Not auth, but usually decided together: `borgo.Cache(w, 5*time.Minute)` for anything public, `borgo.NoCache(w)` for anything personalized — see [caching in the deploy guide](deploy.md#caching).
+Not auth, but usually decided together: `borgo.Cache(w, 5*time.Minute)` for anything public, `borgo.NoCache(w)` for anything personalized — see [caching in the deploy guide](deploy.md#caching). Call `Cache` *after* anything that sets a cookie: it downgrades itself to `private` when it sees one, and it cannot see a cookie that has not been set yet.
