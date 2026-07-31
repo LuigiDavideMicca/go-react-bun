@@ -5,4 +5,5 @@ import "github.com/LuigiDavideMicca/borgo"
 
 func init() {
 	borgo.Handle("GET /api/blob", GetBlob)
+	borgo.Handle("GET /api/selfbytes", GetSelfBytes)
 }

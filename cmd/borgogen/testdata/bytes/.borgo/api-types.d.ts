@@ -7,9 +7,16 @@ export interface Blob {
   arr: Array<number>;
 }
 
+export interface SelfBytes {
+  text: Array<string>;
+  ptext: Array<string | number>;
+  js: Array<unknown>;
+}
+
 declare module "borgo-framework" {
   interface ApiRoutes {
     "GET /api/blob": { response: Blob };
+    "GET /api/selfbytes": { response: SelfBytes };
   }
 }
 

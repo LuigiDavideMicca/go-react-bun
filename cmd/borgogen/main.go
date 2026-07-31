@@ -924,9 +924,13 @@ func (g *tsGen) tsType(t types.Type) string {
 		return g.tsType(t.Elem()) + " | null"
 	case *types.Slice:
 		// encoding/json base64s a slice of any byte-kinded element, named or
-		// aliased, not just of the predeclared byte
+		// aliased, not just of the predeclared byte - unless that element
+		// marshals itself, by MarshalJSON or by MarshalText, in which case the
+		// slice is written element by element like any other. Slice elements
+		// are addressable, so a marshaler on the pointer receiver counts.
 		if b, ok := types.Unalias(t.Elem()).Underlying().(*types.Basic); ok &&
-			b.Kind() == types.Uint8 && !hasCustomMarshal(t.Elem()) {
+			b.Kind() == types.Uint8 && !hasCustomMarshal(t.Elem()) &&
+			!hasMarshalMethod(t.Elem(), "MarshalText", true) {
 			return "string"
 		}
 		return "Array<" + g.tsType(t.Elem()) + ">"

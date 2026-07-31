@@ -350,9 +350,14 @@ func TestByteSlicesAreBase64Strings(t *testing.T) {
 		t.Fatal(err)
 	}
 	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
-	want := "export interface Blob {\n  raw: string;\n  alias: string;\n  defined: string;\n  arr: Array<number>;\n}"
-	if !strings.Contains(types, want) {
-		t.Errorf("api-types.d.ts missing:\n%s\ngot:\n%s", want, types)
+	for _, want := range []string{
+		"export interface Blob {\n  raw: string;\n  alias: string;\n  defined: string;\n  arr: Array<number>;\n}",
+		// a byte-kinded element that marshals itself leaves the base64 path
+		"export interface SelfBytes {\n  text: Array<string>;\n  ptext: Array<string | number>;\n  js: Array<unknown>;\n}",
+	} {
+		if !strings.Contains(types, want) {
+			t.Errorf("api-types.d.ts missing:\n%s\ngot:\n%s", want, types)
+		}
 	}
 }
 
