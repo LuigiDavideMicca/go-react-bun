@@ -212,6 +212,19 @@ export function gzipStream(source: ReadableStream<Uint8Array>): ReadableStream<U
   // used to take the whole server process down
   const reader = source.getReader();
   let cancelled = false;
+  // gzip pushes its output from a 'data' handler, which cannot consult the
+  // consumer's queue - so the pump has to be the one that waits. without this
+  // the loop below reads the source as fast as zlib will take the writes, and
+  // documentStream's whole point (react is pulled only when the consumer has
+  // room) is lost the moment a response is compressed, which in production is
+  // every response. resumed from pull(), and from cancel() so a client that
+  // goes away while the pump is parked does not strand the reader.
+  let resume: (() => void) | null = null;
+  const wake = () => {
+    const r = resume;
+    resume = null;
+    r?.();
+  };
   return new ReadableStream<Uint8Array>({
     start(controller) {
       const closed = new Promise<void>((resolve) => gzip.once("close", resolve));
@@ -227,6 +240,14 @@ export function gzipStream(source: ReadableStream<Uint8Array>): ReadableStream<U
       void (async () => {
         try {
           for (;;) {
+            // desiredSize is null once the stream is errored or closed; treat
+            // that as room and let the read below settle it
+            if (!cancelled && !gzip.destroyed && (controller.desiredSize ?? 1) <= 0) {
+              await new Promise<void>((resolve) => {
+                resume = resolve;
+              });
+            }
+            if (cancelled || gzip.destroyed) break;
             const { done, value } = await reader.read();
             if (done || gzip.destroyed) break;
             if (!gzip.write(value)) {
@@ -240,8 +261,12 @@ export function gzipStream(source: ReadableStream<Uint8Array>): ReadableStream<U
         }
       })();
     },
+    pull() {
+      wake();
+    },
     cancel(reason) {
       cancelled = true;
+      wake();
       gzip.destroy();
       void reader.cancel(reason).catch(() => {});
     },

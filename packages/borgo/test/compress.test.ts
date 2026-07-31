@@ -347,6 +347,65 @@ describe("gzipStream", () => {
     }
     expect(gunzipSync(Buffer.concat(chunks)).toString()).toBe("shell ".repeat(200) + "late chunk");
   });
+
+  test("a stalled client throttles the render instead of buffering the page", async () => {
+    // documentStream is pull-based so a slow client paces react; in production
+    // every document is compressed, and gzip's output is pushed from a 'data'
+    // handler that cannot see the consumer's queue. the pump has to be the one
+    // that waits, or wrapping the stream silently undoes the backpressure.
+    const TOTAL = 300;
+    let produced = 0;
+    const source: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        async next() {
+          if (produced >= TOTAL) return { done: true as const, value: undefined };
+          produced++;
+          return { done: false as const, value: encoder.encode("<li>" + "x".repeat(2000) + "</li>") };
+        },
+        async return() {
+          return { done: true as const, value: undefined };
+        },
+      }),
+    };
+
+    const reader = gzipStream(documentStream("<head>", source, "</body>")).getReader();
+    const first = await reader.read();
+    const afterFirstRead = produced;
+    await Bun.sleep(150);
+    // the consumer has not read again: the render must not have run away
+    expect(produced).toBe(afterFirstRead);
+    expect(produced).toBeLessThan(TOTAL);
+
+    // and draining still yields the whole document
+    const chunks: Buffer[] = [Buffer.from(first.value!)];
+    for (let next = await reader.read(); !next.done; next = await reader.read()) {
+      chunks.push(Buffer.from(next.value));
+    }
+    expect(produced).toBe(TOTAL);
+    expect(gunzipSync(Buffer.concat(chunks)).toString()).toBe(
+      "<head>" + ("<li>" + "x".repeat(2000) + "</li>").repeat(TOTAL) + "</body>",
+    );
+  });
+
+  test("a client that leaves while the pump is parked does not strand it", async () => {
+    let returned = false;
+    const source: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        async next() {
+          return { done: false as const, value: encoder.encode("<li>" + "y".repeat(2000) + "</li>") };
+        },
+        async return() {
+          returned = true;
+          return { done: true as const, value: undefined };
+        },
+      }),
+    };
+    const reader = gzipStream(documentStream("<head>", source, "</body>")).getReader();
+    await reader.read();
+    await Bun.sleep(50); // the pump is now waiting on the consumer's queue
+    await reader.cancel("client went away");
+    expect(returned).toBe(true);
+  });
 });
 
 describe("jsonResponse", () => {
