@@ -10,6 +10,7 @@ import {
   parseNetstatPid,
   parseVersion,
   portHolder,
+  realEnv,
   versionAtLeast,
   type DoctorEnv,
 } from "../src/doctor";
@@ -171,6 +172,26 @@ describe("ports", () => {
     );
     expect(r.ok).toBe(false);
     expect(r.fix).toContain("API_PORT");
+  });
+
+  // the real probe, not the injected one: a holder bound to the wildcard
+  // address without SO_EXCLUSIVEADDRUSE (go's net.Listen, and so borgo's own
+  // api on windows) still leaves 127.0.0.1 bindable, so a loopback-pinned
+  // probe would call an answering port free
+  test("the real probe sees a wildcard holder that leaves loopback bindable", async () => {
+    const held = Bun.serve({ port: 0, hostname: "0.0.0.0", reusePort: true, fetch: () => new Response("x") });
+    try {
+      expect(await realEnv().isPortFree(held.port!)).toBe(false);
+    } finally {
+      held.stop(true);
+    }
+  });
+
+  test("the real probe calls an unheld port free", async () => {
+    const probe = Bun.serve({ port: 0, fetch: () => new Response("x") });
+    const port = probe.port!;
+    probe.stop(true);
+    expect(await realEnv().isPortFree(port)).toBe(true);
   });
 
   test("portHolder parses lsof output", () => {

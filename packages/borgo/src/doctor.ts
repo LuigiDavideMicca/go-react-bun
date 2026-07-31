@@ -72,13 +72,16 @@ export const realEnv = (): DoctorEnv => ({
       return (error as { code?: string }).code === "ENOENT" ? "ok" : "busy";
     }
   },
+  // no host: the probe binds the wildcard address, which collides with a
+  // holder on any interface. pinning it to 127.0.0.1 misses the common case
+  // on windows - a server bound to 0.0.0.0 without SO_EXCLUSIVEADDRUSE (go's
+  // net.Listen, so borgo's own api) lets a loopback-only bind succeed, and the
+  // port reads back "free" while the api is answering on it
   isPortFree: (port) =>
     new Promise((resolve) => {
       const server = createServer();
       server.once("error", () => resolve(false));
-      server.listen({ port, host: "127.0.0.1", exclusive: true }, () =>
-        server.close(() => resolve(true)),
-      );
+      server.listen({ port, exclusive: true }, () => server.close(() => resolve(true)));
     }),
 });
 
