@@ -675,7 +675,7 @@ export async function serve({ dev = false } = {}) {
           try {
             allowed = new URL(origin).host === url.host;
           } catch {}
-          if (!allowed) return new Response("forbidden", { status: 403 });
+          if (!allowed) return secure(new Response("forbidden", { status: 403 }));
         }
         const topics = (url.searchParams.get("topics") ?? "")
           .split(",")
@@ -685,10 +685,10 @@ export async function serve({ dev = false } = {}) {
         // socket: unbounded counts or names are cheap resident memory for
         // anyone who can open a socket
         if (topics.length > MAX_WS_TOPICS || topics.some((t) => t.length > MAX_WS_TOPIC_LENGTH)) {
-          return new Response("too many topics", { status: 400 });
+          return secure(new Response("too many topics", { status: 400 }));
         }
         if (server.upgrade(req, { data: { kind: "app", topics } })) return undefined as never;
-        return new Response("upgrade required", { status: 426 });
+        return secure(new Response("upgrade required", { status: 426 }));
       }
 
       // go -> browser push: accepted from loopback (or with the shared key)
@@ -701,16 +701,16 @@ export async function serve({ dev = false } = {}) {
         const authorized = key
           ? keysEqual(req.headers.get("x-borgo-key") ?? "", key)
           : isLoopback(server.requestIP(req)?.address) && !forwarded;
-        if (!authorized) return new Response("forbidden", { status: 403 });
+        if (!authorized) return secure(new Response("forbidden", { status: 403 }));
         const msg = await req.json().catch(() => null);
         if (!msg || typeof msg.topic !== "string" || typeof msg.event !== "string") {
-          return new Response("bad request", { status: 400 });
+          return secure(new Response("bad request", { status: 400 }));
         }
         server.publish(
           wsTopic(msg.topic),
           JSON.stringify({ topic: msg.topic, event: msg.event, data: msg.data }),
         );
-        return new Response(null, { status: 204 });
+        return secure(new Response(null, { status: 204 }));
       }
 
       if (dev && url.pathname.startsWith("/__borgo/dev")) {
@@ -722,16 +722,16 @@ export async function serve({ dev = false } = {}) {
             await compileCss(true);
           } catch (error) {
             console.error(error instanceof Error ? error.message : error);
-            return new Response(null, { status: 500 });
+            return secure(new Response(null, { status: 500 }));
           }
           broadcast({ type: "css" });
-          return new Response(null, { status: 204 });
+          return secure(new Response(null, { status: 204 }));
         }
         if (req.method === "POST" && url.pathname === "/__borgo/dev/reload") {
           broadcast({ type: "reload" });
-          return new Response(null, { status: 204 });
+          return secure(new Response(null, { status: 204 }));
         }
-        return new Response("not found", { status: 404 });
+        return secure(new Response("not found", { status: 404 }));
       }
       if (url.pathname === "/healthz") return secure(dropBody(await healthz()));
       if (metrics && url.pathname === "/metrics") {
