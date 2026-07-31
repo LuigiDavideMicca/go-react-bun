@@ -5,6 +5,7 @@ import "github.com/LuigiDavideMicca/borgo"
 
 func init() {
 	borgo.Handle("GET /api/dashes", GetDashes)
+	borgo.Handle("GET /api/invalid", GetInvalid)
 	borgo.Handle("GET /api/quoted", Quotes)
 	borgo.Handle("GET /api/rows", Rows)
 }

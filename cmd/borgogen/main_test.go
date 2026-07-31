@@ -400,6 +400,8 @@ func TestNonIdentifierJSONNamesAreQuoted(t *testing.T) {
 		`"1st": string`,
 		// json.Marshal(Dashes{}) is {"-":0,"keep":0}
 		"export interface Dashes {\n  \"-\": number;\n  keep: number;\n}",
+		// json.Marshal(Invalid{}) is {"Apos":"","Emoji":"","a b":"","inner":0}
+		"export interface Invalid {\n  Apos: string;\n  Emoji: string;\n  \"a b\": string;\n  inner: number;\n}",
 		"città: string",    // unicode letters are identifiers in ts
 		"plain_$1: string", // $ and a non-leading digit are too
 		// ,string quotes booleans and pointed-to numbers, not only plain ones

@@ -46,3 +46,23 @@ type Dashes struct {
 func GetDashes(w http.ResponseWriter, r *http.Request) {
 	borgo.JSON(w, http.StatusOK, Dashes{})
 }
+
+// A tag name encoding/json cannot use is no name at all to it: the field
+// marshals under its Go name, and an embedded struct with one is flattened
+// like an untagged one. json.Marshal(Invalid{}) writes
+// {"Apos":"","Emoji":"","a b":"","inner":0}.
+type Flat struct {
+	Inner int `json:"inner"`
+}
+
+type Invalid struct {
+	Apos  string `json:"who's"`
+	Emoji string `json:"ok✅"`
+	Space string `json:"a b"`
+	Flat  `json:"br♥ken"`
+}
+
+//borgo:route GET /api/invalid
+func GetInvalid(w http.ResponseWriter, r *http.Request) {
+	borgo.JSON(w, http.StatusOK, Invalid{})
+}

@@ -5,6 +5,13 @@ export interface Dashes {
   keep: number;
 }
 
+export interface Invalid {
+  Apos: string;
+  Emoji: string;
+  "a b": string;
+  inner: number;
+}
+
 export interface Quoted {
   b: string;
   i: string;
@@ -24,6 +31,7 @@ export interface Row {
 declare module "borgo-framework" {
   interface ApiRoutes {
     "GET /api/dashes": { response: Dashes };
+    "GET /api/invalid": { response: Invalid };
     "GET /api/quoted": { response: Quoted };
     "GET /api/rows": { response: Row };
   }

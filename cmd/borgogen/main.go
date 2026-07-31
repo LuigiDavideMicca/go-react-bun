@@ -1076,6 +1076,10 @@ func (g *tsGen) collectFields(s *types.Struct, depth int, expanded map[*types.St
 	for i := 0; i < s.NumFields(); i++ {
 		f := s.Field(i)
 		name, opts, skip := parseJSONTag(s.Tag(i))
+		if !validTagName(name) {
+			// not a name encoding/json will use; the field keeps its Go one
+			name = ""
+		}
 		et := f.Type()
 		if p, ok := types.Unalias(et).(*types.Pointer); ok {
 			et = p.Elem()
@@ -1170,6 +1174,24 @@ func canBeEmpty(t types.Type) bool {
 		return u.Len() == 0
 	}
 	return false
+}
+
+// validTagName mirrors encoding/json's isValidTag. A name holding anything
+// else - a quote, a backslash, an apostrophe, a rune that is neither letter,
+// digit nor one of these punctuation marks - is not a name to it at all: it
+// drops the tag and marshals the field under its Go name, so a
+// `json:"who's"` field arrives as "Owner".
+func validTagName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !strings.ContainsRune("!#$%&()*+-./:;<=>?@[]^_{|}~ ", c) &&
+			!unicode.IsLetter(c) && !unicode.IsDigit(c) {
+			return false
+		}
+	}
+	return true
 }
 
 // hasOpt reports whether a json tag's option list contains opt. Options are
