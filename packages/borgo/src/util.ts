@@ -1,6 +1,16 @@
+import { timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { c, g } from "./colors";
+import { CSRF_COOKIE, CSRF_FIELD, csrfCookieValue } from "./index";
 import type { Head } from "./router";
+
+// constant-time on the value, honest about the length: a comparison that
+// leaks how many prefix bytes matched is a comparison an attacker can walk
+export const keysEqual = (given: string, expected: string) => {
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+};
 
 // attribute values are always double-quoted, so this is the complete set
 export const escapeHtml = (s: string) =>
@@ -149,6 +159,52 @@ export function hasCookie(header: string | null, name: string): boolean {
     if (eq !== -1 && part.slice(0, eq).trim() === name) return true;
   }
   return false;
+}
+
+export type CsrfOptions = {
+  // on by default in production; BORGO_CSRF=1 forces the check in dev,
+  // BORGO_CSRF=0 disables - serve() resolves the env once and passes this
+  enforced: boolean;
+};
+
+// csrf: a double-submit token, issued as a cookie on rendered pages and
+// required from form actions of requests carrying a session - a cross-site
+// post cannot read the cookie to echo it in the form.
+export async function csrfRejects(req: Request, { enforced }: CsrfOptions): Promise<boolean> {
+  if (!enforced) return false;
+  const cookies = req.headers.get("cookie");
+  // enforced for any browser that has been issued a token, not only for
+  // live sessions: otherwise a cross-site post can log the victim into
+  // the attacker's account (login csrf). cookie-less clients (curl, api
+  // consumers) are unaffected. presence, not value: a token shadowed by a
+  // tossed duplicate reads as absent, and a browser that can be made to
+  // look token-less is a browser the check no longer runs for.
+  if (!hasCookie(cookies, "borgo_session") && !hasCookie(cookies, CSRF_COOKIE)) return false;
+  // a sibling subdomain can drop a second borgo_csrf into the victim's jar;
+  // whichever of the two a first-wins read picked, the attacker could make
+  // it theirs and then echo it from a cross-site form. duplicates that
+  // disagree are no token at all - the same call the browser runtime makes
+  const expected = csrfCookieValue(cookies);
+  // no token to compare against: reject without buffering and parsing the
+  // body, which the action below would parse a second time anyway
+  if (!expected) return true;
+  // the clone looks like it buffers the body a second time, ahead of the
+  // action's own formData(). it does not: bun's clone shares the body
+  // store, and holding two clones of a 40mb request costs the same 40mb as
+  // holding one (measured). what a single-parse rewrite would cost instead
+  // is +40mb per 40mb request - arrayBuffer() materialises one copy and
+  // every Request built over that buffer copies it again - plus the action
+  // losing the real request's abort signal. the parse itself is the only
+  // extra, and it is transient. read the token the same way the action
+  // will: one parser, one answer. a cheaper hand-rolled scan of the raw
+  // bytes would be a second parser disagreeing with the first about
+  // percent-encoding, in the middle of a security check.
+  let given = "";
+  try {
+    const form = await req.clone().formData();
+    given = String(form.get(CSRF_FIELD) ?? "");
+  } catch {}
+  return !given || !keysEqual(given, expected);
 }
 
 // env knobs are limits: a typo must fall back to the default, never become

@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -16,26 +15,21 @@ import {
   serveIndexed,
   type AssetInfo,
 } from "./compress";
-import { CSRF_COOKIE, CSRF_FIELD, csrfCookieValue, registerCsrf, registerIslands, withCsrf } from "./index";
+import { CSRF_COOKIE, csrfCookieValue, registerCsrf, registerIslands, withCsrf } from "./index";
 import { createMetrics } from "./metrics";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, safeDecode, type Route } from "./router";
 import {
   createSecurity,
+  csrfRejects,
   envInt,
   freshCookieHeader,
-  hasCookie,
   headHtml,
   headResponse,
+  keysEqual,
   proxyRequest,
   scriptJson,
 } from "./util";
-
-const keysEqual = (given: string, expected: string) => {
-  const a = Buffer.from(given);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-};
 
 // resolve react from the app, not from this package: with a linked borgo
 // checkout the two would otherwise be different copies and hooks would break
@@ -203,43 +197,6 @@ export async function serve({ dev = false } = {}) {
     process.env.BORGO_CSRF === "0" ? false : dev ? process.env.BORGO_CSRF === "1" : true;
   const csrfCookieAttrs = `Path=/; SameSite=Lax${process.env.SESSION_SECURE === "1" ? "; Secure" : ""}`;
 
-  async function csrfRejects(req: Request): Promise<boolean> {
-    if (!csrfEnforced) return false;
-    const cookies = req.headers.get("cookie");
-    // enforced for any browser that has been issued a token, not only for
-    // live sessions: otherwise a cross-site post can log the victim into
-    // the attacker's account (login csrf). cookie-less clients (curl, api
-    // consumers) are unaffected. presence, not value: a token shadowed by a
-    // tossed duplicate reads as absent, and a browser that can be made to
-    // look token-less is a browser the check no longer runs for.
-    if (!hasCookie(cookies, "borgo_session") && !hasCookie(cookies, CSRF_COOKIE)) return false;
-    // a sibling subdomain can drop a second borgo_csrf into the victim's jar;
-    // whichever of the two a first-wins read picked, the attacker could make
-    // it theirs and then echo it from a cross-site form. duplicates that
-    // disagree are no token at all - the same call the browser runtime makes
-    const expected = csrfCookieValue(cookies);
-    // no token to compare against: reject without buffering and parsing the
-    // body, which the action below would parse a second time anyway
-    if (!expected) return true;
-    // the clone looks like it buffers the body a second time, ahead of the
-    // action's own formData(). it does not: bun's clone shares the body
-    // store, and holding two clones of a 40mb request costs the same 40mb as
-    // holding one (measured). what a single-parse rewrite would cost instead
-    // is +40mb per 40mb request - arrayBuffer() materialises one copy and
-    // every Request built over that buffer copies it again - plus the action
-    // losing the real request's abort signal. the parse itself is the only
-    // extra, and it is transient. read the token the same way the action
-    // will: one parser, one answer. a cheaper hand-rolled scan of the raw
-    // bytes would be a second parser disagreeing with the first about
-    // percent-encoding, in the middle of a security check.
-    let given = "";
-    try {
-      const form = await req.clone().formData();
-      given = String(form.get(CSRF_FIELD) ?? "");
-    } catch {}
-    return !given || !keysEqual(given, expected);
-  }
-
   async function renderPage(
     req: Request,
     route: Route,
@@ -391,7 +348,7 @@ export async function serve({ dev = false } = {}) {
         if (typeof action !== "function") {
           throw new Error(`the action export of pages/${target.route.file} must be a function`);
         }
-        if (await csrfRejects(req)) {
+        if (await csrfRejects(req, { enforced: csrfEnforced })) {
           if (wantsJson) return actionJson({ csrf: true }, { status: 403 });
           return new Response("invalid csrf token", { status: 403 });
         }
