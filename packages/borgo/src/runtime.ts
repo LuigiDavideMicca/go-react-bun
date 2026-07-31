@@ -223,7 +223,10 @@ export function mount({ createElement, hydrateRoot, routes, notFound }: MountOpt
   function prefetch(to: URL, withProps: boolean) {
     const matched = matchRoute(to.pathname, routes);
     if (!matched) return;
-    matched.route.load();
+    // an import that fails here (offline, dev server mid-restart) must not
+    // surface as an unhandled rejection - and in dev, as the error overlay -
+    // over a healthy page; a real navigation retries it with error handling
+    matched.route.load().catch(() => {});
     if (!withProps) return;
     const cacheKey = to.pathname + to.search;
     const hit = propsCache.get(cacheKey);
