@@ -141,6 +141,40 @@ func TestGzipMiddlewarePassesThroughPreEncoded(t *testing.T) {
 	}
 }
 
+// net/http snapshots headers at WriteHeader and ignores later mutations; the
+// response buffer must not quietly honour them, or the same handler would
+// behave differently the day its response outgrows the buffer
+func TestGzipHeadersFreezeAtWriteHeader(t *testing.T) {
+	t.Run("buffered identity", func(t *testing.T) {
+		rec := serveGzip(t, "gzip", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Early", "kept")
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("X-Late", "dropped")
+			w.Write([]byte("small"))
+		})
+		if got := rec.Header().Get("X-Early"); got != "kept" {
+			t.Errorf("X-Early = %q, want kept", got)
+		}
+		if got := rec.Header().Get("X-Late"); got != "" {
+			t.Errorf("X-Late = %q, headers after WriteHeader must not ship", got)
+		}
+	})
+	t.Run("compressed", func(t *testing.T) {
+		rec := serveGzip(t, "gzip", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Early", "kept")
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("X-Late", "dropped")
+			w.Write([]byte(strings.Repeat("x", 2*gzipMinBytes)))
+		})
+		if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+			t.Fatalf("Content-Encoding = %q, want gzip", got)
+		}
+		if rec.Header().Get("X-Early") != "kept" || rec.Header().Get("X-Late") != "" {
+			t.Errorf("headers wrong: early=%q late=%q", rec.Header().Get("X-Early"), rec.Header().Get("X-Late"))
+		}
+	})
+}
+
 // pooled gzip writers must never leak one response's bytes into another
 func TestGzipConcurrentResponsesStayIsolated(t *testing.T) {
 	handler := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

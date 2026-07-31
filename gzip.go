@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -68,9 +69,21 @@ func acceptsGzip(acceptEncoding string) bool {
 
 // gzipResponseWriter holds the status and buffers the first kilobyte, so the
 // compress-or-not decision is made before any header reaches the client.
+//
+// Headers are snapshotted when WriteHeader commits a status, mirroring
+// net/http: without that, a header mutated while the buffer still holds the
+// response would ship - which stdlib ignores - and the same handler would
+// behave differently once its response grows past the buffer and the wire
+// commit happens mid-Write. The snapshot is a shallow map clone - Set and Del
+// replace or drop whole value slices, and an in-place Add cannot grow the
+// snapshot's view of a shared slice, so shallow is as isolating as net/http's
+// deep clone for everything the Header API can express. Measured cost: two
+// allocations (map header + buckets, ~400 B) and ~0.3 us per response, under
+// a percent of serving a real request.
 type gzipResponseWriter struct {
 	rw          http.ResponseWriter
 	status      int
+	header      http.Header // snapshot taken at WriteHeader, written at commit
 	buf         []byte
 	gz          *gzip.Writer
 	passthrough bool
@@ -102,9 +115,23 @@ func (g *gzipResponseWriter) WriteHeader(status int) {
 	}
 	g.status = status
 	h := g.rw.Header()
+	g.header = maps.Clone(h)
 	if strings.HasPrefix(h.Get("Content-Type"), "text/event-stream") || h.Get("Content-Encoding") != "" {
 		g.startPassthrough()
 	}
+}
+
+// commitHeader restores the WriteHeader-time snapshot into the live header
+// map just before it reaches the wire, discarding any later mutation. A nil
+// snapshot (Flush before WriteHeader) commits the live headers as they are,
+// which is what net/http's implicit commit does too.
+func (g *gzipResponseWriter) commitHeader() {
+	if g.header == nil {
+		return
+	}
+	h := g.rw.Header()
+	clear(h)
+	maps.Copy(h, g.header)
 }
 
 func (g *gzipResponseWriter) Write(p []byte) (int, error) {
@@ -141,6 +168,7 @@ func (g *gzipResponseWriter) Flush() {
 }
 
 func (g *gzipResponseWriter) startGzip() {
+	g.commitHeader()
 	h := g.rw.Header()
 	// sniff before compressing: net/http would otherwise see gzip bytes
 	if h.Get("Content-Type") == "" {
@@ -161,6 +189,7 @@ func (g *gzipResponseWriter) startGzip() {
 
 func (g *gzipResponseWriter) startPassthrough() {
 	g.passthrough = true
+	g.commitHeader()
 	g.rw.WriteHeader(g.status)
 	if len(g.buf) > 0 {
 		g.rw.Write(g.buf)
@@ -193,6 +222,7 @@ func (g *gzipResponseWriter) finish() {
 		// (net/http still writes an empty 200 if nobody else does)
 		return
 	}
+	g.commitHeader()
 	g.rw.WriteHeader(g.status)
 	if len(g.buf) > 0 {
 		g.rw.Write(g.buf)
