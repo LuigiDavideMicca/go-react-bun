@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "typecheck": "cd packages/borgo && bunx tsc --noEmit && cd ../create-borgo && bunx tsc --noEmit && cd ../../examples/tasks && bunx tsc --noEmit",
-    "test": "bun test packages/borgo/test",
+    "test": "bun test packages/borgo/test packages/create-borgo/test",
     "test:go": "go test ./...",
     "e2e": "playwright test"
   },

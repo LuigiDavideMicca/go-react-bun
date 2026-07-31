@@ -98,22 +98,22 @@ const ask = async (prompt: string): Promise<string> => {
     .toLowerCase();
 };
 
-if ((template === undefined || tailwind === undefined) && interactive) {
-  console.log(`\n  ${terracotta(home)} ${bold("create-borgo")} ${dim(`v${version}`)}\n`);
-}
+const banner = `  ${terracotta(home)} ${bold("create-borgo")} ${dim(`v${version}`)}`;
+const asked = interactive && (template === undefined || tailwind === undefined);
+if (asked) console.log(`\n${banner}\n`);
 
 if (template === undefined) {
   if (interactive) {
-    TEMPLATES.forEach((t, i) => {
-      console.log(`  ${bold(String(i + 1))} ${t.name.padEnd(8)} ${dim(t.hint)}`);
-    });
-    let prompt = `\n  template ${dim("(1-3, enter = base)")}: `;
+    for (const [i, t] of TEMPLATES.entries()) {
+      console.log(`  ${bold(String(i + 1))}  ${terracotta(t.name.padEnd(8))} ${dim(t.hint)}`);
+    }
+    let prompt = `\n  template ${dim(`(1-${TEMPLATES.length}, enter for base)`)} `;
     while (template === undefined) {
       const answer = await ask(prompt);
       if (answer === "") template = "base";
-      else if (/^[1-9]$/.test(answer)) template = TEMPLATES[Number(answer) - 1]?.name;
+      else if (/^[0-9]+$/.test(answer)) template = TEMPLATES[Number(answer) - 1]?.name;
       else if (isTemplate(answer)) template = answer;
-      prompt = `  pick 1-${TEMPLATES.length} ${dim("(enter = base)")}: `;
+      prompt = `  ${dim(`pick 1-${TEMPLATES.length}, or a name`)} `;
     }
   } else {
     template = "base";
@@ -129,7 +129,7 @@ if (!isTemplate(template)) {
 
 if (tailwind === undefined) {
   if (interactive) {
-    const answer = await ask(`  tailwind? ${dim("(y/N)")}: `);
+    const answer = await ask(`  tailwind ${dim("(y/N)")} `);
     tailwind = answer === "y" || answer === "yes";
   } else {
     tailwind = false;
@@ -209,10 +209,11 @@ const layouts: Record<TemplateName, string> = {
     index.html  ${dim("html shell")} ${dot} ${style} ${dim("global styles")}`,
 };
 
-console.log(`
-  ${terracotta(home)} ${bold("create-borgo")} ${dim(`v${version}`)}
-
-  ${sage(ok)} created ${bold(name)}/ ${dim(`(template: ${template}${tailwind ? " + tailwind" : ""})`)}
+// the banner is already on screen when the questions were asked: repeating it
+// would push the answers the user just gave off the top of a short terminal
+const stack = tailwind ? `${template} + tailwind` : template;
+console.log(`${asked ? "" : `\n${banner}\n`}
+  ${sage(ok)} created ${bold(name)}/ ${dim(`${dot} ${stack}`)}
 ${layouts[template]}
 
   next steps
@@ -222,6 +223,10 @@ ${layouts[template]}
     bun run dev
 
   then open ${bold("http://localhost:3000")}
-
+${
+  tailwind
+    ? `\n  ${dim(`tailwind is wired: edit ${bold("style.css")} ${dot} the template's own styles are plain css, replace them freely`)}\n`
+    : ""
+}
   ${dim(`borgo is built by Luigi Micca ${dot}`)} ${terracotta("https://luigimicca.com")}
 `);

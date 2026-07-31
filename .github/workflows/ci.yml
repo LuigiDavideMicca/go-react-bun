@@ -58,7 +58,7 @@ jobs:
         run: bun run typecheck
 
       - name: bun tests
-        run: bun test packages/borgo/test
+        run: bun run test
 
       - name: typed request bodies reject a wrong body
         working-directory: examples/tasks
