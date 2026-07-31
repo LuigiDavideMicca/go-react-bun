@@ -8,7 +8,8 @@ Deep dives for every convention the [README](../README.md) summarizes. Each page
 | [The typed bridge](typed-bridge.md) | Go API routes, borgogen, typed request bodies, type overrides, honest limits |
 | [Client navigation and hydration](client-navigation.md) | client-side transitions, prefetching, scroll restoration, code splitting, hydration modes, islands |
 | [Realtime](realtime.md) | server-sent events, WebSocket topics, typed event payloads, `borgo.Push`/`PushT` |
-| [Auth and sessions](auth-and-sessions.md) | signed-cookie sessions, password hashing, `borgo.Auth`, guards on both sides of the bridge, CSRF |
+| [Auth and sessions](auth-and-sessions.md) | signed-cookie sessions, password hashing, `borgo.Auth`, guards on both sides of the bridge |
+| [Security](security.md) | the default posture: headers, CSP and nonces, CSRF, cookie rules, limits and timeouts, and what borgo leaves to you |
 | [Dev experience](dev-experience.md) | fast refresh and its contract, styling and Tailwind, the error overlay, `borgo doctor` |
 | [PWA](pwa.md) | manifest, service worker, the precache list, guarded registration |
 | [Deploy](deploy.md) | Docker, compose, reverse proxy, systemd, static export, caching, health and metrics, environment reference |
@@ -24,4 +25,6 @@ Deep dives for every convention the [README](../README.md) summarizes. Each page
 4. [Auth and sessions](auth-and-sessions.md) and [realtime](realtime.md) — when the app needs them
 5. [Dev experience](dev-experience.md) — worth ten minutes once, so the dev loop never surprises you
 
-**Running an app in production** — [deploy](deploy.md) is self-contained: pick a layout (single container, two services, systemd), put a reverse proxy in front, wire `/healthz`, and keep the [environment reference](deploy.md#environment-reference) at hand. [Static export](deploy.md#static-export) is there too, for the pages that need no server.
+**Running an app in production** — [deploy](deploy.md) is self-contained: pick a layout (single container, two services, systemd), put a reverse proxy in front, wire `/healthz`, and keep the [environment reference](deploy.md#environment-reference) at hand. [Static export](deploy.md#static-export) is there too, for the pages that need no server. Read [security](security.md) once before the first deploy — it ends with a checklist.
+
+**Reviewing borgo for your team** — [security](security.md) states the default posture and, just as importantly, what borgo deliberately does not do; the [typed bridge](typed-bridge.md) and [what this is not](../README.md#what-this-is-not) cover the honest limits of the rest.
