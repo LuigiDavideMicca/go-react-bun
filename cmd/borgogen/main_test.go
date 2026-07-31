@@ -216,6 +216,19 @@ func TestSameNameStructsInDifferentPackagesStayDistinct(t *testing.T) {
 	}
 }
 
+func TestTextMarshalersAreStrings(t *testing.T) {
+	root := filepath.Join("testdata", "textmarshal")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	want := "export interface Resp {\n  id: string;\n  lvl: string;\n  addr: string;\n" +
+		"  keyed: Record<string, number>;\n  plain: number;\n}"
+	if !strings.Contains(types, want) {
+		t.Errorf("api-types.d.ts missing:\n%s\ngot:\n%s", want, types)
+	}
+}
+
 func TestByteSlicesAreBase64Strings(t *testing.T) {
 	root := filepath.Join("testdata", "bytes")
 	if err := run(root); err != nil {

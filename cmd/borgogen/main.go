@@ -751,9 +751,32 @@ func isErrorStatus(info *types.Info, expr ast.Expr) bool {
 	return ok && v >= 300
 }
 
-func hasCustomMarshal(t types.Type) bool {
+func hasCustomMarshal(t types.Type) bool { return hasMarshalMethod(t, "MarshalJSON") }
+
+// hasTextMarshal reports whether t implements encoding.TextMarshaler without
+// implementing json.Marshaler, which is how uuid.UUID, netip.Addr and hand
+// written enums reach the wire: encoding/json writes their MarshalText output
+// as a quoted string, whatever the Go type underneath is.
+func hasTextMarshal(t types.Type) bool {
+	return !hasCustomMarshal(t) && hasMarshalMethod(t, "MarshalText")
+}
+
+// hasMarshalMethod looks for a method with the exact func() ([]byte, error)
+// shape, so a struct field that merely happens to be named MarshalJSON does
+// not read as a marshaler.
+func hasMarshalMethod(t types.Type, name string) bool {
 	for _, T := range []types.Type{t, types.NewPointer(t)} {
-		if m, _, _ := types.LookupFieldOrMethod(T, true, nil, "MarshalJSON"); m != nil {
+		obj, _, _ := types.LookupFieldOrMethod(T, true, nil, name)
+		fn, ok := obj.(*types.Func)
+		if !ok {
+			continue
+		}
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig.Params().Len() != 0 || sig.Results().Len() != 2 {
+			continue
+		}
+		if sig.Results().At(0).Type().String() == "[]byte" &&
+			sig.Results().At(1).Type().String() == "error" {
 			return true
 		}
 	}
@@ -772,6 +795,9 @@ func (g *tsGen) tsType(t types.Type) string {
 		}
 		if hasCustomMarshal(t) {
 			return "unknown"
+		}
+		if hasTextMarshal(t) {
+			return "string"
 		}
 		if s, ok := t.Underlying().(*types.Struct); ok {
 			return g.interfaceFor(t, s)
@@ -803,6 +829,10 @@ func (g *tsGen) tsType(t types.Type) string {
 		return "Array<" + g.tsType(t.Elem()) + ">"
 	case *types.Map:
 		if b, ok := t.Key().Underlying().(*types.Basic); ok && b.Info()&(types.IsString|types.IsNumeric) != 0 {
+			return "Record<string, " + g.tsType(t.Elem()) + ">"
+		}
+		if hasTextMarshal(t.Key()) {
+			// encoding/json keys the object by MarshalText output
 			return "Record<string, " + g.tsType(t.Elem()) + ">"
 		}
 		return "unknown"
