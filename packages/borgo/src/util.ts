@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { c, g } from "./colors";
 import { documentStream, gzipStream, pickEncoding } from "./compress";
 import { CSRF_COOKIE, CSRF_FIELD, csrfCookieValue, withCsrf } from "./index";
-import { resolveHead, type Head, type Route } from "./router";
+import { resolveHead, type ActionContext, type Head, type Route } from "./router";
 
 // constant-time on the value, honest about the length: a comparison that
 // leaks how many prefix bytes matched is a comparison an attacker can walk
@@ -513,6 +513,218 @@ export async function renderPage(
     return new Response(gzipStream(body), { status, headers });
   }
   return new Response(body, { status, headers });
+}
+
+// a response built by an action or a loader guard may carry headers of its
+// own (set-cookie above all); they must survive the translation to json.
+// location, set-cookie and the content-* family are excluded from the plain
+// copy: the first two are re-stated by the envelope and the cookie append
+// below, and the content-* of the original body would describe a body this
+// response no longer carries.
+export function carryHeaders(from: Response, json: Response): Response {
+  const headers = new Headers(json.headers);
+  from.headers.forEach((value, key) => {
+    const k = key.toLowerCase();
+    if (k === "location" || k === "set-cookie" || k.startsWith("content-")) return;
+    headers.set(key, value);
+  });
+  for (const c of from.headers.getSetCookie()) headers.append("Set-Cookie", c);
+  return new Response(json.body, { status: json.status, headers });
+}
+
+// an action that logs in (or out) changes the cookie jar mid-request: the
+// loader that runs right after must see the new session, not the one the
+// browser sent before the action. freshCookieHeader owns the duplicate
+// semantics, which have to match what go would have made of the same jar
+export function freshCookieRequest(req: Request, setCookies: string[]): Request {
+  if (!setCookies.length) return req;
+  const headers = new Headers(req.headers);
+  const cookie = freshCookieHeader(req.headers.get("cookie"), setCookies);
+  if (cookie) headers.set("cookie", cookie);
+  else headers.delete("cookie");
+  return new Request(req.url, { method: req.method, headers });
+}
+
+// the one match a request already does, handed on rather than repeated
+export type RouteMatch = { route: Route; params: Record<string, string> };
+
+export type RunLoaderFn = (
+  req: Request,
+  route: Route,
+  params: Record<string, string>,
+  onSetCookie?: (cookies: string[]) => void,
+) => Promise<LoaderResult>;
+
+export type RenderPageFn = (
+  req: Request,
+  route: Route,
+  params: Record<string, string>,
+  status: number,
+  extraProps?: Record<string, unknown>,
+  extraCookies?: string[],
+) => Promise<Response>;
+
+// dev answers with Response.json, production with the compressing jsonResponse
+export type SendJsonFn = (req: Request, value: unknown, init?: ResponseInit) => Response;
+
+export type ActionOptions = {
+  dev: boolean;
+  // raw base url handed to the action, for anything the typed client misses
+  apiUrl: string;
+  // the _500 page, rendered when an enhanced action throws in production
+  serverError: Route | null;
+  // serve() has already resolved the enforced flag from the environment
+  csrfRejects: (req: Request) => Promise<boolean>;
+  // the api client bound to this request's cookies, collecting set-cookie
+  apiFor: (req: Request, onSetCookie?: (cookies: string[]) => void) => ActionContext["api"];
+  runLoader: RunLoaderFn;
+  renderPage: RenderPageFn;
+  sendJson: SendJsonFn;
+  // overlayHtml in dev; never called in production
+  renderOverlay: (error: unknown) => string;
+  // injectable for tests; production passes none of these
+  onError?: (value: unknown) => void;
+};
+
+// a POST landing on the page routes. answers, or hands back null for "not
+// mine" - a post to a path with no page, or to a page with no action, which
+// the caller turns into the 405 a native form gets.
+//
+// the client runtime submits enhanced forms with X-Borgo-Action: 1 and gets
+// json back (props + actionData, or a redirect) instead of a document, so the
+// page re-renders in place without losing the scroll position. classic no-js
+// posts get the full html render. every enhanced answer is marked X-Borgo
+// (action = json envelope, raw = a full document to swap in) so the runtime
+// never has to guess; anything left unmarked is a custom response it reloads
+// on, which is the documented escape hatch.
+export async function runAction(
+  req: Request,
+  target: RouteMatch | null,
+  options: ActionOptions,
+): Promise<Response | null> {
+  const {
+    dev,
+    apiUrl,
+    serverError,
+    csrfRejects: rejectsCsrf,
+    apiFor,
+    runLoader,
+    renderPage,
+    sendJson,
+    renderOverlay,
+    onError = console.error,
+  } = options;
+
+  const action = target?.route.module.action;
+  const wantsJson = req.headers.get("x-borgo-action") === "1";
+  const actionJson = (value: unknown, init: ResponseInit = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set("X-Borgo", "action");
+    headers.set("Cache-Control", "private, no-store");
+    return sendJson(req, value, { ...init, headers });
+  };
+  const rawDocument = (doc: Response) => {
+    const headers = new Headers(doc.headers);
+    headers.set("X-Borgo", "raw");
+    return new Response(doc.body, { status: doc.status, headers });
+  };
+
+  if (target && action) {
+    if (typeof action !== "function") {
+      throw new Error(`the action export of pages/${target.route.file} must be a function`);
+    }
+    if (await rejectsCsrf(req)) {
+      if (wantsJson) return actionJson({ csrf: true }, { status: 403 });
+      return new Response("invalid csrf token", { status: 403 });
+    }
+    const apiCookies: string[] = [];
+    try {
+      const result = await action({
+        request: req,
+        params: target.params,
+        api: apiFor(req, (c) => apiCookies.push(...c)),
+        apiUrl,
+      });
+      if (result instanceof Response) {
+        const location = result.headers.get("Location");
+        if (wantsJson && location) {
+          return withCookies(carryHeaders(result, actionJson({ redirect: location })), apiCookies);
+        }
+        if (wantsJson && (result.headers.get("content-type") ?? "").includes("text/html")) {
+          return withCookies(rawDocument(result), apiCookies);
+        }
+        return withCookies(result, apiCookies);
+      }
+      const freshReq = freshCookieRequest(req, apiCookies);
+      if (wantsJson) {
+        const loaded = await runLoader(freshReq, target.route, target.params, (c) =>
+          apiCookies.push(...c),
+        );
+        if (loaded instanceof Response) {
+          const location = loaded.headers.get("Location");
+          if (location) {
+            return withCookies(carryHeaders(loaded, actionJson({ redirect: location })), apiCookies);
+          }
+          return withCookies(loaded, apiCookies);
+        }
+        return withCookies(actionJson({ props: loaded, actionData: result }), apiCookies);
+      }
+      return renderPage(freshReq, target.route, target.params, 200, { actionData: result }, apiCookies);
+    } catch (error) {
+      if (!wantsJson) throw error;
+      // the native flow would show the overlay or the 500 page; the
+      // enhanced flow must deliver that same document, not vanish the
+      // failure behind a silent reload
+      onError(error);
+      if (dev) {
+        return rawDocument(
+          new Response(renderOverlay(error), {
+            status: 500,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          }),
+        );
+      }
+      if (serverError) {
+        try {
+          return rawDocument(await renderPage(req, serverError, {}, 500));
+        } catch {}
+      }
+      return rawDocument(new Response("internal server error", { status: 500 }));
+    }
+  }
+  if (wantsJson && target) {
+    // a post to a page without an action: tell the runtime to go native
+    return actionJson({ unsupported: true }, { status: 405, headers: { Allow: "GET, HEAD" } });
+  }
+  return null;
+}
+
+export type PropsOptions = {
+  runLoader: RunLoaderFn;
+  sendJson: SendJsonFn;
+};
+
+// ?__borgo=props: the client router asks for the next page's loader data
+// alone, and renders the component it already has. never cached - it carries
+// session-shaped data and the cookies the loader's api calls issued.
+export async function runPropsRequest(
+  req: Request,
+  route: Route,
+  params: Record<string, string>,
+  { runLoader, sendJson }: PropsOptions,
+): Promise<Response> {
+  const apiCookies: string[] = [];
+  const props = await runLoader(req, route, params, (c) => apiCookies.push(...c));
+  const noStore = { headers: { "Cache-Control": "private, no-store" } };
+  if (props instanceof Response) {
+    // surface loader redirects as data, so the client runtime can follow
+    const location = props.headers.get("Location");
+    if (location) {
+      return withCookies(carryHeaders(props, sendJson(req, { redirect: location }, noStore)), apiCookies);
+    }
+    return withCookies(props, apiCookies);
+  }
+  return withCookies(sendJson(req, { props }, noStore), apiCookies);
 }
 
 // the seam, narrowed to what the proxy actually asks of fetch: a target and

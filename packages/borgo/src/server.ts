@@ -14,13 +14,15 @@ import {
   createSecurity,
   csrfRejects,
   envInt,
-  freshCookieHeader,
   headResponse,
   keysEqual,
   prepareShell,
   proxyRequest,
   renderPage as renderDocument,
-  withCookies,
+  runAction,
+  runPropsRequest,
+  type ActionOptions,
+  type PropsOptions,
   type RenderPageOptions,
 } from "./util";
 
@@ -102,32 +104,6 @@ export async function serve({ dev = false } = {}) {
       ? route.module.loader({ request: req, params, api: apiFor(req, onSetCookie), apiUrl })
       : Promise.resolve({});
 
-  // an action that logs in (or out) changes the cookie jar mid-request: the
-  // loader that runs right after must see the new session, not the one the
-  // browser sent before the action. freshCookieHeader owns the duplicate
-  // semantics, which have to match what go would have made of the same jar
-  const withFreshCookies = (req: Request, setCookies: string[]) => {
-    if (!setCookies.length) return req;
-    const headers = new Headers(req.headers);
-    const cookie = freshCookieHeader(req.headers.get("cookie"), setCookies);
-    if (cookie) headers.set("cookie", cookie);
-    else headers.delete("cookie");
-    return new Request(req.url, { method: req.method, headers });
-  };
-
-  // a response built by an action or a loader guard may carry headers of its
-  // own (set-cookie above all); they must survive the translation to json
-  const carryHeaders = (from: Response, json: Response) => {
-    const headers = new Headers(json.headers);
-    from.headers.forEach((value, key) => {
-      const k = key.toLowerCase();
-      if (k === "location" || k === "set-cookie" || k.startsWith("content-")) return;
-      headers.set(key, value);
-    });
-    for (const c of from.headers.getSetCookie()) headers.append("Set-Cookie", c);
-    return new Response(json.body, { status: json.status, headers });
-  };
-
   // the exact defaults, and the env switches, are documented on createSecurity
   const security = createSecurity(dev, {
     headers: process.env.BORGO_SECURITY_HEADERS,
@@ -170,6 +146,19 @@ export async function serve({ dev = false } = {}) {
   const sendJson = (req: Request, value: unknown, init?: ResponseInit) =>
     dev ? Response.json(value, init) : jsonResponse(req, value, init);
 
+  const actionOptions: ActionOptions = {
+    dev,
+    apiUrl,
+    serverError,
+    csrfRejects: (req) => csrfRejects(req, { enforced: csrfEnforced }),
+    apiFor,
+    runLoader,
+    renderPage,
+    sendJson,
+    renderOverlay: overlayHtml,
+  };
+  const propsOptions: PropsOptions = { runLoader, sendJson };
+
   // metrics wants the matched pattern as its label: handing it back from the
   // one match a request already does keeps the route table scanned once
   type Label = { route: string };
@@ -209,92 +198,8 @@ export async function serve({ dev = false } = {}) {
     if (req.method === "POST") {
       const target = matchRoute(url.pathname, routes);
       if (target) label.route = target.route.pattern;
-      const action = target?.route.module.action;
-      // the client runtime submits enhanced forms with this header and gets
-      // json back (props + actionData, or a redirect) instead of a document,
-      // so the page re-renders in place without losing the scroll position.
-      // classic no-js posts keep the full html render below. every response
-      // on this path is marked X-Borgo (action = json envelope, raw = a full
-      // document to swap in) so the runtime never has to guess.
-      const wantsJson = req.headers.get("x-borgo-action") === "1";
-      const actionJson = (value: unknown, init: ResponseInit = {}) => {
-        const headers = new Headers(init.headers);
-        headers.set("X-Borgo", "action");
-        headers.set("Cache-Control", "private, no-store");
-        return sendJson(req, value, { ...init, headers });
-      };
-      const rawDocument = (doc: Response) => {
-        const headers = new Headers(doc.headers);
-        headers.set("X-Borgo", "raw");
-        return new Response(doc.body, { status: doc.status, headers });
-      };
-      if (target && action) {
-        if (typeof action !== "function") {
-          throw new Error(`the action export of pages/${target.route.file} must be a function`);
-        }
-        if (await csrfRejects(req, { enforced: csrfEnforced })) {
-          if (wantsJson) return actionJson({ csrf: true }, { status: 403 });
-          return new Response("invalid csrf token", { status: 403 });
-        }
-        const apiCookies: string[] = [];
-        try {
-          const result = await action({
-            request: req,
-            params: target.params,
-            api: apiFor(req, (c) => apiCookies.push(...c)),
-            apiUrl,
-          });
-          if (result instanceof Response) {
-            const location = result.headers.get("Location");
-            if (wantsJson && location) {
-              return withCookies(carryHeaders(result, actionJson({ redirect: location })), apiCookies);
-            }
-            if (wantsJson && (result.headers.get("content-type") ?? "").includes("text/html")) {
-              return withCookies(rawDocument(result), apiCookies);
-            }
-            return withCookies(result, apiCookies);
-          }
-          const freshReq = withFreshCookies(req, apiCookies);
-          if (wantsJson) {
-            const loaded = await runLoader(freshReq, target.route, target.params, (c) =>
-              apiCookies.push(...c),
-            );
-            if (loaded instanceof Response) {
-              const location = loaded.headers.get("Location");
-              if (location) {
-                return withCookies(carryHeaders(loaded, actionJson({ redirect: location })), apiCookies);
-              }
-              return withCookies(loaded, apiCookies);
-            }
-            return withCookies(actionJson({ props: loaded, actionData: result }), apiCookies);
-          }
-          return renderPage(freshReq, target.route, target.params, 200, { actionData: result }, apiCookies);
-        } catch (error) {
-          if (!wantsJson) throw error;
-          // the native flow would show the overlay or the 500 page; the
-          // enhanced flow must deliver that same document, not vanish the
-          // failure behind a silent reload
-          console.error(error);
-          if (dev) {
-            return rawDocument(
-              new Response(overlayHtml(error), {
-                status: 500,
-                headers: { "Content-Type": "text/html; charset=utf-8" },
-              }),
-            );
-          }
-          if (serverError) {
-            try {
-              return rawDocument(await renderPage(req, serverError, {}, 500));
-            } catch {}
-          }
-          return rawDocument(new Response("internal server error", { status: 500 }));
-        }
-      }
-      if (wantsJson && target) {
-        // a post to a page without an action: tell the runtime to go native
-        return actionJson({ unsupported: true }, { status: 405, headers: { Allow: "GET, HEAD" } });
-      }
+      const answered = await runAction(req, target, actionOptions);
+      if (answered) return answered;
     }
 
     if (req.method !== "GET" && req.method !== "HEAD") {
@@ -313,18 +218,7 @@ export async function serve({ dev = false } = {}) {
     }
 
     if (wantsProps) {
-      const apiCookies: string[] = [];
-      const props = await runLoader(req, matched.route, matched.params, (c) => apiCookies.push(...c));
-      const noStore = { headers: { "Cache-Control": "private, no-store" } };
-      if (props instanceof Response) {
-        // surface loader redirects as data, so the client runtime can follow
-        const location = props.headers.get("Location");
-        if (location) {
-          return withCookies(carryHeaders(props, sendJson(req, { redirect: location }, noStore)), apiCookies);
-        }
-        return withCookies(props, apiCookies);
-      }
-      return withCookies(sendJson(req, { props }, noStore), apiCookies);
+      return runPropsRequest(req, matched.route, matched.params, propsOptions);
     }
 
     return renderPage(req, matched.route, matched.params, 200);
