@@ -314,6 +314,19 @@ export async function proxyRequest(req: Request, options: ProxyOptions): Promise
   // hop-by-hop headers belong to the browser -> borgo connection, not to
   // this one; built once, outside the retry loop
   const headers = forwardableHeaders(req.headers);
+  // Host is the same kind of thing: it addresses borgo, not go. forwarded
+  // verbatim it makes go's r.Host whatever the client typed into the header,
+  // and r.Host is the field go reaches for implicitly - http.Redirect's
+  // absolute Location, a password-reset link, anything built from "the site's
+  // own name". dropping it lets bun write the target's authority, so r.Host
+  // is the api borgo actually dialled and nothing else. the browser's value
+  // is not lost, it is moved to the header that declares itself untrusted -
+  // and only when no front proxy already set one, because a proxy that
+  // rewrote Host (nginx's default proxy_set_header Host $proxy_host) knows
+  // the public name better than the Host reaching us does.
+  const inboundHost = headers.get("host");
+  headers.delete("host");
+  if (inboundHost && !headers.has("x-forwarded-host")) headers.set("x-forwarded-host", inboundHost);
   // resendable unless a real body streamed through unbuffered - a
   // body-less delete/post (body null) is as safe to retry as a get
   const retriable = !hasBody || buffered || body == null;

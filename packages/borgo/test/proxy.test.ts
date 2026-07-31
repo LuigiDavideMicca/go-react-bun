@@ -477,6 +477,59 @@ describe("proxyRequest: the outbound request", () => {
     expect(headers!.get("accept-encoding")).toBe("gzip");
   });
 
+  test("the browser's Host does not become go's r.Host", async () => {
+    // r.Host is what go builds absolute urls from. forwarded verbatim, the
+    // client picks the site's own name - a password reset mailed to the
+    // victim points at the attacker's host and still looks like the app
+    let headers: Headers | undefined;
+    await proxyRequest(
+      req("GET", { headers: { host: "evil.example.com", cookie: "borgo_session=abc" } }),
+      opts({
+        target: "http://localhost:3501/api/me",
+        fetchImpl: async (_t, init) => {
+          headers = new Headers(init.headers);
+          return new Response("ok");
+        },
+      }),
+    );
+    // no Host on the outbound request: bun writes the target's authority
+    expect(headers!.has("host")).toBe(false);
+    // the value is not lost, it is moved somewhere that names itself untrusted
+    expect(headers!.get("x-forwarded-host")).toBe("evil.example.com");
+    expect(headers!.get("cookie")).toBe("borgo_session=abc");
+  });
+
+  test("a front proxy's own X-Forwarded-Host is not overwritten", async () => {
+    // nginx's default rewrites Host to the upstream, so its X-Forwarded-Host
+    // is the only record of the public name; ours would be strictly worse
+    let headers: Headers | undefined;
+    await proxyRequest(
+      req("GET", { headers: { host: "localhost:3000", "x-forwarded-host": "app.example.com" } }),
+      opts({
+        fetchImpl: async (_t, init) => {
+          headers = new Headers(init.headers);
+          return new Response("ok");
+        },
+      }),
+    );
+    expect(headers!.get("x-forwarded-host")).toBe("app.example.com");
+    expect(headers!.has("host")).toBe(false);
+  });
+
+  test("a request with no Host of its own gains no X-Forwarded-Host", async () => {
+    let headers: Headers | undefined;
+    await proxyRequest(
+      req("GET"),
+      opts({
+        fetchImpl: async (_t, init) => {
+          headers = new Headers(init.headers);
+          return new Response("ok");
+        },
+      }),
+    );
+    expect(headers!.has("x-forwarded-host")).toBe(false);
+  });
+
   test("a head carries no body, and is not turned into a get", async () => {
     let init: RequestInit | undefined;
     const res = await proxyRequest(
