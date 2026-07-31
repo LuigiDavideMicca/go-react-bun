@@ -216,6 +216,27 @@ func TestSameNameStructsInDifferentPackagesStayDistinct(t *testing.T) {
 	}
 }
 
+// One `json:"user-name"` used to be written unquoted, which is a syntax error
+// that costs the whole project its types, not just that route's.
+func TestNonIdentifierJSONNamesAreQuoted(t *testing.T) {
+	root := filepath.Join("testdata", "tagnames")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	for _, want := range []string{
+		`"user-name": string`,
+		`"a.b": string`,
+		`"1st": string`,
+		"città: string",    // unicode letters are identifiers in ts
+		"plain_$1: string", // $ and a non-leading digit are too
+	} {
+		if !strings.Contains(types, want) {
+			t.Errorf("api-types.d.ts missing %q\n%s", want, types)
+		}
+	}
+}
+
 // A struct that embeds a pointer to itself used to recurse until the stack
 // blew up - a fatal error, not a recoverable one, on every save in dev.
 func TestSelfEmbeddingStructTerminates(t *testing.T) {

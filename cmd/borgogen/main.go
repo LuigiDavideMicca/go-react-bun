@@ -927,12 +927,38 @@ func (g *tsGen) structFields(s *types.Struct, expanded map[*types.Struct]bool) [
 		if strings.Contains(opts, "string") && ts == "number" {
 			ts = "string"
 		}
-		out = append(out, fmt.Sprintf("%s%s: %s", name, optional, ts))
+		out = append(out, fmt.Sprintf("%s%s: %s", tsPropName(name), optional, ts))
 	}
 	if len(out) == 0 {
 		return []string{"[key: string]: unknown"}
 	}
 	return out
+}
+
+// tsPropName quotes a JSON name that is not a bare TypeScript identifier.
+// encoding/json accepts tags like `json:"user-name"` or `json:"a.b"`; written
+// unquoted they are a syntax error, and one such field breaks the parse of the
+// whole .d.ts - so every route in the project loses its types at once.
+func tsPropName(name string) string {
+	if isTSIdent(name) {
+		return name
+	}
+	return fmt.Sprintf("%q", name)
+}
+
+func isTSIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_' || r == '$' || unicode.IsLetter(r):
+		case i > 0 && unicode.IsDigit(r):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func parseJSONTag(tag string) (name, opts string) {
