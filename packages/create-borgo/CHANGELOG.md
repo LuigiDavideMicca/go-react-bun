@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.20.0](https://github.com/LuigiDavideMicca/borgo/compare/create-borgo-v0.11.0...create-borgo-v0.20.0) (2026-07-31)
+
+
+### Features
+
+* create-borgo asks about tailwind and scaffolds it wired ([c1e41d9](https://github.com/LuigiDavideMicca/borgo/commit/c1e41d9b65d52cf9d1688bbbdf8f6ebf990dfd28))
+* three create-borgo templates (minimal, base, full) with cli selection ([0b88680](https://github.com/LuigiDavideMicca/borgo/commit/0b8868065e8c2657382514f66bd43c3207d768de))
+
+
+### Miscellaneous Chores
+
+* cut the 0.20 release ([cd2503d](https://github.com/LuigiDavideMicca/borgo/commit/cd2503dd0ea7850f2f95c1b6cb4abdf0513a9b5f))
+
 ## [0.11.0](https://github.com/LuigiDavideMicca/borgo/compare/create-borgo-v0.10.1...create-borgo-v0.11.0) (2026-07-30)
 
 
