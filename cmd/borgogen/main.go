@@ -131,8 +131,12 @@ func run(root string) (err error) {
 	})
 
 	gen := &tsGen{
-		names:     map[string]string{},
-		taken:     map[string]bool{},
+		names: map[string]string{},
+		// Array and Record are the two generics this file writes: an interface
+		// declared under either name shadows them inside the module and every
+		// use turns into "type is not generic", quietly, since apps typecheck
+		// with skipLibCheck
+		taken:     map[string]bool{"Array": true, "Record": true},
 		apiPkg:    pkg.Types,
 		overrides: collectTypeOverrides(pkg),
 	}

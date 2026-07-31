@@ -291,6 +291,25 @@ func TestMountingAvoidsAPackageLevelBorgo(t *testing.T) {
 	}
 }
 
+// export interface Record used to shadow the Record<K, V> this generator
+// writes, so every Record<...> in the file became "type is not generic" - and
+// apps typecheck with skipLibCheck, so nobody saw it.
+func TestTypesNamedAfterTSGenericsAreRenamed(t *testing.T) {
+	root := filepath.Join("testdata", "tsnames")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	for _, want := range []string{
+		"export interface ApiRecord {\n  m: Record<string, number>;\n}",
+		"export interface ApiArray {\n  l: Array<number>;\n}",
+	} {
+		if !strings.Contains(types, want) {
+			t.Errorf("api-types.d.ts missing:\n%s\ngot:\n%s", want, types)
+		}
+	}
+}
+
 func TestTextMarshalersAreStrings(t *testing.T) {
 	root := filepath.Join("testdata", "textmarshal")
 	if err := run(root); err != nil {
