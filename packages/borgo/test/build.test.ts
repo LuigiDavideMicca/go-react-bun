@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assetsBuildMode, generateManifest, parseHydrate, precacheStamp, refreshTransform } from "../src/build";
+import { assetsBuildMode, generateManifest, parseHydrate, precacheStamp, refreshTransform, renameUnsafeChunks } from "../src/build";
 
 describe("parseHydrate", () => {
   const cases: Array<[string, string, ReturnType<typeof parseHydrate>]> = [
@@ -202,5 +202,36 @@ describe("generateManifest", () => {
     const dynamicIdx = manifest.indexOf('pattern: "/deep/:id"');
     expect(staticIdx).toBeGreaterThan(-1);
     expect(dynamicIdx).toBeGreaterThan(staticIdx);
+  });
+});
+
+describe("renameUnsafeChunks", () => {
+  test("a chunk bun could not name loses its brackets, and its importers follow", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "borgo-chunks-"));
+    const odd = join(dir, "[name]-abc123.js");
+    const entry = join(dir, "client.js");
+    writeFileSync(odd, "export const x = 1;\n");
+    writeFileSync(entry, 'import { x } from "./[name]-abc123.js";\nexport default x;\n');
+
+    const renamed = await renameUnsafeChunks([odd, entry]);
+
+    expect(existsSync(join(dir, "chunk-abc123.js"))).toBe(true);
+    expect(existsSync(odd)).toBe(false);
+    expect(renamed.get(odd)).toBe(join(dir, "chunk-abc123.js"));
+    // a rename that leaves the import pointing at the old name is worse than
+    // the bracket: the chunk 404s and hydration dies
+    expect(readFileSync(entry, "utf8")).toContain("./chunk-abc123.js");
+    expect(readFileSync(entry, "utf8")).not.toContain("[name]");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("normal names are left alone", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "borgo-chunks-"));
+    const file = join(dir, "live-0wj4r0a3.js");
+    writeFileSync(file, "export const x = 1;\n");
+    const renamed = await renameUnsafeChunks([file]);
+    expect(renamed.size).toBe(0);
+    expect(existsSync(file)).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

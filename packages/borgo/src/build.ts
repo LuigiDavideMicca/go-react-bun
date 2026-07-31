@@ -1,6 +1,6 @@
 import { Glob } from "bun";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { join, sep } from "node:path";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join, sep } from "node:path";
 import { precompressAssets } from "./compress";
 import { filePathToPattern } from "./router";
 
@@ -261,6 +261,36 @@ export async function compileCss(dev = false) {
   await Bun.write(`${outDir}/style.css`, css.css);
 }
 
+// bun leaves the "[name]" token literal for a chunk it cannot name, which
+// puts brackets in a url path: legal, but s3, some cdns and some proxies
+// mangle them, and a chunk that 404s takes hydration down with it. rename
+// those files and rewrite the imports that point at them.
+export async function renameUnsafeChunks(paths: string[]): Promise<Map<string, string>> {
+  const renamed = new Map<string, string>();
+  for (const path of paths) {
+    const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    const dir = path.slice(0, slash + 1);
+    const file = path.slice(slash + 1);
+    if (!/[[\]]/.test(file)) continue;
+    const safe = file.replace(/\[name\]/g, "chunk").replace(/[[\]]/g, "");
+    renameSync(path, dir + safe);
+    renamed.set(path, dir + safe);
+  }
+  if (!renamed.size) return renamed;
+
+  // the old name is a literal string inside whatever imported it
+  const swaps = [...renamed].map(([from, to]) => [basename(from), basename(to)] as const);
+  for (const path of paths) {
+    const current = renamed.get(path) ?? path;
+    if (!current.endsWith(".js")) continue;
+    const before = readFileSync(current, "utf8");
+    let after = before;
+    for (const [from, to] of swaps) after = after.replaceAll(from, to);
+    if (after !== before) writeFileSync(current, after);
+  }
+  return renamed;
+}
+
 export async function buildAssets(dev = false): Promise<BuildResult> {
   if (dev) void loadBabelRefresh();
   const { hasIslands } = await generateManifest(dev);
@@ -287,14 +317,16 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
     define,
     plugins: [appTranspile(define, dev)],
   });
-  const assets = result.outputs.map((o) => ({ path: o.path, kind: o.kind, size: o.size }));
+  const renamed = await renameUnsafeChunks(result.outputs.map((o) => o.path));
+  const outPath = (p: string) => renamed.get(p) ?? p;
+  const assets = result.outputs.map((o) => ({ path: outPath(o.path), kind: o.kind, size: o.size }));
 
   // prod only: the hashed asset list a service worker can precache; the
   // stamp changes whenever any listed content does
   if (!dev) {
     const files = result.outputs
       .filter((o) => o.path.endsWith(".js"))
-      .map((o) => "/assets/" + o.path.replaceAll("\\", "/").split("/").pop());
+      .map((o) => "/assets/" + outPath(o.path).replaceAll("\\", "/").split("/").pop());
     if (existsSync(`${outDir}/style.css`)) files.push("/assets/style.css");
     files.sort();
     await Bun.write(
@@ -313,10 +345,12 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
   const chunkMap: Record<string, string> = {};
   if (dev) {
     for (const output of result.outputs) {
-      if (!output.path.endsWith(".js")) continue;
-      const text = await Bun.file(output.path).text();
+      // the file may have been renamed out from under this path above
+      const path = outPath(output.path);
+      if (!path.endsWith(".js")) continue;
+      const text = await Bun.file(path).text();
       for (const m of text.matchAll(/borgo-page:([^"\\]+)/g)) {
-        chunkMap[m[1]] = "/assets/" + output.path.replaceAll("\\", "/").split("/").pop();
+        chunkMap[m[1]] = "/assets/" + path.replaceAll("\\", "/").split("/").pop();
       }
     }
   }
