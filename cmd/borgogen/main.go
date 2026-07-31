@@ -6,7 +6,8 @@
 //     borgo.JSON[T] and borgo.WriteJSON call reachable from its handler
 //     (helper functions are followed, into other packages of the same module
 //     too); the request type comes from borgo.Bind[T] and borgo.BindMax[T]
-//     calls the same way. A "//borgo:type Go TS"
+//     calls the same way. An inline json.NewEncoder(w).Encode(v) on the
+//     handler's http.ResponseWriter counts as a response too. A "//borgo:type Go TS"
 //     directive overrides the mapping for any named Go type. borgo.PushT
 //     calls additionally feed a "topic/event" -> payload map (WsEvents),
 //     typing the browser's subscribe callback per topic.
@@ -602,6 +603,37 @@ func (l *helperLoader) load(path string, from token.Position) *helperPkg {
 	return hp
 }
 
+// encodedType returns the type written by a json.NewEncoder(w).Encode(v)
+// chain aimed at an http.ResponseWriter, or nil. Only the inline chain is
+// recognized: once the encoder lives in a variable or targets another writer,
+// calling it a response would be guessing.
+func encodedType(info *types.Info, call *ast.CallExpr) types.Type {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || len(call.Args) != 1 {
+		return nil
+	}
+	enc, ok := info.Uses[sel.Sel].(*types.Func)
+	if !ok || enc.Name() != "Encode" || enc.Pkg() == nil || enc.Pkg().Path() != "encoding/json" {
+		return nil
+	}
+	newEnc, ok := sel.X.(*ast.CallExpr)
+	if !ok || len(newEnc.Args) != 1 {
+		return nil
+	}
+	ctor := callee(info, newEnc)
+	if ctor == nil || ctor.Name() != "NewEncoder" || ctor.Pkg() == nil || ctor.Pkg().Path() != "encoding/json" {
+		return nil
+	}
+	if w := info.Types[newEnc.Args[0]]; w.Type == nil || w.Type.String() != "net/http.ResponseWriter" {
+		return nil
+	}
+	tv := info.Types[call.Args[0]]
+	if tv.Type == nil {
+		return nil
+	}
+	return types.Default(tv.Type)
+}
+
 // callee resolves a call to the declared function or method it invokes, or
 // nil for builtins, function values, and interface methods.
 func callee(info *types.Info, call *ast.CallExpr) *types.Func {
@@ -670,6 +702,10 @@ func (g *tsGen) bridgeTypes(pkg *packages.Package, decls map[*types.Func]*ast.Fu
 					}
 				}
 			case "":
+				if t := encodedType(pkg.TypesInfo, call); t != nil {
+					resp.add(g.tsType(t))
+					return true
+				}
 				fn := callee(pkg.TypesInfo, call)
 				if fn == nil {
 					return true

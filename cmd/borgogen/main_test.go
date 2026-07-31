@@ -42,6 +42,7 @@ func TestGenerateFixture(t *testing.T) {
 		`"GET /api/health": { response: Health };`,
 		"status: string",
 		"detail?: string",
+		`"GET /api/export": { response: Export };`,
 		`"GET /api/widgets": { response: WidgetList };`,
 		`"POST /api/widgets": { response: Widget; request: WidgetCreate };`,
 		`"DELETE /api/widgets/{id}": { response: Deleted };`,
@@ -68,6 +69,9 @@ func TestGenerateFixture(t *testing.T) {
 	}
 	if strings.Contains(types, "ErrResp") {
 		t.Errorf("error-status payloads must stay out of the response union; the ts client throws on non-2xx:\n%s", types)
+	}
+	if strings.Contains(types, "Draft") || strings.Contains(types, "Scratch") {
+		t.Errorf("an encoder aimed at a non-ResponseWriter must not become a response type:\n%s", types)
 	}
 
 	wantGen := []string{
