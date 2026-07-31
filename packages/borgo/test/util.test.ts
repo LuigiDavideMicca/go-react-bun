@@ -3,11 +3,34 @@ import {
   createSecurity,
   envInt,
   escapeHtml,
+  hasCookie,
   headHtml,
   PROXY_RETRY_MAX_BODY,
   scriptJson,
   shouldBufferBody,
 } from "../src/util";
+
+describe("hasCookie", () => {
+  test("presence does not depend on the value being usable", () => {
+    expect(hasCookie("borgo_csrf=tok", "borgo_csrf")).toBe(true);
+    expect(hasCookie("a=1; borgo_csrf=; b=2", "borgo_csrf")).toBe(true);
+    // the case the csrf gate turns on: two tossed duplicates read as no
+    // token, and the browser must still be treated as one we issued to
+    expect(hasCookie("borgo_csrf=aaa; borgo_csrf=bbb", "borgo_csrf")).toBe(true);
+  });
+
+  test("exact name match only", () => {
+    expect(hasCookie("xborgo_csrf=1", "borgo_csrf")).toBe(false);
+    expect(hasCookie("borgo_csrf_extra=1", "borgo_csrf")).toBe(false);
+    expect(hasCookie("borgo_session=x", "borgo_csrf")).toBe(false);
+  });
+
+  test("missing, empty and malformed headers", () => {
+    expect(hasCookie(null, "borgo_csrf")).toBe(false);
+    expect(hasCookie("", "borgo_csrf")).toBe(false);
+    expect(hasCookie("novalue", "novalue")).toBe(false);
+  });
+});
 
 describe("scriptJson", () => {
   test("a closing script tag cannot end the block", () => {

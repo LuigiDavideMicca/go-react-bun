@@ -100,6 +100,17 @@ export const scriptJson = (value: unknown) =>
     .replaceAll("\u2028", "\\u2028")
     .replaceAll("\u2029", "\\u2029");
 
+// "did we ever issue this browser a cookie of this name", regardless of what
+// the value reads as. a check that switches itself off when the value is
+// unusable is a check an attacker can switch off by making it unusable.
+export function hasCookie(header: string | null, name: string): boolean {
+  for (const part of (header ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq !== -1 && part.slice(0, eq).trim() === name) return true;
+  }
+  return false;
+}
+
 // env knobs are limits: a typo must fall back to the default, never become
 // NaN and silently disable the limit it was meant to tune
 export function envInt(value: string | undefined, fallback: number): number {

@@ -17,11 +17,11 @@ import {
   pickEncoding,
   type AssetInfo,
 } from "./compress";
-import { CSRF_COOKIE, CSRF_FIELD, cookieValue, registerCsrf, registerIslands, withCsrf } from "./index";
+import { CSRF_COOKIE, CSRF_FIELD, csrfCookieValue, registerCsrf, registerIslands, withCsrf } from "./index";
 import { createMetrics } from "./metrics";
 import { overlayHtml } from "./overlay";
 import { matchRoute, resolveHead, safeDecode, type Route } from "./router";
-import { createSecurity, envInt, headHtml, scriptJson, shouldBufferBody } from "./util";
+import { createSecurity, envInt, hasCookie, headHtml, scriptJson, shouldBufferBody } from "./util";
 
 const isConnRefused = (err: unknown) => {
   const e = err as { code?: string; message?: string };
@@ -219,9 +219,15 @@ export async function serve({ dev = false } = {}) {
     // enforced for any browser that has been issued a token, not only for
     // live sessions: otherwise a cross-site post can log the victim into
     // the attacker's account (login csrf). cookie-less clients (curl, api
-    // consumers) are unaffected.
-    if (!cookieValue(cookies, "borgo_session") && !cookieValue(cookies, CSRF_COOKIE)) return false;
-    const expected = cookieValue(cookies, CSRF_COOKIE);
+    // consumers) are unaffected. presence, not value: a token shadowed by a
+    // tossed duplicate reads as absent, and a browser that can be made to
+    // look token-less is a browser the check no longer runs for.
+    if (!hasCookie(cookies, "borgo_session") && !hasCookie(cookies, CSRF_COOKIE)) return false;
+    // a sibling subdomain can drop a second borgo_csrf into the victim's jar;
+    // whichever of the two a first-wins read picked, the attacker could make
+    // it theirs and then echo it from a cross-site form. duplicates that
+    // disagree are no token at all - the same call the browser runtime makes
+    const expected = csrfCookieValue(cookies);
     // no token to compare against: reject without buffering and parsing the
     // body, which the action below would parse a second time anyway
     if (!expected) return true;
@@ -249,7 +255,7 @@ export async function serve({ dev = false } = {}) {
 
     // the same token rides in the cookie and in every <CsrfField />; a
     // browser without one gets it minted alongside this page
-    const cookieToken = cookieValue(req.headers.get("cookie"), CSRF_COOKIE);
+    const cookieToken = csrfCookieValue(req.headers.get("cookie"));
     const csrfToken = cookieToken || crypto.randomUUID().replaceAll("-", "");
     if (!cookieToken) apiCookies.push(`${CSRF_COOKIE}=${csrfToken}; ${csrfCookieAttrs}`);
 
