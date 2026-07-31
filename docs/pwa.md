@@ -40,11 +40,20 @@ self.addEventListener("install", (e) => {
 });
 
 self.addEventListener("activate", (e) => {
-  // drop caches from older stamps
+  // drop caches from older stamps, keeping the one this worker just filled
   e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k.startsWith("app-")).map((k) => caches.delete(k))),
-    ).then(() => self.clients.claim()),
+    fetch("/assets/precache.json")
+      .then((r) => r.json())
+      .then(({ stamp }) =>
+        caches.keys().then((keys) =>
+          Promise.all(
+            keys
+              .filter((k) => k.startsWith("app-") && k !== `app-${stamp}`)
+              .map((k) => caches.delete(k)),
+          ),
+        ),
+      )
+      .then(() => self.clients.claim()),
   );
 });
 
@@ -69,6 +78,7 @@ The helper no-ops server-side, in browsers without service worker support, and �
 
 ## Caveats, honestly
 
-- The activate handler above drops *all* `app-*` caches, including the current one, and refills lazily; keep the current stamp if you want a warm cache across activations.
-- SSR pages are dynamic responses (`Cache-Control: private, no-store`); if you want them offline, cache navigations explicitly in your worker with a fallback document.
+- The stamp changes when the *content* of any listed asset changes, which is what makes it usable as a cache key. It is not a version number: a rebuild that produces identical bytes produces the identical stamp, deliberately, so an unchanged deploy does not evict a warm cache.
+- SSR pages are dynamic responses (`Cache-Control: private, no-store`); if you want them offline, cache navigations explicitly in your worker with a fallback document. Do not blanket-cache documents — session-dependent HTML in a shared cache is how one user sees another's page.
 - `borgo export` output is plain static files — a service worker works there too, but `precache.json` still lists only build assets, not exported pages.
+- A service worker outlives your deploys. Ship one only if you are prepared to debug it: an app that is wrong for one user, forever, because of a cached worker, is a worse failure than a slow first paint. `registerServiceWorker()` refusing to run in dev is the first line of that defense.
