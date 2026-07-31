@@ -34,6 +34,9 @@ func gzipMiddleware(next http.Handler) http.Handler {
 		gw := &gzipResponseWriter{rw: w}
 		defer gw.finish()
 		next.ServeHTTP(gw, r)
+		// reached only when the handler returned on its own: a panic unwinds
+		// past this line and finish must not ship half a response
+		gw.complete = true
 	})
 }
 
@@ -71,6 +74,7 @@ type gzipResponseWriter struct {
 	buf         []byte
 	gz          *gzip.Writer
 	passthrough bool
+	complete    bool
 }
 
 func (g *gzipResponseWriter) Header() http.Header { return g.rw.Header() }
@@ -180,10 +184,13 @@ func (g *gzipResponseWriter) finish() {
 	if g.passthrough {
 		return
 	}
-	if g.status == 0 {
-		// the handler wrote nothing - it panicked, or means an empty 200.
-		// Leaving the response uncommitted lets net/http (or the recovery
-		// above) decide, instead of nailing it to 200 here
+	if g.status == 0 || !g.complete {
+		// nothing is on the wire yet: either the handler wrote nothing - an
+		// empty 200, or a panic before the first byte - or it panicked with a
+		// half-written body still in the buffer. Committing that half would
+		// send a truncated 200 under a Content-Length that no longer matches;
+		// leaving the response uncommitted lets the recovery answer 500
+		// (net/http still writes an empty 200 if nobody else does)
 		return
 	}
 	g.rw.WriteHeader(g.status)

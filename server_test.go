@@ -13,6 +13,7 @@ import (
 	"net/http/httptrace"
 	"net/textproto"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -212,6 +213,14 @@ func TestPanicAfterEarlyHintsIsStillA500(t *testing.T) {
 	}
 }
 
+// every browser sends Accept-Encoding: gzip, so the response buffer is in the
+// path of a real request
+func gzipRequest() *http.Request {
+	r := httptest.NewRequest(http.MethodGet, "/api/x", nil)
+	r.Header.Set("Accept-Encoding", "gzip")
+	return r
+}
+
 func TestRecoverMiddleware(t *testing.T) {
 	log.SetOutput(io.Discard)
 	defer log.SetOutput(os.Stderr)
@@ -234,19 +243,41 @@ func TestRecoverMiddleware(t *testing.T) {
 		}
 	})
 
-	t.Run("a panic after the response started leaves the body alone", func(t *testing.T) {
+	t.Run("a panic mid-body is a 500, not a truncated 200", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		recoverMiddleware(gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			WriteJSON(w, http.StatusOK, map[string]string{"half": "written"})
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Length", "2000")
+			w.Write([]byte(`{"items":[1,2,3`))
+			panic("mid body")
+		}))).ServeHTTP(rec, gzipRequest())
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500", rec.Code)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("body = %q, want a whole json error (%v)", rec.Body, err)
+		}
+		// a Content-Length left over from the abandoned body would make
+		// net/http cut the connection on a response that is now well formed
+		if got, want := rec.Header().Get("Content-Length"), strconv.Itoa(rec.Body.Len()); got != want {
+			t.Errorf("Content-Length = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("a panic past the buffer leaves the committed bytes alone", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		recoverMiddleware(gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(strings.Repeat("x", 2*gzipMinBytes)))
 			panic("late")
-		}))).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/x", nil))
+		}))).ServeHTTP(rec, gzipRequest())
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want the committed 200", rec.Code)
 		}
-		var body map[string]string
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("body corrupted by the recovery: %q (%v)", rec.Body, err)
+		if rec.Body.Len() == 0 {
+			t.Error("the committed body vanished")
 		}
 	})
 

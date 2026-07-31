@@ -156,8 +156,11 @@ func BindError(w http.ResponseWriter, err error) {
 
 // recoverMiddleware answers a panicking handler with a 500 instead of letting
 // net/http drop the connection, which reaches the browser as an opaque network
-// error. A handler that already started writing only gets the log line: its
-// bytes are on the wire and appending to them would corrupt the response.
+// error. Nothing has reached the wire while the response is still buffered, so
+// a handler that panicked half way through a small body gets the 500 too,
+// rather than a truncated 200. Once bytes are committed - a streamed or
+// compressed response past the buffer - the panic is only logged: appending to
+// them would corrupt the response.
 func recoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw := &recoverWriter{ResponseWriter: w}
