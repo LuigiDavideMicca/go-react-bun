@@ -218,6 +218,22 @@ export async function generateManifest(dev = false) {
 export type Asset = { path: string; kind: "entry-point" | "chunk" | string; size: number };
 export type BuildResult = { assets: Asset[]; chunkMap: Record<string, string> };
 
+// the cache key a service worker hangs its precache on, so it must move
+// whenever any listed byte does. names alone are not enough: chunks are
+// content-hashed but the entry points (client.js, islands-client.js) and
+// style.css keep stable names, and a change confined to one of them - a layout
+// edit lands in client.js - would leave the stamp, and every cache keyed on
+// it, pinned to yesterday's bundle
+export async function precacheStamp(dir: string, files: string[]): Promise<string> {
+  let payload = "";
+  for (const file of files) {
+    const path = `${dir}/${file.replace(/^\/assets\//, "")}`;
+    const bytes = await Bun.file(path).arrayBuffer();
+    payload += `${file}:${Bun.hash(bytes)}|`;
+  }
+  return String(Bun.hash(payload));
+}
+
 export async function compileCss(dev = false) {
   if (process.env.BORGO_TAILWIND === "1") {
     if (!existsSync("style.css")) {
@@ -274,20 +290,17 @@ export async function buildAssets(dev = false): Promise<BuildResult> {
   const assets = result.outputs.map((o) => ({ path: o.path, kind: o.kind, size: o.size }));
 
   // prod only: the hashed asset list a service worker can precache; the
-  // stamp changes whenever any listed content does (chunk names are
-  // content-hashed, style.css is not, so its bytes join the stamp)
+  // stamp changes whenever any listed content does
   if (!dev) {
     const files = result.outputs
       .filter((o) => o.path.endsWith(".js"))
       .map((o) => "/assets/" + o.path.replaceAll("\\", "/").split("/").pop());
-    let styleHash = "";
-    if (existsSync(`${outDir}/style.css`)) {
-      files.push("/assets/style.css");
-      styleHash = String(Bun.hash(await Bun.file(`${outDir}/style.css`).arrayBuffer()));
-    }
+    if (existsSync(`${outDir}/style.css`)) files.push("/assets/style.css");
     files.sort();
-    const stamp = String(Bun.hash(files.join("|") + styleHash));
-    await Bun.write(`${outDir}/precache.json`, JSON.stringify({ stamp, assets: files }));
+    await Bun.write(
+      `${outDir}/precache.json`,
+      JSON.stringify({ stamp: await precacheStamp(outDir, files), assets: files }),
+    );
   }
 
   // prod only: emit .gz/.br siblings once here instead of compressing on
