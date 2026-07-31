@@ -24,7 +24,50 @@ func Ticker(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-`borgo.NewSSEHub()` adds broadcast — `hub.Publish(event, data)` from anywhere, `hub.ServeHTTP` as the route handler. The front server proxies streams without buffering, so an `EventSource` in the browser just works. All stdlib. See the tasks example: create a task in one tab, watch it appear in another.
+`borgo.NewSSEHub()` adds broadcast — `hub.Publish(event, data)` from anywhere, `hub.ServeHTTP` as the route handler:
+
+```go
+var events = borgo.NewSSEHub()
+
+//borgo:route GET /api/events
+func Events(w http.ResponseWriter, r *http.Request) {
+	events.ServeHTTP(w, r)
+}
+
+//borgo:route POST /api/tasks
+func CreateTask(w http.ResponseWriter, r *http.Request) {
+	body, err := borgo.Bind[TaskCreate](r)
+	if err != nil {
+		borgo.BindError(w, err)
+		return
+	}
+	task := Task{Title: body.Title}
+	events.Publish("task-created", task)
+	borgo.JSON(w, http.StatusCreated, TaskItem{Task: task})
+}
+```
+
+And in the page:
+
+```tsx
+import { useEffect, useState } from "react";
+import type { Task } from "../.borgo/api-types";
+
+export default function Tasks({ tasks: initial }: { tasks: Task[] }) {
+  const [tasks, setTasks] = useState(initial);
+  useEffect(() => {
+    const source = new EventSource("/api/events");
+    const refresh = async () => setTasks((await (await fetch("/api/tasks")).json()).tasks);
+    source.addEventListener("task-created", refresh);
+    return () => source.close();
+  }, []);
+  return <ul>{tasks.map((t) => <li key={t.ID}>{t.title}</li>)}</ul>;
+}
+```
+
+Create a task in one tab, watch it appear in the other. The front server proxies streams without buffering, so a plain `EventSource` works with no client library, and the whole thing is standard library on the Go side.
+
+A publish never blocks on a slow subscriber, and a subscriber that disappears without closing its connection — a laptop lid, a dropped mobile connection — is reaped rather than holding a goroutine and a file descriptor forever: writes carry a rolling deadline, so a stream nobody is reading eventually errors out and unsubscribes itself.
 
 ## WebSocket topics
 
@@ -65,6 +108,14 @@ Topics with no declared events keep the untyped `(event: string, data: unknown)`
 Go itself stays stdlib-only — the WebSocket termination lives where Bun already provides it natively. Choose SSE for one-way server→browser feeds; choose WebSocket topics for anything browsers also write to. The `/live` page in `examples/tasks` demos both directions: two-tab chat plus Go pushes.
 
 The relay itself stays dumb by design: the front server forwards `{event, data}` between subscribers and Go; per-message business logic belongs in Go routes.
+
+## Honest limits
+
+- **The relay is not a message broker.** There is no durability, no replay, no delivery guarantee and no ordering guarantee across topics. A subscriber that was offline missed what happened. If a client must not miss an event, give it a way to re-fetch state on reconnect — which is what the SSE example above does by refetching rather than applying a delta.
+- **Nothing is authorized per topic.** Any browser that can open the socket can subscribe to any topic name, so treat topic names as public and never put a secret in one. Scope by unguessable id, and keep anything sensitive behind an authenticated API route.
+- **Limits are enforced**: 32 topics per client, 128 characters per topic name, 1 MB per message, and a same-origin check on the upgrade. See [security](security.md#realtime-surface).
+- **Reconnection is exponential and capped** at 30 seconds. After a long outage a client can be up to half a minute behind before it even tries; a page that must feel live should refetch on reconnect rather than trusting the gap was empty.
+- **SSE holds a connection per subscriber.** That is cheap in Go, but it is not free at the proxy in front of you: make sure it does not buffer, and does not cut idle connections shorter than your ping interval. [`borgo deploy init nginx`](deploy.md#borgo-deploy-init) writes a config that gets both right.
 
 ## Streams and server timeouts
 
