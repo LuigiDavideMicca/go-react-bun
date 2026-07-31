@@ -19,6 +19,13 @@ func TestCacheHeaders(t *testing.T) {
 			"public, max-age=60, stale-while-revalidate=600",
 		},
 		{"no cache", func(w *httptest.ResponseRecorder) { NoCache(w) }, "no-store"},
+		{"negative age", func(w *httptest.ResponseRecorder) { Cache(w, -time.Hour) }, "public, max-age=0"},
+		{
+			// over 2^31-1 seconds: must stay exact on 32-bit platforms too
+			"a century",
+			func(w *httptest.ResponseRecorder) { Cache(w, 100*365*24*time.Hour) },
+			"public, max-age=3153600000",
+		},
 	}
 
 	for _, c := range cases {

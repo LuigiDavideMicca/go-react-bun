@@ -23,11 +23,15 @@ func Cache(w http.ResponseWriter, maxAge time.Duration, staleWhileRevalidate ...
 	w.Header().Set("Cache-Control", value)
 }
 
-func clampSeconds(d time.Duration) int {
+// clampSeconds converts a duration to whole seconds without going through a
+// platform-sized int: on 32-bit, int(d.Seconds()) of a >68-year duration
+// overflows into an implementation-defined value (typically negative), turning
+// the header into garbage. int64 holds any duration's seconds exactly.
+func clampSeconds(d time.Duration) int64 {
 	if d < 0 {
 		return 0
 	}
-	return int(d.Seconds())
+	return int64(d / time.Second)
 }
 
 // NoCache marks the response as never cacheable - right for anything
