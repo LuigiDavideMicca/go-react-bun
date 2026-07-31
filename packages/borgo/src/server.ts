@@ -415,7 +415,9 @@ export async function serve({ dev = false } = {}) {
     }
 
     // decode before serving so files with spaces or unicode names resolve;
-    // reject traversal and separator tricks on the decoded form. get/head
+    // reject traversal and separator tricks on the decoded form - on windows
+    // also ntfs alternate streams (file.css::$DATA) and reserved characters,
+    // which alias a file under names the path checks never saw. get/head
     // only: a public/ file must not shadow a page action's post
     if (req.method === "GET" || req.method === "HEAD") {
       const assetPath = safeDecode(url.pathname);
@@ -423,7 +425,8 @@ export async function serve({ dev = false } = {}) {
         assetPath !== "/" &&
         !assetPath.includes("..") &&
         !assetPath.includes("\\") &&
-        !assetPath.includes("\0")
+        !assetPath.includes("\0") &&
+        (process.platform !== "win32" || !/[:*?"<>|]/.test(assetPath))
       ) {
         const indexed = assetIndex.get(assetPath);
         if (indexed) return serveIndexed(req, indexed);
@@ -520,7 +523,7 @@ export async function serve({ dev = false } = {}) {
       }
       if (wantsJson && target) {
         // a post to a page without an action: tell the runtime to go native
-        return actionJson({ unsupported: true }, { status: 405 });
+        return actionJson({ unsupported: true }, { status: 405, headers: { Allow: "GET, HEAD" } });
       }
     }
 
