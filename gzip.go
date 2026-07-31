@@ -45,7 +45,8 @@ func acceptsGzip(acceptEncoding string) bool {
 	for _, part := range strings.Split(acceptEncoding, ",") {
 		params := strings.Split(part, ";")
 		name := strings.TrimSpace(params[0])
-		if name != "gzip" && name != "*" {
+		// coding names are case-insensitive (RFC 9110): "GZIP" must compress too
+		if !strings.EqualFold(name, "gzip") && name != "*" {
 			continue
 		}
 		refused := false

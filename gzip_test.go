@@ -25,6 +25,9 @@ func TestAcceptsGzip(t *testing.T) {
 		{"gzip;q=0.0", false},
 		{"gzip; q=0.00", false},
 		{"gzip;q=0.5", true},
+		// coding names are case-insensitive
+		{"GZIP", true},
+		{"Gzip;q=0", false},
 		{"*;q=0", false},
 		{"br", false},
 		{"*", true},
