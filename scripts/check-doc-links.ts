@@ -179,6 +179,7 @@ const GO_DOMAIN: Record<string, string> = {
   TaskCreate: "type TaskCreate struct {\n\tTitle string `json:\"title\"`\n\tBody  string `json:\"body\"`\n}",
   User: "type User struct {\n\tUsername string `json:\"username\"`\n\tHash     string `json:\"-\"`\n}",
   Me: "type Me struct {\n\tUsername string `json:\"username\"`\n}",
+  TaskItem: "type TaskItem struct {\n\tTask Task `json:\"task\"`\n}",
 };
 
 // the app-side pieces docs legitimately elide - a store, a handler, the data
