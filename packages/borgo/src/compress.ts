@@ -167,6 +167,7 @@ export function documentStream(
 ): ReadableStream<Uint8Array> {
   const iterator = chunks[Symbol.asyncIterator]();
   let tailSent = false;
+  let cancelled = false;
   return new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(encoder.encode(head));
@@ -181,11 +182,15 @@ export function documentStream(
         }
         controller.close();
       } catch (error) {
+        // a cancelled consumer (head request, client gone) rejects the pump
+        // by design: only a failure on a live stream is worth a log line
+        if (cancelled) return;
         console.error("stream pump failed:", error);
         controller.error(error);
       }
     },
     cancel() {
+      cancelled = true;
       void iterator.return?.().catch(() => {});
     },
   });

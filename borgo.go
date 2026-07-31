@@ -310,7 +310,33 @@ func Serve() {
 		// shutdown that is taking too long
 		stop()
 		shutdown(srv, grace)
+	case <-watchParent():
+		// on windows a force-killed supervisor delivers no signal: without
+		// this the api outlives borgo dev/start, holding the port and the
+		// binary until someone finds it in the task manager
+		log.Print("borgo: parent process exited; shutting down")
+		stop()
+		shutdown(srv, grace)
 	}
+}
+
+// watchParent returns a channel that closes when the process named by
+// BORGO_PARENT_PID exits; without the env it returns nil (blocks forever).
+func watchParent() <-chan struct{} {
+	v := os.Getenv("BORGO_PARENT_PID")
+	if v == "" {
+		return nil
+	}
+	pid, err := strconv.Atoi(v)
+	if err != nil || pid <= 0 {
+		return nil
+	}
+	ch := make(chan struct{})
+	go func() {
+		waitParentExit(pid)
+		close(ch)
+	}()
+	return ch
 }
 
 // shutdown stops accepting and lets in-flight requests finish. Event streams

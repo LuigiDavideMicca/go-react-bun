@@ -67,7 +67,13 @@ switch (command) {
         process.exit(1);
       }
 
-      const apiProc = Bun.spawn([bin], { stdout: "inherit", stderr: "inherit" });
+      // the api watches this pid and exits with it, so a force-killed start
+      // (no signal on windows) cannot leave an orphan on the port
+      const apiProc = Bun.spawn([bin], {
+        stdout: "inherit",
+        stderr: "inherit",
+        env: { ...process.env, BORGO_PARENT_PID: String(process.pid) },
+      });
       // an intentional stop must exit 0, or a supervisor restart-loops; the
       // flag also wins the race when the signal reaches the child first
       let stopping = false;

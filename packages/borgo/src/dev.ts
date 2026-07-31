@@ -11,6 +11,20 @@ const serverEntry = fileURLToPath(new URL("serve-entry.ts", import.meta.url));
 const ignored = /(^|[\\/])(node_modules|\.git)([\\/]|$)|^(\.borgo|public|dist)([\\/]|$)|borgo\.gen\.go$/;
 
 export async function dev() {
+  // die with the launcher: a force-killed parent (terminal, task runner, test
+  // harness) delivers no signal on windows, and an orphaned watcher would
+  // keep the front server and the api alive on their ports forever
+  const ppid = process.ppid;
+  if (ppid > 1) {
+    setInterval(() => {
+      try {
+        process.kill(ppid, 0);
+      } catch {
+        process.exit(0);
+      }
+    }, 2_000);
+  }
+
   const goBin = `.borgo/${goBinName()}`;
   const goNext = `.borgo/next-${goBinName()}`;
   const frontPort = process.env.PORT || "3000";
@@ -88,7 +102,13 @@ export async function dev() {
     const proc = Bun.spawn([goBin], {
       stdout: "inherit",
       stderr: "inherit",
-      env: reload ? { ...process.env, BORGO_RELOAD: "1" } : process.env,
+      env: {
+        ...process.env,
+        ...(reload ? { BORGO_RELOAD: "1" } : {}),
+        // the api watches this pid and exits when the watcher dies, so a
+        // force-killed session cannot leave a stale process on the binary
+        BORGO_PARENT_PID: String(process.pid),
+      },
     });
     goProc = proc;
     const ready = await apiReady(proc);
@@ -111,6 +131,7 @@ export async function dev() {
         DEV: "1",
         ...(reload ? { BORGO_RELOAD: "1" } : {}),
         ...(changed ? { BORGO_CHANGED: changed } : {}),
+        BORGO_PARENT_PID: String(process.pid),
       },
     });
     frontProc = proc;

@@ -1,5 +1,18 @@
 import { serve } from "./server";
 
+// die with the watcher: a force-killed dev session delivers no signal on
+// windows, and an orphaned front server would hold the port forever
+const parentPid = Number(process.env.BORGO_PARENT_PID || 0);
+if (parentPid > 1) {
+  setInterval(() => {
+    try {
+      process.kill(parentPid, 0);
+    } catch {
+      process.exit(0);
+    }
+  }, 2_000);
+}
+
 try {
   await serve({ dev: !!process.env.DEV });
 } catch (error) {
