@@ -323,6 +323,27 @@ func TestTextMarshalersAreStrings(t *testing.T) {
 	}
 }
 
+// A MarshalText on the pointer receiver runs only where encoding/json holds an
+// addressable value, so one named type reaches the wire as a string in a slice
+// and as its underlying shape in a plain field - see the json.Marshal output
+// spelled out in testdata/textmarshal/api/text.go.
+func TestPointerReceiverTextMarshalerCoversBothShapes(t *testing.T) {
+	root := filepath.Join("testdata", "textmarshal")
+	if err := run(root); err != nil {
+		t.Fatal(err)
+	}
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	for _, want := range []string{
+		"export interface PtrText {\n  one: string | number;\n  many: Array<string | number>;\n" +
+			"  keyed: Record<string, number>;\n  deep: TierBox;\n}",
+		"export interface TierBox {\n  one: string | number;\n}",
+	} {
+		if !strings.Contains(types, want) {
+			t.Errorf("api-types.d.ts missing:\n%s\ngot:\n%s", want, types)
+		}
+	}
+}
+
 func TestByteSlicesAreBase64Strings(t *testing.T) {
 	root := filepath.Join("testdata", "bytes")
 	if err := run(root); err != nil {

@@ -4,5 +4,6 @@ package api
 import "github.com/LuigiDavideMicca/borgo"
 
 func init() {
+	borgo.Handle("GET /api/ptrtext", GetPtrText)
 	borgo.Handle("GET /api/resp", GetResp)
 }

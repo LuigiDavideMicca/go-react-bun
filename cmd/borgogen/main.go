@@ -841,36 +841,51 @@ func isErrorStatus(info *types.Info, expr ast.Expr) bool {
 	return ok && v >= 300
 }
 
-func hasCustomMarshal(t types.Type) bool { return hasMarshalMethod(t, "MarshalJSON") }
+// hasCustomMarshal reports whether t marshals through json.Marshaler in any
+// position. A marshaler declared on the pointer receiver only reaches some of
+// them (see textMarshalTS), but both answers are "unknown" here, so the
+// distinction does not change the emitted type.
+func hasCustomMarshal(t types.Type) bool { return hasMarshalMethod(t, "MarshalJSON", true) }
 
-// hasTextMarshal reports whether t implements encoding.TextMarshaler without
-// implementing json.Marshaler, which is how uuid.UUID, netip.Addr and hand
-// written enums reach the wire: encoding/json writes their MarshalText output
-// as a quoted string, whatever the Go type underneath is.
-func hasTextMarshal(t types.Type) bool {
-	return !hasCustomMarshal(t) && hasMarshalMethod(t, "MarshalText")
+// textMarshalTS types a value that reaches the wire through
+// encoding.TextMarshaler - how uuid.UUID, netip.Addr and hand written enums
+// become quoted strings whatever their Go shape is.
+//
+// encoding/json only calls a MarshalText declared on the pointer receiver when
+// the value it holds is addressable, and inside a json.Marshal(v any) most are
+// not: not v itself, not a struct field of it, not a map value - but a slice
+// element is, and so is anything behind a pointer. One named type can reach
+// the wire both ways in a single response, so a pointer-only marshaler has no
+// single shape to report and the type is the union of the two.
+func (g *tsGen) textMarshalTS(t types.Type) (string, bool) {
+	if hasCustomMarshal(t) || !hasMarshalMethod(t, "MarshalText", true) {
+		return "", false
+	}
+	if hasMarshalMethod(t, "MarshalText", false) {
+		return "string", true
+	}
+	if raw := g.tsType(t.Underlying()); raw != "string" {
+		return "string | " + raw, true
+	}
+	return "string", true
 }
 
 // hasMarshalMethod looks for a method with the exact func() ([]byte, error)
 // shape, so a struct field that merely happens to be named MarshalJSON does
-// not read as a marshaler.
-func hasMarshalMethod(t types.Type, name string) bool {
-	for _, T := range []types.Type{t, types.NewPointer(t)} {
-		obj, _, _ := types.LookupFieldOrMethod(T, true, nil, name)
-		fn, ok := obj.(*types.Func)
-		if !ok {
-			continue
-		}
-		sig, ok := fn.Type().(*types.Signature)
-		if !ok || sig.Params().Len() != 0 || sig.Results().Len() != 2 {
-			continue
-		}
-		if sig.Results().At(0).Type().String() == "[]byte" &&
-			sig.Results().At(1).Type().String() == "error" {
-			return true
-		}
+// not read as a marshaler. addressable widens the lookup to the method set of
+// *t, which is the one encoding/json uses for an addressable value.
+func hasMarshalMethod(t types.Type, name string, addressable bool) bool {
+	obj, _, _ := types.LookupFieldOrMethod(t, addressable, nil, name)
+	fn, ok := obj.(*types.Func)
+	if !ok {
+		return false
 	}
-	return false
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok || sig.Params().Len() != 0 || sig.Results().Len() != 2 {
+		return false
+	}
+	return sig.Results().At(0).Type().String() == "[]byte" &&
+		sig.Results().At(1).Type().String() == "error"
 }
 
 func (g *tsGen) tsType(t types.Type) string {
@@ -886,8 +901,8 @@ func (g *tsGen) tsType(t types.Type) string {
 		if hasCustomMarshal(t) {
 			return "unknown"
 		}
-		if hasTextMarshal(t) {
-			return "string"
+		if ts, ok := g.textMarshalTS(t); ok {
+			return ts
 		}
 		if s, ok := t.Underlying().(*types.Struct); ok {
 			return g.interfaceFor(t, s)
@@ -921,8 +936,10 @@ func (g *tsGen) tsType(t types.Type) string {
 		if b, ok := t.Key().Underlying().(*types.Basic); ok && b.Info()&(types.IsString|types.IsNumeric) != 0 {
 			return "Record<string, " + g.tsType(t.Elem()) + ">"
 		}
-		if hasTextMarshal(t.Key()) {
-			// encoding/json keys the object by MarshalText output
+		if !hasCustomMarshal(t.Key()) && hasMarshalMethod(t.Key(), "MarshalText", false) {
+			// encoding/json keys the object by MarshalText output. A key is
+			// never addressable, so a MarshalText on the pointer receiver does
+			// not apply - encoding/json refuses to marshal the map at all
 			return "Record<string, " + g.tsType(t.Elem()) + ">"
 		}
 		return "unknown"

@@ -35,3 +35,29 @@ type Resp struct {
 func GetResp(w http.ResponseWriter, r *http.Request) {
 	borgo.JSON(w, http.StatusOK, Resp{})
 }
+
+// Tier's MarshalText is on the pointer receiver, so encoding/json calls it
+// only where the value it reaches is addressable. json.Marshal(PtrText{}) is
+//
+//	{"one":0,"many":["tier"],"keyed":{"0":0},"deep":{"one":0}}
+//
+// - the same Go type on the wire as a number and as a string in one response.
+type Tier int
+
+func (t *Tier) MarshalText() ([]byte, error) { return []byte("tier"), nil }
+
+type TierBox struct {
+	One Tier `json:"one"`
+}
+
+type PtrText struct {
+	One   Tier         `json:"one"`
+	Many  []Tier       `json:"many"`
+	Keyed map[Tier]int `json:"keyed"`
+	Deep  TierBox      `json:"deep"`
+}
+
+//borgo:route GET /api/ptrtext
+func GetPtrText(w http.ResponseWriter, r *http.Request) {
+	borgo.JSON(w, http.StatusOK, PtrText{})
+}
