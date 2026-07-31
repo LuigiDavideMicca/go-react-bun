@@ -4,6 +4,7 @@ import { redirect } from "../src/index";
 import { matchRoute, type PageModule, type Route } from "../src/router";
 import {
   carryHeaders,
+  createSecurity,
   freshCookieRequest,
   headResponse,
   runAction,
@@ -179,16 +180,42 @@ describe("runAction: which envelope a post gets", () => {
     expect(await res!.json()).toEqual({ redirect: "/done" });
   });
 
-  test("any content-type naming text/html is raw, parameters and prefixes included", async () => {
-    for (const type of ["text/html", "text/html;charset=utf-8", "Text/Html"]) {
+  test("any content-type naming text/html is raw, whatever case the action typed it in", async () => {
+    for (const type of ["text/html", "text/html;charset=utf-8", "Text/Html", "TEXT/HTML"]) {
       const res = await runAction(
         enhanced(),
         match({ action: async () => new Response("<p>x</p>", { headers: { "Content-Type": type } }) }),
         opts(),
       );
-      // the check is a substring on the raw value: uppercase does not match,
-      // and that is the behaviour the runtime is written against
-      expect(marker(res!)).toBe(type === "Text/Html" ? null : "raw");
+      expect(marker(res!)).toBe("raw");
+    }
+  });
+
+  test("a location at any status is a redirect to the enhanced path, and to it alone", async () => {
+    // recorded, not endorsed: 201 Created + Location is not a redirect, but
+    // the envelope reads any Location as one, so the two flows part ways -
+    // the native form stays put on a body the browser will not show. borgo's
+    // own redirect() is a 303, which both flows agree on.
+    const created = () => new Response(null, { status: 201, headers: { Location: "/tasks/5" } });
+    const enh = await runAction(enhanced(), match({ action: async () => created() }), opts());
+    expect(await enh!.json()).toEqual({ redirect: "/tasks/5" });
+    const cls = await runAction(post(), match({ action: async () => created() }), opts());
+    expect(cls!.status).toBe(201);
+    expect(cls!.headers.get("Location")).toBe("/tasks/5");
+  });
+
+  test("a custom document keeps the csp the security layer puts on documents", async () => {
+    // the action path is the only place a content-type borgo did not write
+    // reaches secure(): the /api proxy skips it, and the assets are typed
+    // from their own extension
+    const security = createSecurity(false, {})!;
+    for (const type of ["text/html; charset=utf-8", "TEXT/HTML; charset=utf-8", "IMAGE/SVG+XML"]) {
+      const res = await runAction(
+        enhanced(),
+        match({ action: async () => new Response("<p>x</p>", { headers: { "Content-Type": type } }) }),
+        opts(),
+      );
+      expect(security.apply(res!).headers.get("Content-Security-Policy")).toContain("default-src 'self'");
     }
   });
 });
@@ -825,6 +852,51 @@ describe("runPropsRequest", () => {
     expect(res.headers.get("Content-Encoding")).toBe("gzip");
     expect(res.headers.get("Vary")).toBe("Accept-Encoding");
     expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+});
+
+describe("a redirect chain across the two units", () => {
+  // a submit whose loader redirects, to a page whose loader redirects again:
+  // the client follows the first envelope with a props fetch, and must find
+  // the same shape there or the chain (and the hop cap guarding it) breaks
+  const shapeOf = async (res: Response) => ({
+    status: res.status,
+    marker: res.headers.get("X-Borgo"),
+    cache: res.headers.get("Cache-Control"),
+    location: res.headers.get("Location"),
+    body: await res.json(),
+  });
+
+  test("the action's redirect and the loader's redirect answer alike", async () => {
+    const fromAction = await runAction(
+      enhanced(),
+      match({ action: async () => ({ ok: 1 }) }),
+      opts({ runLoader: async () => redirect("/step-2") }),
+    );
+    const fromProps = await runPropsRequest(
+      new Request("http://app.test/step-2?__borgo=props"),
+      route(),
+      {},
+      { runLoader: async () => redirect("/step-3"), sendJson: (_r, v, i) => Response.json(v, i) },
+    );
+    const a = await shapeOf(fromAction!);
+    const b = await shapeOf(fromProps);
+    expect(a).toEqual({
+      status: 200,
+      marker: "action",
+      cache: "private, no-store",
+      location: null,
+      body: { redirect: "/step-2" },
+    });
+    // the props answer carries no marker - it was never an action - but is
+    // otherwise the same envelope the runtime already knows how to follow
+    expect(b).toEqual({
+      status: 200,
+      marker: null,
+      cache: "private, no-store",
+      location: null,
+      body: { redirect: "/step-3" },
+    });
   });
 });
 

@@ -91,7 +91,12 @@ export function createSecurity(
         if (!headers.has(name)) headers.set(name, value);
       }
       if (enabled && !headers.has("Content-Security-Policy")) {
-        const type = headers.get("Content-Type") ?? "";
+        // rfc 9110 §8.3.1: type and subtype are case-insensitive. every
+        // content-type borgo writes itself is already lowercase, but an
+        // action or a loader guard may hand back a response typed by
+        // whoever built it - and a document whose type reads TEXT/HTML is
+        // still a document the csp has to cover
+        const type = (headers.get("Content-Type") ?? "").toLowerCase();
         if (type.startsWith("text/html") || type.startsWith("image/svg+xml")) {
           headers.set("Content-Security-Policy", withoutNonce);
         }
@@ -650,7 +655,10 @@ export async function runAction(
         if (wantsJson && location) {
           return withCookies(carryHeaders(result, actionJson({ redirect: location })), apiCookies);
         }
-        if (wantsJson && (result.headers.get("content-type") ?? "").includes("text/html")) {
+        // case-insensitively, for the same reason the csp check is: the
+        // action owns this content-type, and a document the marker misses
+        // is a document the runtime reloads over instead of swapping in
+        if (wantsJson && (result.headers.get("content-type") ?? "").toLowerCase().includes("text/html")) {
           return withCookies(rawDocument(result), apiCookies);
         }
         return withCookies(result, apiCookies);
