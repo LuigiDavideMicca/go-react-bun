@@ -96,6 +96,7 @@ Run these through Bun (`bun run dev`) or directly (`bunx borgo dev`).
 | `borgo start` | runs from the build output, supervising both processes |
 | `borgo export` | prerenders exportable pages into `dist/site/` — see [static export](deploy.md#static-export) |
 | `borgo deploy init <target>` | writes a deploy config: `caddy`, `nginx`, `systemd` or `compose` — see [deploy](deploy.md#borgo-deploy-init) |
+| `borgo pwa init` | writes `public/manifest.webmanifest` and a working `public/sw.js` — see [PWA](pwa.md) |
 | `borgo doctor` | environment diagnosis, exit 1 on any failing check |
 
 Flags:

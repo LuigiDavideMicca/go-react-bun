@@ -163,7 +163,7 @@ docs/                   getting started, then deep dives: pages, typed bridge, c
                         auth, security, dev experience, pwa, deploy, faq
 ```
 
-Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo build` (client assets in `public/assets/`, Go binary in `dist/`), `borgo start` (run from build output, supervising both processes; `--front-only` for split deployments with `API_URL`), `borgo export` (static site in `dist/site/`), `borgo deploy init <caddy|nginx|systemd|compose>` (deploy configs), `borgo doctor` (environment diagnosis). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
+Commands (in an app): `borgo dev` (both servers, watch, fast refresh), `borgo build` (client assets in `public/assets/`, Go binary in `dist/`), `borgo start` (run from build output, supervising both processes; `--front-only` for split deployments with `API_URL`), `borgo export` (static site in `dist/site/`), `borgo deploy init <caddy|nginx|systemd|compose>` (deploy configs), `borgo pwa init` (manifest and service worker), `borgo doctor` (environment diagnosis). Ports via `PORT` (front, 3000) and `API_PORT` (Go, 3501).
 
 ### Deploying
 

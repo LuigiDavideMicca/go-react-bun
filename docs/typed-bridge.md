@@ -15,7 +15,33 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-Prefer explicitness? `borgo.Handle("GET /api/tasks", ListTasks)` in an `init()` works identically and feeds the same types. `main.go` stays five lines: import your `api` package, call `borgo.Serve()`. The Go side imposes no database and has zero dependencies — bring GORM, sqlc, `database/sql`, or nothing.
+Prefer explicitness? `borgo.Handle("GET /api/tasks", ListTasks)` in an `init()` works identically and feeds the same types. `main.go` stays five lines: import your `api` package, call `borgo.Serve()`.
+
+## It is a normal Go module
+
+This is worth stating plainly, because the framework's own zero-dependency rule sometimes reads as a restriction on *your* code. It is not. Your `api/` package is ordinary Go: `go get` whatever you want and use it.
+
+```bash
+go get gorm.io/gorm
+go get github.com/jackc/pgx/v5
+go get modernc.org/sqlite
+```
+
+```go
+//borgo:route GET /api/tasks/recent
+func RecentTasks(w http.ResponseWriter, r *http.Request) {
+	tasks := []Task{}
+	if err := db.Order("created_at desc").Find(&tasks).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	borgo.JSON(w, http.StatusOK, TaskList{Tasks: tasks})
+}
+```
+
+The bridge does not care where your data came from — it reads the type you hand to `borgo.JSON`, so a route backed by GORM, `database/sql`, an HTTP call to another service or a hard-coded slice all type identically. `examples/tasks` in this repository uses GORM with SQLite; the `full` template uses in-memory maps so it has no dependencies to install.
+
+What has zero dependencies is the **framework**: `github.com/LuigiDavideMicca/borgo` pulls in nothing but the standard library, so the only third-party code in your binary is the code you chose. Types from a dependency reach TypeScript like any other — `time.Time` becomes a string, a type with `MarshalText` becomes a string, and anything with a custom `MarshalJSON` maps to `unknown` until you point a [`//borgo:type` override](#type-overrides) at it, which is exactly what the GORM example does for `gorm.DeletedAt`.
 
 A malformed directive fails the generator *before* it writes anything, so a typo can never leave behind a half-generated `borgo.gen.go` that keeps breaking the build after you fix it. Registering the same pattern twice, or registering after `borgo.Serve()` has snapshotted the table, panics with a message naming the file and line.
 

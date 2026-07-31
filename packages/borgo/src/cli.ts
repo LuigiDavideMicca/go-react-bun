@@ -115,6 +115,16 @@ switch (command) {
     process.exit(await doctor());
   }
 
+  case "pwa": {
+    const { pwaInit } = await import("./pwa");
+    const [sub] = process.argv.slice(3).filter((a) => !a.startsWith("--"));
+    if (sub !== "init") {
+      console.log(`\n  ${banner("pwa")}\n\n  usage: borgo pwa init [--force]\n`);
+      process.exit(1);
+    }
+    process.exit(pwaInit(process.argv.includes("--force")));
+  }
+
   case "deploy": {
     const { deployInit } = await import("./deploy");
     const [sub, target] = process.argv.slice(3).filter((a) => !a.startsWith("--"));
@@ -126,7 +136,7 @@ switch (command) {
   }
 
   default: {
-    console.log(`\n  ${banner()}\n\n  usage: borgo <dev|build|start|export|deploy|doctor>\n`);
+    console.log(`\n  ${banner()}\n\n  usage: borgo <dev|build|start|export|deploy|pwa|doctor>\n`);
     // the banner answers --help and --version, which must not exit 1
     process.exit(!command || /^(-h|--help|-v|--version)$/.test(command) ? 0 : 1);
   }

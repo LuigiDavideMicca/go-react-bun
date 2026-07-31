@@ -186,6 +186,10 @@ const GO_DOMAIN: Record<string, string> = {
 // itself. stubbed so an example that names one still compiles
 const GO_STUBS = `var tasks []Task
 
+var db = struct {
+	Order func(string) *struct{ Find func(any) *struct{ Error error } }
+}{}
+
 func lookupUser(ctx context.Context, username string) (User, string, error) { return User{}, "", nil }
 
 func createUser(ctx context.Context, username, hash string) (User, error) { return User{}, nil }

@@ -1,84 +1,75 @@
 # PWA
 
-What borgo provides to ship a progressive web app — a manifest, a root-scope service worker, a precache list and a guarded registration helper — and what it deliberately leaves to you (the caching strategy).
+Making a borgo app installable and able to serve its own assets offline. One command writes the files, two one-line edits wire them up, and the rest of this page explains what you got so you can change it.
 
-## The manifest
+## Set it up
 
-Put `manifest.webmanifest` in `public/` and link it from `index.html`:
+```bash
+bunx borgo pwa init
+```
+
+That writes two files into `public/`:
+
+- **`manifest.webmanifest`** — the install metadata: your app's name, colors taken from borgo's palette, `display: standalone`, and icon entries. Edit the names and colors; they are yours.
+- **`sw.js`** — a working service worker, described below.
+
+Then the two lines the command prints. In `index.html`, inside `<head>`:
 
 ```html
 <link rel="manifest" href="/manifest.webmanifest" />
 ```
 
-It is served with the correct `application/manifest+json` content type, like every static file in `public/`.
+And in a page or layout that hydrates:
 
-## The service worker
+```tsx
+import { useEffect } from "react";
+import { registerServiceWorker } from "borgo-framework";
 
-Put `sw.js` in `public/`. It is served from `/sw.js` — the site root, so its scope covers the whole app — with `Cache-Control: no-cache`, so browsers re-check it on every deploy instead of letting an old worker linger.
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  useEffect(() => registerServiceWorker(), []);
+  return <div className="app">{children}</div>;
+}
+```
 
-## The precache list
+The manifest references `/icon-192.png` and `/icon-512.png`, which you supply — a browser will install the app without them, but it will not look like yours.
 
-`borgo build` writes `public/assets/precache.json`:
+## What the generated worker does
+
+It caches **build output only**: the JavaScript chunks and stylesheet that `borgo build` produced, listed in `/assets/precache.json` together with a `stamp`:
 
 ```json
 { "stamp": "8713…", "assets": ["/assets/client.js", "/assets/style.css", "…"] }
 ```
 
-`assets` lists every built JavaScript chunk and the stylesheet; `stamp` changes whenever any of that content does. A minimal cache-first worker built on it:
+The stamp is a hash of that content, so it changes exactly when the build output changes — and *does not* change when a rebuild produces identical bytes. The worker uses it as its cache name, which gives you the two behaviors you want for free: a deploy invalidates the cache, and a no-op rebuild leaves a warm cache alone.
+
+On install it fills `app-<stamp>`; on activate it deletes every other `app-*` cache and claims open tabs; on fetch it answers same-origin `/assets/` requests from the cache, falling through to the network for everything else.
+
+`sw.js` is served from the site root with `Cache-Control: no-cache`, so a browser re-checks it on every deploy rather than running last week's worker.
+
+## What it deliberately does not cache
+
+**Documents.** Server-rendered pages are dynamic and session-dependent, and they ship `Cache-Control: private, no-store`. A blanket document cache in a service worker is how one user ends up looking at another user's page. If you want an offline experience, cache a dedicated offline page and serve *that* on a failed navigation, rather than caching real pages:
 
 ```js
-// public/sw.js
-self.addEventListener("install", (e) => {
-  e.waitUntil(
-    fetch("/assets/precache.json")
-      .then((r) => r.json())
-      .then(({ stamp, assets }) =>
-        caches.open(`app-${stamp}`).then((c) => c.addAll(assets)),
-      ),
-  );
-  self.skipWaiting();
-});
-
-self.addEventListener("activate", (e) => {
-  // drop caches from older stamps, keeping the one this worker just filled
-  e.waitUntil(
-    fetch("/assets/precache.json")
-      .then((r) => r.json())
-      .then(({ stamp }) =>
-        caches.keys().then((keys) =>
-          Promise.all(
-            keys
-              .filter((k) => k.startsWith("app-") && k !== `app-${stamp}`)
-              .map((k) => caches.delete(k)),
-          ),
-        ),
-      )
-      .then(() => self.clients.claim()),
-  );
-});
-
-self.addEventListener("fetch", (e) => {
-  if (e.request.method !== "GET" || !new URL(e.request.url).pathname.startsWith("/assets/")) return;
-  e.respondWith(caches.match(e.request).then((hit) => hit ?? fetch(e.request)));
-});
+// in sw.js, added to the fetch handler
+if (event.request.mode === "navigate") {
+  event.respondWith(fetch(event.request).catch(() => caches.match("/offline.html")));
+}
 ```
 
-The strategy — what to precache beyond the build output, how to handle documents and `/api` calls offline — is yours. Mechanics, not policy.
+**`/api/` responses.** Same reasoning, plus mutations. Cache what your app decides is safe, explicitly, per route.
 
-## Registration
+**`precache.json` itself.** Caching it would pin the worker to an old stamp permanently — the one bug in this design that is genuinely hard to recover from, so the generated worker excludes it by path.
 
-```tsx no-check
-import { registerServiceWorker } from "borgo-framework";
+## Registration, and why it refuses in dev
 
-// anywhere client-side: a hydrated page, an island, the root layout
-registerServiceWorker(); // default path "/sw.js"
-```
+`registerServiceWorker(path = "/sw.js")` no-ops server-side, in browsers without support, and **in development**. That last one is deliberate: a caching worker attached to a dev server will serve you yesterday's chunks while you edit, and you will spend an afternoon convincing yourself that fast refresh is broken. Production builds register normally.
 
-The helper no-ops server-side, in browsers without service worker support, and — importantly — **in dev**: a caching worker attached to `borgo dev` would serve yesterday's chunks and make fast refresh look haunted. Production builds register normally.
+If you need to test the worker locally, run a production build: `bun run build && bun run start`.
 
 ## Caveats, honestly
 
-- The stamp changes when the *content* of any listed asset changes, which is what makes it usable as a cache key. It is not a version number: a rebuild that produces identical bytes produces the identical stamp, deliberately, so an unchanged deploy does not evict a warm cache.
-- SSR pages are dynamic responses (`Cache-Control: private, no-store`); if you want them offline, cache navigations explicitly in your worker with a fallback document. Do not blanket-cache documents — session-dependent HTML in a shared cache is how one user sees another's page.
-- `borgo export` output is plain static files — a service worker works there too, but `precache.json` still lists only build assets, not exported pages.
-- A service worker outlives your deploys. Ship one only if you are prepared to debug it: an app that is wrong for one user, forever, because of a cached worker, is a worse failure than a slow first paint. `registerServiceWorker()` refusing to run in dev is the first line of that defense.
+- A service worker outlives your deploys. Ship one only if you are prepared to debug it — an app that is wrong for one user, forever, because of a cached worker is a worse failure than a slow first paint. The dev guard is the first line of that defense; the stamp is the second.
+- `borgo export` output is plain static files, and a worker works there too — but `precache.json` lists build assets, not exported pages, so an offline-capable static site needs its asset list extended.
+- Nothing here makes your app work offline by itself. It makes the shell load instantly and survive a flaky connection. Real offline means deciding what your data layer does without a network, which is your app's design, not the framework's.
