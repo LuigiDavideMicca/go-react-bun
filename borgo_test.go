@@ -107,6 +107,24 @@ func TestHandleIsConcurrencySafe(t *testing.T) {
 	}
 }
 
+// a route registered after Serve snapshotted the registry would never be
+// mounted; a silent dead route is worse than a crash
+func TestHandleAfterServePanics(t *testing.T) {
+	routesMu.Lock()
+	served = true
+	routesMu.Unlock()
+	defer func() {
+		routesMu.Lock()
+		served = false
+		routesMu.Unlock()
+		msg, _ := recover().(string)
+		if !strings.Contains(msg, "after borgo.Serve") {
+			t.Fatalf("want panic naming the late registration, got %q", msg)
+		}
+	}()
+	Handle(uniquePattern("too-late"), func(http.ResponseWriter, *http.Request) {})
+}
+
 // a recovered panic must leave the registry usable for the next caller
 func TestHandleRecoversAndStaysUsable(t *testing.T) {
 	func() {

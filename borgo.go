@@ -28,8 +28,11 @@ import (
 var (
 	// generated init() functions register on one goroutine, but nothing stops
 	// an app from registering lazily: the lock keeps the map from tearing
-	routesMu  sync.Mutex
-	routes    = map[string]http.HandlerFunc{}
+	routesMu sync.Mutex
+	routes   = map[string]http.HandlerFunc{}
+	// Serve snapshots the registry into its mux once; a Handle call after that
+	// would silently register a route that is never mounted, so it panics
+	served    bool
 	patternRe = regexp.MustCompile(`^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /\S*$`)
 	// the mux is the authority on pattern syntax and conflicts (e.g.
 	// "GET /x/{id}" vs "GET /x/{slug}"): registering eagerly moves the
@@ -50,6 +53,9 @@ func Handle(pattern string, h http.HandlerFunc) {
 	// unlocking on the way out of a panic keeps the registry usable for a
 	// caller that recovers from a bad pattern
 	defer routesMu.Unlock()
+	if served {
+		panic(`borgo.Handle: pattern "` + pattern + `" registered after borgo.Serve: the route table is already mounted, so this route would never be served; register in init() or before calling Serve`)
+	}
 	if _, dup := routes[pattern]; dup {
 		panic(`borgo.Handle: pattern "` + pattern + `" registered twice; each route file must use a unique method + path`)
 	}
@@ -273,6 +279,7 @@ func Serve() {
 		patterns = append(patterns, pattern)
 	}
 	_, healthzTaken := routes["GET /healthz"]
+	served = true
 	routesMu.Unlock()
 	if !healthzTaken {
 		mux.HandleFunc("GET /healthz", healthz)
