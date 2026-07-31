@@ -80,6 +80,52 @@ func FuzzSSEFrame(f *testing.F) {
 	})
 }
 
+// FuzzAcceptsGzip throws arbitrary Accept-Encoding headers at the negotiator.
+// Three properties, all of them RFC 9110 12.5.3 rather than restatements of
+// the implementation: the optional whitespace a client may put around the list
+// separators is not semantic, and where the header does not name gzip at all,
+// appending an explicit entry for it settles the answer either way - which is
+// what makes "*" unable to override a refusal.
+func FuzzAcceptsGzip(f *testing.F) {
+	for _, seed := range []string{
+		"", "gzip", "GZIP", "*", "*;q=0", "gzip;q=0",
+		"gzip;q=0, *", "*, gzip;q=0", "identity, *;q=0", "*;q=0, gzip",
+		"deflate, gzip;q=0.5", "br;q=1, *;q=0", "gzip;q=", "gzip;q=abc",
+		"gzip ; q = 0", ",,,", "*;q=0.0001", "x-gzip",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, header string) {
+		got := acceptsGzip(header)
+
+		spaced := strings.ReplaceAll(header, ",", " , ")
+		if other := acceptsGzip(spaced); other != got {
+			t.Fatalf("whitespace changed the decision: %q=%v but %q=%v", header, got, spaced, other)
+		}
+
+		if namesGzip(header) {
+			return
+		}
+		if !acceptsGzip(header + ", gzip") {
+			t.Fatalf("an explicit gzip must be accepted: %q", header+", gzip")
+		}
+		if acceptsGzip(header + ", gzip;q=0") {
+			t.Fatalf("an explicit gzip;q=0 must be refused: %q", header+", gzip;q=0")
+		}
+	})
+}
+
+// namesGzip reports whether the header already carries a gzip entry, whose
+// quality would otherwise contradict the one the property appends.
+func namesGzip(header string) bool {
+	for _, part := range strings.Split(header, ",") {
+		if strings.EqualFold(strings.TrimSpace(strings.Split(part, ";")[0]), "gzip") {
+			return true
+		}
+	}
+	return false
+}
+
 // FuzzBindMax feeds arbitrary bodies and content types through the decoder;
 // it must error or decode, never panic, at any limit.
 func FuzzBindMax(f *testing.F) {
