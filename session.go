@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -87,7 +88,10 @@ func SetSession(w http.ResponseWriter, v any, maxAge time.Duration) error {
 	payload := base64.RawURLEncoding.EncodeToString(envelope)
 	cookie := newSessionCookie()
 	cookie.Value = payload + "." + sessionSign(payload)
-	cookie.MaxAge = int(maxAge.Seconds())
+	// int(maxAge.Seconds()) would overflow a 32-bit int for a >68-year age,
+	// and a negative MaxAge serializes as Max-Age=0: the browser would delete
+	// the session the moment it was issued
+	cookie.MaxAge = int(min(int64(maxAge/time.Second), math.MaxInt32))
 	if n := len(cookie.String()); n > sessionCookieMaxLen {
 		return fmt.Errorf("borgo: session cookie is %d bytes, over the %d-byte browser limit; store a smaller principal (see Auth.Principal)", n, sessionCookieMaxLen)
 	}

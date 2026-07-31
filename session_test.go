@@ -125,6 +125,18 @@ func TestSessionDuplicateCookies(t *testing.T) {
 	})
 }
 
+// a >68-year maxAge must not wrap a 32-bit cookie MaxAge into a deletion
+func TestSessionMaxAgeClamps(t *testing.T) {
+	t.Setenv("SESSION_SECRET", "test-secret")
+	cookie := setAndExtract(t, testSession{User: "luigi"}, 100*365*24*time.Hour)
+	if cookie.MaxAge <= 0 {
+		t.Fatalf("MaxAge = %d, want a positive clamped value", cookie.MaxAge)
+	}
+	if _, ok := GetSession[testSession](sessionRequest(cookie)); !ok {
+		t.Fatal("long-lived session must round trip")
+	}
+}
+
 func TestClearSession(t *testing.T) {
 	w := httptest.NewRecorder()
 	ClearSession(w)
