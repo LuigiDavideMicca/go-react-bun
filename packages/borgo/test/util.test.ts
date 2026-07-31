@@ -8,6 +8,7 @@ import {
   HOP_BY_HOP,
   forwardableHeaders,
   headHtml,
+  headResponse,
   PROXY_RETRY_MAX_BODY,
   scriptJson,
   shouldBufferBody,
@@ -375,5 +376,97 @@ describe("forwardableHeaders", () => {
     const req = new Headers({ connection: "keep-alive", cookie: "a=1" });
     forwardableHeaders(req);
     expect(req.get("connection")).toBe("keep-alive");
+  });
+});
+
+describe("headResponse", () => {
+  // what bun puts on the wire is the only judge here: a Response object holds
+  // no length of its own until it is served
+  const served = async (method: string, make: () => Response) => {
+    const server = Bun.serve({ port: 0, fetch: (req) => headResponse(req.method, make()) });
+    const res = await fetch(`http://localhost:${server.port}/`, { method, decompress: false } as RequestInit);
+    const bytes = (await res.arrayBuffer()).byteLength;
+    server.stop(true);
+    return { status: res.status, length: res.headers.get("content-length"), bytes, headers: res.headers };
+  };
+
+  const stream = (text: string) =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(text));
+          c.close();
+        },
+      }),
+      { headers: { "Content-Type": "text/html; charset=utf-8" } },
+    );
+
+  test("a get is handed back untouched", async () => {
+    const res = headResponse("GET", new Response("body"));
+    expect(await res.text()).toBe("body");
+  });
+
+  test("a head keeps the status and headers, and ships no bytes", async () => {
+    const head = await served("HEAD", () => new Response("not found", { status: 404, headers: { "X-Mark": "1" } }));
+    expect(head.status).toBe(404);
+    expect(head.bytes).toBe(0);
+    expect(head.headers.get("X-Mark")).toBe("1");
+  });
+
+  test("a measured length survives the head - that is the point of measuring it", async () => {
+    // the asset paths set this explicitly so a HEAD reports what a GET returns
+    const get = await served("GET", () => new Response("0123456789", { headers: { "Content-Length": "10" } }));
+    const head = await served("HEAD", () => new Response("0123456789", { headers: { "Content-Length": "10" } }));
+    expect(get.length).toBe("10");
+    expect(head.length).toBe("10");
+    expect(head.bytes).toBe(0);
+  });
+
+  test("an unmeasured length is omitted, never answered as zero", async () => {
+    // a null body would have bun frame the head as Content-Length: 0, and a
+    // client would read "this resource is empty" off a document that is not
+    for (const make of [
+      () => stream("<html>a long document</html>"),
+      () => Response.json({ status: "ok", uptime: 12.5 }),
+      () => new Response("method not allowed", { status: 405 }),
+    ]) {
+      const get = await served("GET", make);
+      const head = await served("HEAD", make);
+      expect(head.bytes).toBe(0);
+      expect(head.length).not.toBe("0");
+      expect(head.length).toBeNull();
+      expect(head.status).toBe(get.status);
+      expect(Number(get.length ?? get.bytes)).toBeGreaterThan(0);
+    }
+  });
+
+  test("the render behind a head is cancelled, not left pumping", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const res = headResponse(
+      "HEAD",
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(c) {
+            pulls++;
+            c.enqueue(new Uint8Array(8));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+      ),
+    );
+    await Bun.sleep(5);
+    expect(cancelled).toBe(true);
+    expect(pulls).toBeLessThanOrEqual(1);
+    expect(res.body).not.toBeNull();
+  });
+
+  test("a body-less response (204, 304) is passed straight through", async () => {
+    for (const status of [204, 304]) {
+      const res = new Response(null, { status, headers: { ETag: '"x"' } });
+      expect(headResponse("HEAD", res)).toBe(res);
+    }
   });
 });

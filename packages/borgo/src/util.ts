@@ -239,12 +239,34 @@ export function shouldBufferBody(method: string, contentLength: string | null): 
 // a head renders for real - status and headers must be what a get would have
 // said - and only the body is dropped. cancelled, too: without that the
 // ssr/gzip pipeline behind it keeps rendering into a stream nobody reads.
+//
+// a null body is itself a claim: bun frames one as Content-Length: 0. so every
+// response that never measured its own length - the streamed document,
+// /healthz, /metrics, a props payload, a plain text 404 - used to answer a head
+// by declaring itself empty, for a resource a get returns in full. that is the
+// same lie the asset paths set an explicit length to avoid, arriving from the
+// other side. a length that is known still rides (the assets state theirs, and
+// go states its own through the proxy); where none is, an already-closed
+// stream leaves bun framing the head as it framed the get. rfc 9110 §9.3.2
+// allows omitting a field "determined only while generating the content" -
+// it does not allow getting it wrong.
 export function headResponse(method: string, res: Response): Response {
   if (method !== "HEAD" || !res.body) return res;
-  const headless = new Response(null, { status: res.status, headers: res.headers });
+  const measured = res.headers.has("Content-Length");
+  const headless = new Response(measured ? null : emptyStream(), {
+    status: res.status,
+    headers: res.headers,
+  });
   void res.body.cancel().catch(() => {});
   return headless;
 }
+
+const emptyStream = () =>
+  new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.close();
+    },
+  });
 
 // the seam, narrowed to what the proxy actually asks of fetch: a target and
 // an init in, a response out. the global satisfies it and so does a stub.
