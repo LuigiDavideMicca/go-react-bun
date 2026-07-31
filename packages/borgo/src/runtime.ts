@@ -2,12 +2,12 @@
 // always comes from the app's own node_modules
 import type { createElement as CreateElement } from "react";
 import type { hydrateRoot as HydrateRoot, Root } from "react-dom/client";
-import { CSRF_COOKIE, CSRF_FIELD, cookieValue, withCsrf } from "./index";
+import { CSRF_FIELD, csrfCookieValue, withCsrf } from "./index";
 import { matchRoute, resolveHead, type Head, type LayoutModule, type PageModule } from "./router";
 
 // the double-submit cookie was set by the response that carried this page,
 // so the token hydrates to the same value the server rendered
-const csrfToken = () => cookieValue(document.cookie, CSRF_COOKIE);
+const csrfToken = () => csrfCookieValue(document.cookie);
 
 declare global {
   interface Window {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { makeApiClient } from "../src/api";
-import { CSRF_COOKIE, cookieValue, withCsrf } from "../src/index";
+import { CSRF_COOKIE, cookieValue, csrfCookieValue, withCsrf } from "../src/index";
 
 describe("cookieValue", () => {
   test("finds a cookie among several", () => {
@@ -19,6 +19,33 @@ describe("cookieValue", () => {
 
   test("value may contain =", () => {
     expect(cookieValue("s=a=b=c", "s")).toBe("a=b=c");
+  });
+});
+
+describe("csrfCookieValue", () => {
+  test("single cookie reads like cookieValue", () => {
+    expect(csrfCookieValue("a=1; borgo_csrf=tok3n; b=2")).toBe("tok3n");
+    expect(csrfCookieValue("")).toBe("");
+    expect(csrfCookieValue(null)).toBe("");
+    expect(csrfCookieValue("xborgo_csrf=nope")).toBe("");
+  });
+
+  test("two same-name cookies with different values are ambiguous: no token", () => {
+    expect(csrfCookieValue("borgo_csrf=aaa; borgo_csrf=bbb")).toBe("");
+  });
+
+  test("junk + valid is still ambiguous: the browser cannot verify either", () => {
+    expect(csrfCookieValue("borgo_csrf=!!junk!!; borgo_csrf=deadbeefcafe")).toBe("");
+    expect(csrfCookieValue("borgo_csrf=deadbeefcafe; borgo_csrf=!!junk!!")).toBe("");
+    expect(csrfCookieValue("borgo_csrf=; borgo_csrf=deadbeefcafe")).toBe("");
+  });
+
+  test("valid + valid with different values: no token, mirroring the go side", () => {
+    expect(csrfCookieValue("borgo_csrf=deadbeefcafe; other=1; borgo_csrf=beefdeadface")).toBe("");
+  });
+
+  test("identical duplicates are one token, not a conflict", () => {
+    expect(csrfCookieValue("borgo_csrf=tok; a=2; borgo_csrf=tok")).toBe("tok");
   });
 });
 

@@ -138,6 +138,22 @@ export function cookieValue(header: string | null, name: string): string {
   return "";
 }
 
+// duplicate borgo_csrf cookies (a stale Domain= copy shadowing the host-only
+// one) are ambiguous, and the browser cannot verify tokens to break the tie.
+// the go side treats ambiguous duplicates as no session; the csrf read agrees:
+// differing values mean no token, identical duplicates are still one token
+export function csrfCookieValue(header: string | null): string {
+  let value: string | null = null;
+  for (const part of (header ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1 || part.slice(0, eq).trim() !== CSRF_COOKIE) continue;
+    const found = part.slice(eq + 1).trim();
+    if (value !== null && value !== found) return "";
+    value = found;
+  }
+  return value ?? "";
+}
+
 type CsrfReact = {
   createElement: typeof CreateElement;
   createContext: typeof CreateContext;
