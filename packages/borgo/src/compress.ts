@@ -175,6 +175,72 @@ export function isRangeStale(req: Request, etag: string, lastModified: string): 
   return given !== etag && given !== lastModified;
 }
 
+// the indexed path: no stat, and an etag the browser can revalidate against
+export function serveIndexed(req: Request, info: AssetInfo): Response {
+  let variant = info.identity;
+  if (info.variants.length) {
+    const encoding = pickEncoding(req.headers.get("accept-encoding"), ["br", "gzip"]);
+    if (encoding) variant = info.variants.find((v) => v.encoding === encoding) ?? variant;
+  }
+  const headers = new Headers();
+  if (info.cacheControl) headers.set("Cache-Control", info.cacheControl);
+  if (info.compressible) headers.set("Vary", "Accept-Encoding");
+  headers.set("ETag", variant.etag);
+  headers.set("Last-Modified", info.lastModified);
+  if (isNotModified(req, variant.etag, info.mtimeMs)) {
+    return new Response(null, { status: 304, headers });
+  }
+  if (variant.encoding) {
+    headers.set("Content-Encoding", variant.encoding);
+    headers.set("Content-Type", info.type);
+  }
+  // a HEAD is answered from the headers alone, and dropping the body drops
+  // the length bun would have computed from the file: without this every
+  // HEAD claims Content-Length: 0 for a file a GET returns in full. bun
+  // recomputes it from the file on a GET (and on a range), so a stale index
+  // can only misreport the head, never mis-frame a body
+  headers.set("Content-Length", String(variant.size));
+  // bun turns a Range into a 206 off a Bun.file body, and never consults
+  // If-Range while doing it. a stream body is how the refusal is spelled:
+  // bun ranges files, not streams, so a validator that no longer matches
+  // gets the whole representation as a plain 200 - still off the disk,
+  // never through memory.
+  if (isRangeStale(req, variant.etag, info.lastModified)) {
+    return new Response(Bun.file(variant.path).stream(), { headers });
+  }
+  return new Response(Bun.file(variant.path), { headers });
+}
+
+// dev, and anything written into public/ after boot
+export async function serveAsset(
+  req: Request,
+  path: string,
+  asset: ReturnType<typeof Bun.file>,
+  { dev }: { dev: boolean },
+): Promise<Response> {
+  const headers: Record<string, string> = {};
+  const cacheControl = assetCacheControl(path);
+  if (cacheControl) headers["Cache-Control"] = cacheControl;
+  // same reason as in serveIndexed: a HEAD keeps the headers and loses the
+  // body bun would have measured
+  const served = (file: ReturnType<typeof Bun.file>) =>
+    new Response(file, { headers: { ...headers, "Content-Length": String(file.size) } });
+  if (!isCompressiblePath(path)) return served(asset);
+  headers["Vary"] = "Accept-Encoding";
+  if (!dev) {
+    const encoding = pickEncoding(req.headers.get("accept-encoding"), ["br", "gzip"]);
+    if (encoding) {
+      const sibling = Bun.file(`${path}.${encoding === "br" ? "br" : "gz"}`);
+      if (await sibling.exists()) {
+        headers["Content-Encoding"] = encoding;
+        headers["Content-Type"] = asset.type;
+        return served(sibling);
+      }
+    }
+  }
+  return served(asset);
+}
+
 const encoder = new TextEncoder();
 
 // the ssr document: shell head, react's own stream, shell tail. pull-based on

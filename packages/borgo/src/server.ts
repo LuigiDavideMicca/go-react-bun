@@ -7,15 +7,13 @@ import { makeApiClient } from "./api";
 import { buildAssets, compileCss } from "./build";
 import { banner, c, fmtMs, g, statusColor } from "./colors";
 import {
-  assetCacheControl,
   buildAssetIndex,
   documentStream,
   gzipStream,
-  isCompressiblePath,
-  isNotModified,
-  isRangeStale,
   jsonResponse,
   pickEncoding,
+  serveAsset,
+  serveIndexed,
   type AssetInfo,
 } from "./compress";
 import { CSRF_COOKIE, CSRF_FIELD, csrfCookieValue, registerCsrf, registerIslands, withCsrf } from "./index";
@@ -328,67 +326,6 @@ export async function serve({ dev = false } = {}) {
   // siblings (precompression is skipped) and serves identity.
   const assetIndex: Map<string, AssetInfo> = dev ? new Map() : buildAssetIndex("public");
 
-  // the indexed path: no stat, and an etag the browser can revalidate against
-  function serveIndexed(req: Request, info: AssetInfo): Response {
-    let variant = info.identity;
-    if (info.variants.length) {
-      const encoding = pickEncoding(req.headers.get("accept-encoding"), ["br", "gzip"]);
-      if (encoding) variant = info.variants.find((v) => v.encoding === encoding) ?? variant;
-    }
-    const headers = new Headers();
-    if (info.cacheControl) headers.set("Cache-Control", info.cacheControl);
-    if (info.compressible) headers.set("Vary", "Accept-Encoding");
-    headers.set("ETag", variant.etag);
-    headers.set("Last-Modified", info.lastModified);
-    if (isNotModified(req, variant.etag, info.mtimeMs)) {
-      return new Response(null, { status: 304, headers });
-    }
-    if (variant.encoding) {
-      headers.set("Content-Encoding", variant.encoding);
-      headers.set("Content-Type", info.type);
-    }
-    // a HEAD is answered from the headers alone, and dropping the body drops
-    // the length bun would have computed from the file: without this every
-    // HEAD claims Content-Length: 0 for a file a GET returns in full. bun
-    // recomputes it from the file on a GET (and on a range), so a stale index
-    // can only misreport the head, never mis-frame a body
-    headers.set("Content-Length", String(variant.size));
-    // bun turns a Range into a 206 off a Bun.file body, and never consults
-    // If-Range while doing it. a stream body is how the refusal is spelled:
-    // bun ranges files, not streams, so a validator that no longer matches
-    // gets the whole representation as a plain 200 - still off the disk,
-    // never through memory.
-    if (isRangeStale(req, variant.etag, info.lastModified)) {
-      return new Response(Bun.file(variant.path).stream(), { headers });
-    }
-    return new Response(Bun.file(variant.path), { headers });
-  }
-
-  // dev, and anything written into public/ after boot
-  async function serveAsset(req: Request, path: string, asset: ReturnType<typeof Bun.file>) {
-    const headers: Record<string, string> = {};
-    const cacheControl = assetCacheControl(path);
-    if (cacheControl) headers["Cache-Control"] = cacheControl;
-    // same reason as in serveIndexed: a HEAD keeps the headers and loses the
-    // body bun would have measured
-    const served = (file: ReturnType<typeof Bun.file>) =>
-      new Response(file, { headers: { ...headers, "Content-Length": String(file.size) } });
-    if (!isCompressiblePath(path)) return served(asset);
-    headers["Vary"] = "Accept-Encoding";
-    if (!dev) {
-      const encoding = pickEncoding(req.headers.get("accept-encoding"), ["br", "gzip"]);
-      if (encoding) {
-        const sibling = Bun.file(`${path}.${encoding === "br" ? "br" : "gz"}`);
-        if (await sibling.exists()) {
-          headers["Content-Encoding"] = encoding;
-          headers["Content-Type"] = asset.type;
-          return served(sibling);
-        }
-      }
-    }
-    return served(asset);
-  }
-
   const sendJson = (req: Request, value: unknown, init?: ResponseInit) =>
     dev ? Response.json(value, init) : jsonResponse(req, value, init);
 
@@ -424,7 +361,7 @@ export async function serve({ dev = false } = {}) {
         if (indexed) return serveIndexed(req, indexed);
         const path = "public" + assetPath;
         const asset = Bun.file(path);
-        if (await asset.exists()) return serveAsset(req, path, asset);
+        if (await asset.exists()) return serveAsset(req, path, asset, { dev });
       }
     }
 
