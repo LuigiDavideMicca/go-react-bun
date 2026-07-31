@@ -170,6 +170,23 @@ func TestInvalidDirectiveWritesNoMounting(t *testing.T) {
 	}
 }
 
+// A run that fails after the routes are collected - here on a PushT topic -
+// must leave both outputs exactly as they were, not a fresh mounting next to a
+// missing or stale .d.ts.
+func TestFailedRunLeavesNoOutput(t *testing.T) {
+	root := filepath.Join("testdata", "partialfail")
+	genPath := filepath.Join(root, "api", "borgo.gen.go")
+	if err := run(root); err == nil {
+		t.Fatal("want an error")
+	}
+	if _, err := os.Stat(genPath); !os.IsNotExist(err) {
+		t.Errorf("borgo.gen.go must not be written by a failing run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".borgo", "api-types.d.ts")); !os.IsNotExist(err) {
+		t.Errorf("api-types.d.ts must not be written by a failing run: %v", err)
+	}
+}
+
 func TestStaleGeneratedMountingRecovers(t *testing.T) {
 	root := filepath.Join("testdata", "stalegen")
 	genPath := filepath.Join(root, "api", "borgo.gen.go")

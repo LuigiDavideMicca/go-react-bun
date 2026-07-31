@@ -111,7 +111,6 @@ func run(root string) (err error) {
 	directives := collectDirectives(pkg, decls, routes)
 	warnLooseRouteComments(pkg, decls)
 	routes = append(routes, directives...)
-	writeMounting(root, pkg.Name, directives, pkg.Types.Scope())
 
 	sort.Slice(routes, func(i, j int) bool {
 		am, ap := splitPattern(routes[i].pattern)
@@ -179,6 +178,10 @@ func run(root string) (err error) {
 		out.WriteString("  }\n")
 	}
 	out.WriteString("}\n\nexport {};\n")
+
+	// the disk is untouched until here: any check above fails the run without
+	// leaving one output regenerated, or deleted, and the other one stale
+	writeMounting(root, pkg.Name, directives, pkg.Types.Scope())
 
 	if mkErr := os.MkdirAll(filepath.Join(root, ".borgo"), 0o755); mkErr != nil {
 		fail("%v", mkErr)
