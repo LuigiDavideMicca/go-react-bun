@@ -109,6 +109,11 @@ func TestGzipMiddlewareRespectsClient(t *testing.T) {
 		if rec.Body.String() != big {
 			t.Errorf("Accept-Encoding %q: body mangled", header)
 		}
+		// identity responses vary by Accept-Encoding too: without this a
+		// shared cache would serve the uncompressed body to everyone
+		if got := rec.Header().Get("Vary"); got != "Accept-Encoding" {
+			t.Errorf("Accept-Encoding %q: Vary = %q, want Accept-Encoding", header, got)
+		}
 	}
 }
 

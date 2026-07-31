@@ -25,13 +25,15 @@ var gzipWriters sync.Pool
 // through, and Flush keeps working so SSE and streamed handlers are unhurt.
 func gzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// the representation depends on Accept-Encoding whether or not this
+		// response ends up compressed - and whether or not this client can
+		// take gzip: an identity response cached without Vary would be served
+		// to gzip-capable clients too
+		w.Header().Set("Vary", "Accept-Encoding")
 		if !acceptsGzip(r.Header.Get("Accept-Encoding")) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// the representation depends on Accept-Encoding whether or not this
-		// response ends up compressed
-		w.Header().Set("Vary", "Accept-Encoding")
 		gw := &gzipResponseWriter{rw: w}
 		defer gw.finish()
 		next.ServeHTTP(gw, r)
