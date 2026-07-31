@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = old
+	out, _ := io.ReadAll(r)
+	return string(out)
+}
+
 func read(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -344,25 +359,37 @@ func TestSelfEmbeddingStructTerminates(t *testing.T) {
 	}
 }
 
-func TestLooseRouteCommentWarns(t *testing.T) {
-	old := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
+// Two borgo.Handle calls for one pattern used to declare the key twice in
+// ApiRoutes, with whichever type sorted last.
+func TestDuplicateManualPatternIsDeclaredOnceAndWarns(t *testing.T) {
+	root := filepath.Join("testdata", "dupmanual")
+	out := captureStderr(t, func() {
+		if err := run(root); err != nil {
+			t.Fatal(err)
+		}
+	})
+	types := read(t, filepath.Join(root, ".borgo", "api-types.d.ts"))
+	if n := strings.Count(types, `"GET /api/x":`); n != 1 {
+		t.Errorf("want the pattern declared once, got %d\n%s", n, types)
 	}
-	os.Stderr = w
-	runErr := run(filepath.Join("testdata", "loose"))
-	w.Close()
-	os.Stderr = old
-	out, _ := io.ReadAll(r)
+	if !strings.Contains(types, `"GET /api/x": { response: A };`) {
+		t.Errorf("want the first registration typed\n%s", types)
+	}
+	if !strings.Contains(out, "already registered at") || !strings.Contains(out, "dup.go:21") {
+		t.Errorf("want a warning naming both call sites, got:\n%s", out)
+	}
+}
 
-	if runErr != nil {
-		t.Fatal(runErr)
-	}
-	if !strings.Contains(string(out), "not attached to a handler") {
+func TestLooseRouteCommentWarns(t *testing.T) {
+	out := captureStderr(t, func() {
+		if err := run(filepath.Join("testdata", "loose")); err != nil {
+			t.Error(err)
+		}
+	})
+	if !strings.Contains(out, "not attached to a handler") {
 		t.Errorf("want a loose-directive warning on stderr, got:\n%s", out)
 	}
-	if !strings.Contains(string(out), "loose.go:9") {
+	if !strings.Contains(out, "loose.go:9") {
 		t.Errorf("want file:line in the warning, got:\n%s", out)
 	}
 }

@@ -49,6 +49,7 @@ var (
 type route struct {
 	pattern string
 	handler *types.Func
+	pos     token.Position
 }
 
 type genError struct{ msg string }
@@ -118,7 +119,15 @@ func run(root string) (err error) {
 		if ap != bp {
 			return ap < bp
 		}
-		return am < bm
+		if am != bm {
+			return am < bm
+		}
+		// sort.Slice is not stable, so duplicate patterns need a tiebreak of
+		// their own or which one gets typed varies between runs
+		if routes[i].pos.Filename != routes[j].pos.Filename {
+			return routes[i].pos.Filename < routes[j].pos.Filename
+		}
+		return routes[i].pos.Offset < routes[j].pos.Offset
 	})
 
 	gen := &tsGen{
@@ -129,8 +138,17 @@ func run(root string) (err error) {
 	}
 	loader := newHelperLoader(root, pkg)
 	entries := make(map[string]string, len(routes))
+	first := make(map[string]token.Position, len(routes))
 	patterns := make([]string, 0, len(routes))
 	for _, r := range routes {
+		if prev, dup := first[r.pattern]; dup {
+			// two borgo.Handle calls for one pattern: http.ServeMux panics at
+			// startup, and emitting the key twice would put two conflicting
+			// declarations of it in ApiRoutes
+			fmt.Fprintf(os.Stderr, "borgogen: warning: %s: pattern %q is already registered at %s; only the first registration is typed, and http.ServeMux panics on the duplicate at startup\n", r.pos, r.pattern, prev)
+			continue
+		}
+		first[r.pattern] = r.pos
 		resp, req := gen.bridgeTypes(pkg, decls, decls[r.handler], loader)
 		entry := "{ response: " + resp
 		if req != "" {
@@ -291,7 +309,7 @@ func collectDirectives(pkg *packages.Package, decls map[*types.Func]*ast.FuncDec
 				fail("%s: pattern %q already registered by %s", pos, pattern, prev)
 			}
 			taken[pattern] = fn.Name() + " (//borgo:route)"
-			out = append(out, route{pattern: pattern, handler: fn})
+			out = append(out, route{pattern: pattern, handler: fn, pos: pos})
 		}
 	}
 	return out
@@ -418,6 +436,7 @@ func collectRoutes(pkg *packages.Package) []route {
 			routes = append(routes, route{
 				pattern: constant.StringVal(tv.Value),
 				handler: handlerFunc(pkg.TypesInfo, call.Args[1]),
+				pos:     pkg.Fset.Position(call.Pos()),
 			})
 			return true
 		})
