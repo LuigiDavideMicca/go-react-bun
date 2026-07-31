@@ -1,4 +1,4 @@
-import { readdirSync, statSync, type Dirent } from "node:fs";
+import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { join } from "node:path";
 import { brotliCompressSync, constants, createGzip, gzipSync } from "node:zlib";
 
@@ -182,6 +182,11 @@ export function serveIndexed(req: Request, info: AssetInfo): Response {
     const encoding = pickEncoding(req.headers.get("accept-encoding"), ["br", "gzip"]);
     if (encoding) variant = info.variants.find((v) => v.encoding === encoding) ?? variant;
   }
+  // the index was taken at boot: a precompressed sibling deleted since then
+  // (a `borgo dev` writing over the same public/assets, a deploy swapping
+  // files in place) must degrade to the identity file, not answer a 500 for
+  // an asset that is still sitting on disk
+  if (variant.encoding && !existsSync(variant.path)) variant = info.identity;
   const headers = new Headers();
   if (info.cacheControl) headers.set("Cache-Control", info.cacheControl);
   if (info.compressible) headers.set("Vary", "Accept-Encoding");

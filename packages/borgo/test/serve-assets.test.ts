@@ -348,3 +348,24 @@ describe("serveAsset: the unindexed path", () => {
     expect(await cc(plain)).toBeNull();
   });
 });
+
+test("a precompressed sibling deleted after boot degrades to identity, not a 500", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "borgo-stale-"));
+  const file = join(dir, "app.js");
+  writeFileSync(file, "console.log('hello')");
+  writeFileSync(file + ".gz", gzipSync(Buffer.from("console.log('hello')")));
+  const index = buildAssetIndex(dir);
+  const info = [...index.values()][0];
+  expect(info.variants.some((v) => v.encoding === "gzip")).toBe(true);
+
+  // the sibling vanishes the way a parallel `borgo dev` build removes it
+  rmSync(file + ".gz");
+  const res = serveIndexed(
+    new Request("http://x/app.js", { headers: { "accept-encoding": "gzip" } }),
+    info,
+  );
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-encoding")).toBe(null);
+  expect(await res.text()).toBe("console.log('hello')");
+  rmSync(dir, { recursive: true, force: true });
+});
